@@ -1,0 +1,99 @@
+name: 更新資料並發布網站
+
+on:
+  schedule:
+    # GitHub 排程用 UTC。盤中每 30 分鐘；收盤後各跑一次完整更新。
+    - cron: '7,37 1-5 * * 1-5'     # 台股盤中 09:07–13:37（台北）
+    - cron: '47 8 * * 1-5'         # 台股收盤後完整更新 16:47（三大法人約 15:00–16:30 公布）
+    - cron: '7,37 13-20 * * 1-5'   # 美股盤中（涵蓋夏令與冬令時間）
+    - cron: '37 21 * * 1-5'        # 美股收盤後完整更新
+  push:
+    branches: [main]
+    paths: ['site/**', 'config/**', 'pipeline/**', 'ml/**', '.github/workflows/update.yml']
+  workflow_dispatch:
+    inputs:
+      full:
+        description: '完整更新（tw / us / all，留空 = 盤中快速更新）'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: update
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci --omit=dev
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip   # 不下載 GPU（CUDA）元件，CPU 版已內建
+
+      - name: 取出狀態（data 分支：預測紀錄、昨日訊號、快取）
+        run: |
+          if git fetch --depth=1 origin data 2>/dev/null; then
+            git worktree add state origin/data
+          else
+            mkdir -p state
+          fi
+
+      - name: 判斷更新模式
+        id: mode
+        run: |
+          FULL="${{ github.event.inputs.full }}"
+          case "${{ github.event.schedule }}" in
+            '47 8 * * 1-5')  FULL=tw ;;
+            '37 21 * * 1-5') FULL=us ;;
+          esac
+          # 第一次（尚無狀態）一律完整更新
+          [ -f state/heavy.json ] || FULL=all
+          echo "full=$FULL" >> "$GITHUB_OUTPUT"
+          echo "更新模式：${FULL:-盤中快速更新}"
+
+      - name: 產生資料
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: |
+          ARGS="--out=out/data --state=state"
+          [ -n "${{ steps.mode.outputs.full }}" ] && ARGS="$ARGS --full=${{ steps.mode.outputs.full }}"
+          node pipeline/build.js $ARGS
+
+      - name: 組合網站
+        run: cp -r site/. out/
+
+      - name: 儲存狀態（只有完整更新會改變）
+        if: steps.mode.outputs.full != ''
+        run: |
+          cd state
+          if [ ! -d .git ] && [ ! -f .git ]; then
+            git init -q -b data && git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo "狀態沒有變化"; exit 0; }
+          git commit -q -m "state: $(date -u +%Y-%m-%dT%H:%MZ) ${{ steps.mode.outputs.full }}"
+          git push -q origin HEAD:data
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+      - id: deploy
+        uses: actions/deploy-pages@v4
