@@ -306,7 +306,7 @@ async function main() {
   // 狀態只在收盤後完整更新時寫入（盤中更新只讀取）
   if (FULL) {
     const signals = Object.fromEntries(Object.values(items).map(x => [x.key, x.signal.sig]));
-    writeJSON(path.join(STATE, 'last.json'), { verdict: { level: verdict.level, at: nowIso }, signals: { ...(last.signals || {}), ...signals }, at: nowIso });
+    writeJSON(path.join(STATE, 'last.json'), { verdict: { level: verdict.level, at: nowIso }, signals: { ...(last.signals || {}), ...signals }, at: nowIso, status });
     writeJSON(path.join(STATE, 'heavy.json'), heavy);
     writeJSON(path.join(STATE, 'predictions.json'), predictions);
     log('狀態已更新', STATE);

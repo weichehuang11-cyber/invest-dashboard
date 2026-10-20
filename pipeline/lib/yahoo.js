@@ -55,14 +55,42 @@ function parseDaily(json) {
   };
 }
 
+// yahoo-finance2 會自動處理 Yahoo 要求的 cookie／crumb（雲端主機直接呼叫常被擋）
+let _yf = null;
+function yf() {
+  if (_yf) return _yf;
+  const YF = require('yahoo-finance2').default;
+  _yf = typeof YF === 'function' ? new YF({ suppressNotices: ['yahooSurvey', 'ripHistorical'] }) : YF;
+  return _yf;
+}
+
+/** 把 yahoo-finance2 chart() 的結果轉回 v8 chart 原始格式，交給 parseDaily */
+function toRaw(r) {
+  const meta = { ...r.meta };
+  if (meta.regularMarketTime instanceof Date) meta.regularMarketTime = Math.floor(meta.regularMarketTime.getTime() / 1000);
+  const q = r.quotes || [];
+  return { chart: { result: [{ meta, timestamp: q.map(x => Math.floor(new Date(x.date).getTime() / 1000)),
+    indicators: { quote: [{ open: q.map(x => x.open), high: q.map(x => x.high), low: q.map(x => x.low), close: q.map(x => x.close), volume: q.map(x => x.volume) }] } }] } };
+}
+
+async function fetchOne(s, range) {
+  const days = { '1mo': 31, '1y': 366, '2y': 731 }[range] || 731;
+  try {
+    const r = await yf().chart(s, { period1: new Date(Date.now() - days * 86400000), interval: '1d' }, { validateResult: false });
+    const d = parseDaily(toRaw(r));
+    if (d && d.bars.close.length) return d;
+  } catch (_) { /* 改用直接呼叫 */ }
+  const j = await get(`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(s)}?interval=1d&range=${range}&includePrePost=false`, { retries: 1 });
+  return parseDaily(j);
+}
+
 /** 台股自動試 .TW（上市）→ .TWO（上櫃） */
 async function daily(key, range = '2y') {
   const sym = yahooSymbol(key);
   const tries = sym.endsWith('.TW') ? [sym, sym.replace(/\.TW$/, '.TWO')] : [sym];
   for (const s of tries) {
     try {
-      const j = await get(`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(s)}?interval=1d&range=${range}&includePrePost=false`);
-      const d = parseDaily(j);
+      const d = await fetchOne(s, range);
       if (d && d.bars.close.length) return { ...d, yahoo: s };
     } catch (_) { /* 換下一個寫法 */ }
   }
