@@ -459,11 +459,12 @@ ${footer()}`;
   }
 
   // ── 市場健康度、事件行事曆 ────────────────────────────────────
-  function spark(a, { w = 300, h = 34, zero = false, col = '#1F4FD8', min = 5 } = {}) {
-    const v = (a || []).filter(isNum); if (v.length < min) return '';   // 資料太少就不畫，避免一條空線
+  function spark(a, { w = 300, h = 34, zero = false, col = '#1F4FD8', min = 5, cap = null, fmt = x => num(x, 0) } = {}) {
+    const v = (a || []).filter(isNum); if (v.length < min) return '';
+    const capHtml = cap ? `<div class="spark-cap"><span>${esc(cap)}・近 ${v.length} 個交易日</span><span>${fmt(v[0])} → <b>${fmt(v[v.length - 1])}</b>（最高 ${fmt(Math.max(...v))}・最低 ${fmt(Math.min(...v))}）</span></div>` : '';   // 資料太少就不畫，避免一條空線
     let lo = Math.min(...v), hi = Math.max(...v); if (zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); } if (hi === lo) { hi += 1; lo -= 1; }
     const x = i => (i / (v.length - 1) * w).toFixed(1), y = t => (h - 3 - (t - lo) / (hi - lo) * (h - 6)).toFixed(1);
-    return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:${h}px" aria-hidden="true">${zero && lo < 0 && hi > 0 ? `<line x1="0" x2="${w}" y1="${y(0)}" y2="${y(0)}" stroke="#C9CED6" stroke-dasharray="2 2" vector-effect="non-scaling-stroke"/>` : ''}<path d="${v.map((t, i) => `${i ? 'L' : 'M'}${x(i)},${y(t)}`).join('')}" fill="none" stroke="${col}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`;
+    return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:${h}px" aria-hidden="true">${zero && lo < 0 && hi > 0 ? `<line x1="0" x2="${w}" y1="${y(0)}" y2="${y(0)}" stroke="#C9CED6" stroke-dasharray="2 2" vector-effect="non-scaling-stroke"/>` : ''}<path d="${v.map((t, i) => `${i ? 'L' : 'M'}${x(i)},${y(t)}`).join('')}" fill="none" stroke="${col}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>${capHtml}`;
   }
 
   const pctTag = p => (isNum(p) ? `<span class="small muted">歷史第 ${p.toFixed(0)} 百分位</span>` : '');
@@ -479,21 +480,22 @@ ${footer()}`;
       <div class="legend"><span class="up">上漲 ${int(b.adv)}${b.upLimit != null ? `（漲停 ${b.upLimit}）` : ''}</span><span>平盤 ${int(b.unch)}</span><span class="down">下跌 ${int(b.dec)}${b.downLimit != null ? `（跌停 ${b.downLimit}）` : ''}</span></div>`; })() : '';
     const accum = n => `<span class="small muted">累積中（${b?.days || 0}／${n} 個交易日）</span>`;
     const p1 = b ? panel('台股市場寬度', `${adBar}
-      ${hrow('站上 20 日線', isNum(b.above20) ? `<b>${b.above20.toFixed(0)}%</b>` : accum(20), '', spark(b.series.map(x => x.above20)))}
+      ${hrow('站上 20 日線', isNum(b.above20) ? `<b>${b.above20.toFixed(0)}%</b>` : accum(20), '', spark(b.series.map(x => x.above20), { cap: '站上 20 日線的股票比例', fmt: x => x.toFixed(0) + '%' }))}
       ${hrow('站上 60 日線', isNum(b.above60) ? `<b>${b.above60.toFixed(0)}%</b>` : accum(60))}
       ${hrow('20 日新高／新低', b.newHiLo ? `<b class="up">${b.newHiLo.hi}</b> ／ <b class="down">${b.newHiLo.lo}</b> 家` : accum(21))}
-      ${hrow('近 5 日漲跌家數比', isNum(b.adRatio5) ? `<b>${b.adRatio5.toFixed(2)}</b>` : '—', isNum(b.adRatio5) ? (b.adRatio5 >= 1 ? '上漲家數較多' : '下跌家數較多') : '', spark(b.adLine.map(x => x.v)))}`,
-      '站上 20 日線比例低於 25% 代表普遍弱勢，高於 75% 代表普遍強勢。指數漲但多數股票跌，是常見的轉弱警訊。') : '';
+      ${hrow('近 5 日漲跌家數比', isNum(b.adRatio5) ? `<b>${b.adRatio5.toFixed(2)}</b>` : '—', isNum(b.adRatio5) ? (b.adRatio5 >= 1 ? '上漲家數較多（＞1）' : '下跌家數較多（＜1）') : '')}
+      ${hrow('騰落線', '', '每天「上漲家數−下跌家數」累加；往上＝多數股票在漲，往下＝多數股票在跌', spark(b.adLine.map(x => x.v), { cap: '累計漲跌家數差', fmt: x => (x > 0 ? '+' : '') + Math.round(x).toLocaleString() }))}`,
+      '站上 20 日線比例：低於 25% 普遍弱勢、高於 75% 普遍強勢，看線的方向比看單日數字重要。指數創高但這兩條線往下（多數股票沒跟上），代表漲勢集中在少數權值股，是常見的轉弱警訊。') : '';
     const f = tw.futures, pc = tw.putcall, vt = us.vixTerm;
     const p2 = (f || pc || vt) ? panel('期貨、選擇權部位', `
-      ${f ? hrow('外資台指期未平倉淨額', `<b class="${cls(f.net)}">${sign(f.net)}${int(Math.abs(f.net))}</b> 口`, parts(isNum(f.chg) && `日 ${chgTxt(f.chg)}`, isNum(f.chg5) && `5 日 ${chgTxt(f.chg5)}`), spark(f.hist.map(x => x.net), { zero: true })) : ''}
-      ${pc ? hrow('台指選擇權 P/C 未平倉比', `<b>${num(pc.oi, 1)}%</b>`, pctTag(pc.pct), spark(pc.hist.map(x => x.oi))) : ''}
+      ${f ? hrow('外資台指期未平倉淨額', `<b class="${cls(f.net)}">${sign(f.net)}${int(Math.abs(f.net))}</b> 口`, parts(isNum(f.chg) && `日 ${chgTxt(f.chg)}`, isNum(f.chg5) && `5 日 ${chgTxt(f.chg5)}`), spark(f.hist.map(x => x.net), { zero: true, cap: '外資淨未平倉（口）', fmt: x => Math.round(x).toLocaleString() })) : ''}
+      ${pc ? hrow('台指選擇權 P/C 未平倉比', `<b>${num(pc.oi, 1)}%</b>`, pctTag(pc.pct), spark(pc.hist.map(x => x.oi), { cap: 'P/C 未平倉比', fmt: x => x.toFixed(0) + '%' })) : ''}
       ${vt ? hrow('VIX 期限結構（近月／三個月）', `<b class="${vt.ratio > 1 ? 'bad-text' : ''}">${num(vt.ratio, 2)}</b>`, vt.ratio > 1 ? '倒掛：急性恐慌' : vt.ratio > 0.92 ? '接近倒掛' : '正常（遠月較高）') : ''}`,
       '外資台指期淨空單越多，代表避險或看空越重（常與現貨賣超同步）。P/C 未平倉比偏高多半是賣方支撐、偏多解讀；VIX 近月高於三個月代表恐慌。') : '';
     const fc = tw.foreignCum, m = tw.margin;
     const p3 = (fc || m) ? panel('資金流向', `
       ${fc ? hrow('外資現貨累計（估算）', `5 日 <b class="${cls(fc.d5)}">${sign(fc.d5)}${int(Math.abs(fc.d5))}</b> 億`, fc.days >= 20 ? `20 日 ${chgTxt(fc.d20, ' 億')}` : `（${fc.days} 日資料）`) : ''}
-      ${m ? hrow('融資餘額', `<b>${int(m.balance)}</b> 億`, `日 ${chgTxt(m.chg, ' 億')}${isNum(m.chg5) ? `・5 日 ${chgTxt(m.chg5, ' 億')}` : ''}${isNum(m.chg20) ? `・20 日 ${chgTxt(m.chg20, ' 億')}` : ''}`, spark(m.hist.map(x => x.balance))) : ''}`,
+      ${m ? hrow('融資餘額', `<b>${int(m.balance)}</b> 億`, `日 ${chgTxt(m.chg, ' 億')}${isNum(m.chg5) ? `・5 日 ${chgTxt(m.chg5, ' 億')}` : ''}${isNum(m.chg20) ? `・20 日 ${chgTxt(m.chg20, ' 億')}` : ''}`, spark(m.hist.map(x => x.balance), { cap: '融資餘額（億）', fmt: x => Math.round(x).toLocaleString() })) : ''}`,
       '融資增加代表散戶加槓桿；下跌時融資反而增加，常代表籌碼轉亂、後續賣壓較重。') : '';
     const ew = us.equalWeight, sa = us.sectorsAbove50;
     const p4 = (ew || sa) ? panel('美股市場寬度', `
@@ -508,9 +510,9 @@ ${footer()}`;
       '百分位需要累積歷史後才會出現。股債利差越低代表股票相對債券越貴。') : '';
     const hy = us.hy, st = us.stress, nf = us.nfci;
     const p6 = (hy || st || nf) ? panel('信用與金融壓力', `
-      ${hy ? hrow('美國高收益債利差', `<b>${num(hy.v, 2)}%</b>`, `20 日 ${chgTxt(hy.chg, '', 2)}・${pctTag(hy.pct)}`, spark(hy.hist, { col: '#B45309' })) : ''}
-      ${st ? hrow('聖路易聯準會金融壓力指數', `<b class="${st.v > 1 ? 'bad-text' : ''}">${num(st.v, 2)}</b>`, '0＝正常，越高越緊張', spark(st.hist, { zero: true, col: '#B45309' })) : ''}
-      ${nf ? hrow('芝加哥聯準會金融情勢指數', `<b>${num(nf.v, 2)}</b>`, '負值＝寬鬆，正值＝緊縮', spark(nf.hist, { zero: true, col: '#B45309' })) : ''}`,
+      ${hy ? hrow('美國高收益債利差', `<b>${num(hy.v, 2)}%</b>`, `20 日 ${chgTxt(hy.chg, '', 2)}・${pctTag(hy.pct)}`, spark(hy.hist, { col: '#B45309', cap: '高收益債利差', fmt: x => x.toFixed(2) + '%' })) : ''}
+      ${st ? hrow('聖路易聯準會金融壓力指數', `<b class="${st.v > 1 ? 'bad-text' : ''}">${num(st.v, 2)}</b>`, '0＝正常，越高越緊張', spark(st.hist, { zero: true, col: '#B45309', cap: '金融壓力指數', fmt: x => x.toFixed(2) })) : ''}
+      ${nf ? hrow('芝加哥聯準會金融情勢指數', `<b>${num(nf.v, 2)}</b>`, '負值＝寬鬆，正值＝緊縮', spark(nf.hist, { zero: true, col: '#B45309', cap: '金融情勢指數', fmt: x => x.toFixed(2) })) : ''}`,
       '信用利差快速擴大通常領先股市下跌；壓力指數高於 1 代表金融體系明顯緊張。資料來自美國聖路易聯準會 FRED，每週或每日更新。') : '';
     const sigs = H.signals || [];
     return `<div class="hd"><h2 id="hl-h">市場健康度</h2><span class="note">寬度、部位、資金、估值、信用・收盤後更新</span></div>
