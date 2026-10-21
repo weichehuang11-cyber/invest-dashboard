@@ -159,7 +159,8 @@ function weekly(snap, P, barsDir) {
   return L;
 }
 
-(async () => {
+module.exports = { send, decrypt };
+if (require.main === module) (async () => {
   const snap = readJSON(String(args.snap || 'out/data/snapshot.json'), null);
   if (!snap) { console.log('沒有快照，略過通知'); return; }
   const P = await loadPersonal();

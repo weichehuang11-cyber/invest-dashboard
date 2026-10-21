@@ -1,0 +1,35 @@
+name: 推播測試
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: '測試幾分鐘'
+        default: '3'
+      gap:
+        description: '每幾秒一則'
+        default: '20'
+      topic:
+        description: 'ntfy 主題（留空＝用 Secrets 的 NTFY_TOPIC）'
+        required: false
+        default: ''
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 取得目前報價
+        run: curl -fsS "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data/snapshot.json" -o snapshot.json || echo '{}' > snapshot.json
+      - name: 送出測試推播
+        env:
+          NTFY_TOPIC: ${{ github.event.inputs.topic || secrets.NTFY_TOPIC }}
+          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: node pipeline/notify-test.js --snap=snapshot.json --minutes=${{ github.event.inputs.minutes }} --gap=${{ github.event.inputs.gap }}
