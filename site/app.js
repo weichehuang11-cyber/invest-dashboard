@@ -457,12 +457,13 @@ ${footer()}`;
   }
 
   // ── 市場健康度、事件行事曆 ────────────────────────────────────
-  function spark(a, { w = 140, h = 30, zero = false, col = '#1F4FD8' } = {}) {
-    const v = (a || []).filter(isNum); if (v.length < 2) return '';
+  function spark(a, { w = 300, h = 34, zero = false, col = '#1F4FD8', min = 5 } = {}) {
+    const v = (a || []).filter(isNum); if (v.length < min) return '';   // 資料太少就不畫，避免一條空線
     let lo = Math.min(...v), hi = Math.max(...v); if (zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); } if (hi === lo) { hi += 1; lo -= 1; }
-    const x = i => (i / (v.length - 1) * w).toFixed(1), y = t => (h - 2 - (t - lo) / (hi - lo) * (h - 4)).toFixed(1);
-    return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true">${zero && lo < 0 && hi > 0 ? `<line x1="0" x2="${w}" y1="${y(0)}" y2="${y(0)}" stroke="#C9CED6" stroke-dasharray="2 2"/>` : ''}<path d="${v.map((t, i) => `${i ? 'L' : 'M'}${x(i)},${y(t)}`).join('')}" fill="none" stroke="${col}" stroke-width="1.5"/><circle cx="${x(v.length - 1)}" cy="${y(v[v.length - 1])}" r="2.5" fill="${col}"/></svg>`;
+    const x = i => (i / (v.length - 1) * w).toFixed(1), y = t => (h - 3 - (t - lo) / (hi - lo) * (h - 6)).toFixed(1);
+    return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:${h}px" aria-hidden="true">${zero && lo < 0 && hi > 0 ? `<line x1="0" x2="${w}" y1="${y(0)}" y2="${y(0)}" stroke="#C9CED6" stroke-dasharray="2 2" vector-effect="non-scaling-stroke"/>` : ''}<path d="${v.map((t, i) => `${i ? 'L' : 'M'}${x(i)},${y(t)}`).join('')}" fill="none" stroke="${col}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`;
   }
+
   const pctTag = p => (isNum(p) ? `<span class="small muted">歷史第 ${p.toFixed(0)} 百分位</span>` : '');
   const hrow = (label, val, extra = '', sp = '') => `<div class="hrow2"><div class="hl">${label}</div><div class="hv">${val}${extra ? ` <span class="small">${extra}</span>` : ''}</div>${sp ? `<div class="hs">${sp}</div>` : ''}</div>`;
   const parts = (...a) => a.filter(x => x && !/^\S+ $/.test(x)).join('・');
@@ -536,7 +537,7 @@ ${footer()}`;
     const sup = o?.sr?.support?.[0], res = o?.sr?.resistance?.[0];
     const vals = [...c, ...m20.filter(isNum), ...m60.filter(isNum), ...(o?.cone || []).flatMap(q => [q[0], q[4]]), ...(sup ? [sup.p] : []), ...(res ? [res.p] : [])];
     let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.05 || 1; lo -= pad; hi += pad;
-    const MOB = window.innerWidth < 760, W = MOB ? 640 : 1200, Hh = MOB ? 400 : 320, FS = MOB ? 20 : 13, x = i => (i / (T - 1) * W).toFixed(1), y = v => (Hh - (v - lo) / (hi - lo) * Hh).toFixed(1);
+    const MOB = window.innerWidth < 760, W = MOB ? 640 : 1200, Hh = MOB ? 330 : 320, FS = MOB ? 20 : 13, x = i => (i / (T - 1) * W).toFixed(1), y = v => (Hh - (v - lo) / (hi - lo) * Hh).toFixed(1);
     const path = a => a.map((v, i) => (v == null ? '' : `${a[i - 1] == null ? 'M' : 'L'}${x(i)},${y(v)}`)).join('');
     const band = (a, b2) => { const top = [`${x(N - 1)},${y(c[N - 1])}`, ...o.cone.map((q, j) => `${x(N + j)},${y(q[a])}`)]; const bot = [...o.cone.map((q, j) => `${x(N + j)},${y(q[b2])}`).reverse(), `${x(N - 1)},${y(c[N - 1])}`]; return `M${top.join('L')}L${bot.join('L')}Z`; };
     const hline = (v, txt, col, below) => `<line x1="0" x2="${x(N - 1)}" y1="${y(v)}" y2="${y(v)}" stroke="${col}" stroke-dasharray="5 4" stroke-width="1.2"/><text x="6" y="${(below ? +y(v) + FS + 2 : +y(v) - 5).toFixed(1)}" font-size="${FS}" fill="${col}">${esc(txt)}</text>`;
@@ -1244,7 +1245,7 @@ ${(h.log || []).length ? `<section class="card" aria-labelledby="hl2-h"><div cla
           <div><dt>散戶（50 張以下）</dt><dd>${a.retail.toFixed(1)}%</dd></div>
           <div><dt>股東人數</dt><dd>${int(a.holders)} ${b?.holders ? `<small class="${cls(-(a.holders - b.holders))}">${sign(a.holders - b.holders)}${int(Math.abs(a.holders - b.holders))}</small>` : ''}</dd></div>
         </dl>
-        ${T.length >= 2 ? `<div class="fh"><div class="small muted">千張大戶持股比例（近 ${T.length} 週）</div>${spark(T.map(x => x.b1000), { w: 600, h: 70 })}</div>` : ''}
+        ${T.length >= 5 ? `<div class="fh"><div class="small muted">千張大戶持股比例（近 ${T.length} 週）</div>${spark(T.map(x => x.b1000), { w: 600, h: 70 })}</div>` : ''}
         <p class="small muted" style="margin:0">${c4 ? `近 4 週千張大戶 ${sign(a.b1000 - c4.b1000)}${fix(a.b1000 - c4.b1000, 2)} 個百分點。` : '歷史累積中。'}大戶增加、股東人數減少，通常代表籌碼集中。</p></section>`;
     }
     const f = it.fund || {}, I = f.insider, Hh = f.holders;
