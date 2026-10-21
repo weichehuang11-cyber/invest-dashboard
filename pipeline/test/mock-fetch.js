@@ -28,9 +28,11 @@ function t86() {
   const ids = ['2330', '2317', '2454', '2382', '2303', '2308', '2881', '2891', '2886', '3008', ...Array.from({ length: 150 }, (_, i) => String(1101 + i))];
   return { stat: 'OK', fields: T86_FIELDS, data: ids.map(id => { const f = Math.round((rnd() - 0.55) * 2e7), t = Math.round((rnd() - 0.4) * 3e6), d = Math.round((rnd() - 0.5) * 1e6); return [id, '股' + id, '0', '0', f.toLocaleString(), '0', '0', '0', '0', '0', t.toLocaleString(), d.toLocaleString(), '0', '0', '0', '0', '0', '0', (f + t + d).toLocaleString()]; }) };
 }
-function miIndex() {
+function miIndex(u) {
+  const dt = +(u?.searchParams.get('date') || 0) % 997;
   const ids = ['2330', '2317', '2454', '2382', '2303', '2308', '2881', '2891', '2886', '3008', ...Array.from({ length: 150 }, (_, i) => String(1101 + i))];
-  return { stat: 'OK', tables: [{ title: '價格指數', fields: [], data: [] }, { title: '114年 每日收盤行情(全部)', fields: ['證券代號', '證券名稱', '成交股數', '成交筆數', '成交金額', '開盤價', '最高價', '最低價', '收盤價', '漲跌(+/-)', '漲跌價差'], data: ids.map(id => [id, '股' + id, '1', '1', '1', '1', '1', '1', (50 + Math.abs(hash(id)) % 900).toFixed(2), '<p style= color:red>+</p>', '1.00']) }] };
+  return { stat: 'OK', tables: [{ title: '價格指數', fields: [], data: [] }, { title: '114年 每日收盤行情(全部)', fields: ['證券代號', '證券名稱', '成交股數', '成交筆數', '成交金額', '開盤價', '最高價', '最低價', '收盤價', '漲跌(+/-)', '漲跌價差'], data: ids.map(id => [id, '股' + id, '1', '1', '1', '1', '1', '1', ((50 + Math.abs(hash(id)) % 900) * (1 + Math.sin(dt / 9 + Math.abs(hash(id)) % 7) * 0.05)).toFixed(2), '<p style= color:red>+</p>', '1.00']) },
+    { title: '漲跌證券數合計', fields: ['類型', '整體市場', '股票'], data: [['上漲(漲停)', '5,100(80)', `${400 + dt % 300}(12)`], ['下跌(跌停)', '4,000(10)', `${500 - dt % 200}(3)`], ['持平', '900', '120'], ['未成交', '10', '5'], ['無比價', '20', '8']] }] };
 }
 function finmind(u) {
   const ds = u.searchParams.get('dataset'), id = u.searchParams.get('data_id');
@@ -49,7 +51,12 @@ global.fetch = async (url, opts) => {
   if (u.hostname === 'cdn.cboe.com') return ok(vixCsv(), 'text');
   if (u.hostname === 'home.treasury.gov') return ok(tsyCsv(), 'text');
   if (u.hostname === 'www.twse.com.tw' && u.pathname.includes('T86')) return ok(t86());
-  if (u.hostname === 'www.twse.com.tw' && u.pathname.includes('MI_INDEX')) return ok(miIndex());
+  if (u.hostname === 'www.twse.com.tw' && u.pathname.includes('MI_INDEX')) return ok(miIndex(u));
+  if (u.hostname === 'www.twse.com.tw' && u.pathname.includes('MI_MARGN')) return ok({ stat: 'OK', tables: [{ title: '信用交易統計', fields: ['項目', '買進', '賣出', '現金(券)償還', '前日餘額', '今日餘額'], data: [['融資(交易單位)', '1', '1', '1', '8,000,000', '8,010,000'], ['融券(交易單位)', '1', '1', '1', '300,000', '301,000'], ['融資金額(仟元)', '1', '1', '1', '345,600,000', '347,100,000']] }] });
+  if (u.hostname === 'openapi.twse.com.tw') return ok(['2330', '2317', '2454', ...Array.from({ length: 300 }, (_, i) => String(1101 + i))].map(c => ({ Code: c, Name: 'x', PEratio: (10 + Math.abs(hash(c)) % 30).toFixed(2), DividendYield: '3.10', PBratio: '1.80' })));
+  if (u.hostname === 'openapi.taifex.com.tw' && u.pathname.includes('FuturesContracts')) return ok('\uFEFF' + JSON.stringify([{ '日期': '20261020', '商品名稱': '臺股期貨', '身份別': '自營商', '多空未平倉口數淨額': '1,234' }, { '日期': '20261020', '商品名稱': '臺股期貨', '身份別': '外資及陸資', '多空未平倉口數淨額': '-35,678' }]), 'text');
+  if (u.hostname === 'openapi.taifex.com.tw' && u.pathname.includes('PutCall')) return ok(Array.from({ length: 20 }, (_, i) => ({ Date: `202609${String(10 + i).padStart(2, '0')}`, PutVolume: '1', CallVolume: '1', 'PutCallVolumeRatio%': '95.5', PutOI: '1', CallOI: '1', 'PutCallOIRatio%': String(110 + i) })));
+  if (u.hostname === 'fred.stlouisfed.org') { const id = u.searchParams.get('id'); return ok('observation_date,' + id + '\n' + Array.from({ length: 300 }, (_, i) => `${new Date(Date.now() - (300 - i) * 86400000).toISOString().slice(0, 10)},${(3 + Math.sin(i / 20)).toFixed(2)}`).join('\n'), 'text'); }
   if (u.hostname === 'api.finmindtrade.com') return ok(finmind(u));
   return new Response('blocked in test', { status: 404 });
 };

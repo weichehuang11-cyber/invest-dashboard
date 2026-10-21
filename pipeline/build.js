@@ -26,6 +26,8 @@ const Signal = require('./lib/signal');
 const Verdict = require('./lib/verdict');
 const Outcomes = require('./lib/outcomes');
 const Outlook = require('./lib/outlook');
+const Market = require('./lib/market');
+const Calendar = require('./lib/calendar');
 
 const ROOT = path.join(__dirname, '..');
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const [k, v] = a.replace(/^--/, '').split('='); return [k, v ?? true]; }));
@@ -57,6 +59,72 @@ function betaOf(a, b, n) {
   return vb > 0 ? cov / vb : null;
 }
 
+const pctRank = (arr, v) => (arr.length >= 20 && v != null ? arr.filter(x => x <= v).length / arr.length * 100 : null);
+const lastOf = a => (a && a.length ? a[a.length - 1] : null);
+
+/** 市場健康度：寬度、期貨選擇權部位、資金、估值、信用與壓力，附白話解讀 */
+function buildHealth({ heavy, daily, vix, tsy, sectorsList }) {
+  const H = { tw: {}, us: {}, signals: [] };
+  const sig = (sev, tone, text, detail) => H.signals.push({ sev, tone, text, detail });
+  // 台股寬度
+  const b = Market.twBreadthStats(heavy.tw.hist);
+  if (b) {
+    H.tw.breadth = b;
+    if (b.above20 != null) { if (b.above20 < 25) sig(2, 'neg', `台股僅 ${b.above20.toFixed(0)}% 個股站上 20 日線，市場普遍偏弱`); else if (b.above20 > 75) sig(1, 'pos', `台股 ${b.above20.toFixed(0)}% 個股站上 20 日線，多數股票同步走強`); }
+    const tw = daily['^TWII'];
+    if (tw && b.adRatio5 != null && TA.ret(tw.bars.close, 5) > 1 && b.adRatio5 < 0.9) sig(2, 'neg', '指數近 5 日上漲，但下跌家數多於上漲家數（漲勢集中在少數權值股）', `近 5 日漲跌家數比 ${b.adRatio5.toFixed(2)}`);
+  }
+  // 外資台指期
+  const fh = heavy.tw.futHist || [];
+  if (fh.length) {
+    const l = lastOf(fh), p5 = fh[fh.length - 6];
+    H.tw.futures = { date: l.date, net: l.net, chg: fh.length > 1 ? l.net - fh[fh.length - 2].net : null, chg5: p5 ? l.net - p5.net : null, pct: pctRank(fh.map(x => x.net), l.net), hist: fh.slice(-40) };
+    if (l.net < -30000) sig(2, 'neg', `外資台指期淨空單 ${Math.abs(l.net).toLocaleString()} 口，避險或看空部位偏重`);
+    else if (l.net > 10000) sig(1, 'pos', `外資台指期淨多單 ${l.net.toLocaleString()} 口`);
+  }
+  const pc = heavy.tw.pcHist || [];
+  if (pc.length) { const l = lastOf(pc); H.tw.putcall = { date: l.date, oi: l.oi, vol: l.vol, pct: pctRank(pc.map(x => x.oi), l.oi), hist: pc.slice(-40) }; }
+  const mg = heavy.tw.marginHist || [];
+  if (mg.length) {
+    const l = lastOf(mg), p5 = mg[mg.length - 6], p20 = mg[mg.length - 21];
+    H.tw.margin = { date: l.date, balance: l.balance, chg: mg.length > 1 ? l.balance - mg[mg.length - 2].balance : null, chg5: p5 ? l.balance - p5.balance : null, chg20: p20 ? l.balance - p20.balance : null, hist: mg.slice(-40) };
+    const tw = daily['^TWII'];
+    if (p5 && tw && (l.balance / p5.balance - 1) * 100 > 3 && TA.ret(tw.bars.close, 5) < 0) sig(2, 'neg', `融資 5 日增加 ${(l.balance - p5.balance).toFixed(0)} 億但指數下跌，散戶逢低承接、籌碼轉亂`);
+  }
+  const fo = heavy.tw.foreignHistory || [];
+  if (fo.length) { const sum = n => fo.slice(-n).reduce((s2, x) => s2 + (x.valueEst || 0), 0) / 1e8; H.tw.foreignCum = { d5: Math.round(sum(5)), d20: Math.round(sum(20)), days: fo.length }; }
+  const vh = heavy.tw.valHist || [];
+  if (vh.length) { const l = lastOf(vh); H.tw.valuation = { ...l, pct: pctRank(vh.map(x => x.pe), l.pe), days: vh.length }; }
+  // 美股寬度：等權重 vs 市值權重、板塊站上 50 日線
+  const rsp = daily.RSP, spy = daily.SPY;
+  if (rsp && spy) {
+    const rel = n => { const a = TA.ret(rsp.bars.close, n), c = TA.ret(spy.bars.close, n); return a != null && c != null ? a - c : null; };
+    H.us.equalWeight = { rel20: r2(rel(20)), rel60: r2(rel(60)) };
+    if (rel(20) < -3) sig(2, 'neg', `美股等權重指數近 20 日落後標普 500 ${Math.abs(rel(20)).toFixed(1)} 個百分點，漲勢集中在少數大型股`);
+  }
+  const above50 = sectorsList.filter(k => { const d = daily[k]; return d && d.bars.close.length > 50 && d.price > TA.sma(d.bars.close, 50); }).length;
+  H.us.sectorsAbove50 = { n: above50, of: sectorsList.filter(k => daily[k]).length };
+  const v3 = daily['^VIX3M'];
+  if (vix?.price && v3?.price) {
+    const ratio = vix.price / v3.price;
+    H.us.vixTerm = { vix: r2(vix.price), vix3m: r2(v3.price), ratio: r2(ratio, 3) };
+    if (ratio > 1) sig(3, 'neg', `VIX 期限結構倒掛（近月 ${vix.price.toFixed(1)} > 三個月 ${v3.price.toFixed(1)}），市場處於急性恐慌`);
+  }
+  const uv = heavy.us.valHist || [];
+  if (uv.length) {
+    const l = lastOf(uv), ey = 100 / l.pe, y10 = tsy?.y10 ?? l.y10;
+    H.us.valuation = { date: l.date, pe: l.pe, earningsYield: r2(ey), y10, erp: y10 != null ? r2(ey - y10) : null, pct: pctRank(uv.map(x => x.pe), l.pe), days: uv.length };
+    if (y10 != null && ey - y10 < 0) sig(1, 'neg', `標普 500 盈餘殖利率 ${ey.toFixed(2)}% 低於 10 年債 ${y10.toFixed(2)}%，股票相對債券偏貴`);
+  }
+  const M = heavy.macro || {};
+  const ser = (a, nb) => { if (!a?.length) return null; const l = lastOf(a), p = a[a.length - 1 - nb]; return { date: l.date, v: l.v, chg: p ? r2(l.v - p.v, 2) : null, pct: pctRank(a.map(x => x.v), l.v), hist: a.slice(-60).map(x => x.v) }; };
+  H.us.hy = ser(M.hy, 20); H.us.stress = ser(M.stress, 4); H.us.nfci = ser(M.nfci, 4);
+  if (H.us.hy?.chg > 0.5) sig(2, 'neg', `高收益債利差 20 個交易日擴大 ${H.us.hy.chg.toFixed(2)} 個百分點，信用風險升溫`);
+  if (H.us.stress?.v > 1) sig(2, 'neg', `聖路易聯準會金融壓力指數 ${H.us.stress.v.toFixed(2)}，高於正常水準`);
+  H.signals.sort((x, y) => y.sev - x.sev);
+  return H;
+}
+
 async function main() {
   const t0 = Date.now();
   const wl = readJSON(path.join(ROOT, 'config', 'watchlist.json'), { us: [], tw: [], names: {} });
@@ -68,7 +136,7 @@ async function main() {
   log(`開始 mode=${FULL ? 'full:' + FULL : 'intraday'} us=${wl.us.length} tw=${wl.tw.length}`);
 
   // ── 1. 日 K + 報價 ─────────────────────────────────────────────
-  const keys = [...wl.us, ...wl.tw, ...Object.keys(INDEX), ...Object.keys(SECTORS)];
+  const keys = [...wl.us, ...wl.tw, ...Object.keys(INDEX), ...Object.keys(SECTORS), 'RSP', 'SPY', '^VIX3M'];
   const daily = {};
   await mapSeries(keys, async k => { const d = await Yahoo.daily(k); if (d) daily[k] = d; }, 300);
   // 指數另抓 10 年日 K：走勢推論與回測需要較長歷史
@@ -113,6 +181,29 @@ async function main() {
       }, 400);
       status.finmind = `${Object.keys(heavy.tw.finmind).length}/${wl.tw.length}`;
     } else status.finmind = 'no-token';
+    // 市場寬度、期貨選擇權、估值、融資（失敗不影響其他資料）
+    const lastDate = status.t86 && status.t86 !== 'fail' ? status.t86 : TWSE.lastTradingDate();
+    try {
+      heavy.tw.hist = await Market.updateTwHistory(heavy.tw.hist, lastDate, { maxBackfill: heavy.tw.hist ? 10 : 25, log });
+      status.breadth = `${heavy.tw.hist.dates.length} 日`;
+    } catch (e) { status.breadth = 'fail: ' + e.message; }
+    const push = (k, row, keep = 120) => { const a = (heavy.tw[k] || []).filter(x => x.date !== row.date); a.push(row); heavy.tw[k] = a.sort((x, y) => x.date.localeCompare(y.date)).slice(-keep); };
+    try {
+      const fx = await Market.taifexForeignTX(lastDate);
+      if (fx && !fx.error) { push('futHist', { date: fx.date || lastDate, net: fx.net }); status.futures = fx.src; } else status.futures = 'fail: ' + (fx?.error || '無資料');
+    } catch (e) { status.futures = 'fail: ' + e.message; }
+    try {
+      const pc = await Market.taifexPutCall(lastDate);
+      if (Array.isArray(pc)) { for (const r of pc) push('pcHist', r); status.putcall = 'ok'; } else status.putcall = 'fail: ' + (pc?.error || '無資料');
+    } catch (e) { status.putcall = 'fail: ' + e.message; }
+    try {
+      const v = await Market.twValuation();
+      if (v && !v.error && v.pe) { push('valHist', { date: lastDate, pe: r2(v.pe), dy: r2(v.dy), pb: r2(v.pb), n: v.n }, 1500); status.valuation = 'ok'; } else status.valuation = 'fail: ' + (v?.error || '無資料');
+    } catch (e) { status.valuation = 'fail: ' + e.message; }
+    try {
+      const m = await Market.twMargin(lastDate);
+      if (m) { push('marginHist', { date: lastDate, balance: r2(m.balance, 1) }); if (m.prev != null && !(heavy.tw.marginHist.length > 1)) heavy.tw.marginHist.unshift({ date: TWSE.prevTradingDate(lastDate), balance: r2(m.prev, 1) }); status.margin = 'ok'; } else status.margin = 'fail';
+    } catch (e) { status.margin = 'fail: ' + e.message; }
     heavy.tw.ts = Date.now();
   }
 
@@ -137,7 +228,27 @@ async function main() {
       }, 600);
       status.fundamentals = `${Object.keys(heavy.us.fund).length}/${wl.us.length}`;
     } catch (e) { status.fundamentals = 'fail: ' + e.message; }
+    try {
+      const YF = require('yahoo-finance2').default;
+      const yf = typeof YF === 'function' ? new YF({ suppressNotices: ['yahooSurvey'] }) : YF;
+      const q = await yf.quoteSummary('SPY', { modules: ['summaryDetail'] }, { validateResult: false });
+      const pe = q.summaryDetail?.trailingPE;
+      if (pe > 0) {
+        const today0 = new Date().toISOString().slice(0, 10);
+        heavy.us.valHist = [...(heavy.us.valHist || []).filter(x => x.date !== today0), { date: today0, pe: r2(pe), y10: tsy?.y10 ?? null }].slice(-1500);
+        status.usValuation = 'ok';
+      } else status.usValuation = 'fail';
+    } catch (e) { status.usValuation = 'fail: ' + e.message; }
     heavy.us.ts = Date.now();
+  }
+
+  // ── 3c. 信用與金融壓力（FRED 公開 CSV）：完整更新時抓 ───────────
+  if (FULL) {
+    heavy.macro = heavy.macro || {};
+    for (const [k, id] of [['hy', 'BAMLH0A0HYM2'], ['stress', 'STLFSI4'], ['nfci', 'NFCI']]) {
+      try { const s2 = await Market.fred(id); if (s2.length) heavy.macro[k] = s2.slice(-300); } catch (e) { log('FRED 失敗', id, e.message); }
+    }
+    status.fred = ['hy', 'stress', 'nfci'].filter(k => heavy.macro[k]?.length).length + '/3';
   }
 
   // ── 4. 每檔：指標、籌碼、基本面、模型、訊號 ─────────────────────
@@ -230,7 +341,9 @@ async function main() {
     const d = daily[etf]; if (!d) return null;
     return { etf, name, changePct: r2(d.changePct), ret5: r2(TA.ret(d.bars.close, 5)), ret21: r2(TA.ret(d.bars.close, 21)), ret63: r2(TA.ret(d.bars.close, 63)) };
   }).filter(Boolean).sort((a, b) => (b.ret21 ?? -99) - (a.ret21 ?? -99));
-  const verdict = Verdict.build({ vix, spx: spx && { ...spx }, twii, foreign, curve }, last.verdict);
+  const health = buildHealth({ heavy, daily, vix, tsy, sectorsList: Object.keys(SECTORS) });
+  const verdict = Verdict.build({ vix, spx: spx && { ...spx }, twii, foreign, curve, health }, last.verdict);
+  const calendar = Calendar.build({ config: readJSON(path.join(ROOT, 'config', 'events.json'), { events: [] }).events, items, today: new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10) });
 
   // ── 6. 今天有什麼變了 ──────────────────────────────────────────
   const changes = [];
@@ -257,6 +370,11 @@ async function main() {
     if (vix.prevClose < lv && vix.price >= lv) changes.push({ tag: '市場', sev: 2, title: `VIX 恐慌指數升破 ${lv}`, detail: `買進門檻自動提高至 ${Signal.buyThreshold(vix.price)} 分` });
     if (vix.prevClose >= lv && vix.price < lv) changes.push({ tag: '市場', sev: 1, title: `VIX 恐慌指數回落到 ${lv} 以下`, detail: `買進門檻 ${Signal.buyThreshold(vix.price)} 分` });
   }
+  for (const e of calendar) {
+    const dd = Math.round((Date.parse(e.date) - Date.parse(new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10))) / 86400000);
+    if (e.kind === 'macro' && e.importance >= 3 && dd <= 2) changes.push({ tag: '事件', sev: 2, title: `${e.title}${dd === 0 ? '今天' : dd === 1 ? '明天' : '後天'}（${e.date}）`, detail: '公布前後市場波動通常放大' });
+  }
+  for (const sg of health.signals.filter(x => x.sev >= 2)) changes.push({ tag: '市場', sev: sg.sev, title: sg.text, detail: sg.detail || '' });
   changes.sort((a, b) => b.sev - a.sev);
 
   // ── 7. 預測紀錄（收盤後記錄當日訊號）與成績單 ───────────────────
@@ -301,7 +419,7 @@ async function main() {
   const ranking = Object.values(items).sort((a, b) => b.signal.score - a.signal.score).map(x => x.key);
   const snapshot = {
     version: 1, generatedAt: nowIso, mode: FULL ? `full:${FULL}` : 'intraday', buildSeconds: Math.round((Date.now() - t0) / 1000),
-    status, verdict, env, items, ranking, changes, sectors, scorecard, indices,
+    status, verdict, env, items, ranking, changes, sectors, scorecard, indices, health, calendar,
     chipMarket: heavy.tw.chipMarket || null,
     watchlist: { us: wl.us, tw: wl.tw },
   };

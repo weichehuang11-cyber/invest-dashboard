@@ -9,7 +9,7 @@ const LEVELS = [
   { min: -Infinity, level: -2, label: '偏空', action: '降低持股、提高現金' },
 ];
 
-function build({ vix, spx, twii, foreign, curve }, prev) {
+function build({ vix, spx, twii, foreign, curve, health }, prev) {
   const reasons = [];
   const add = (pts, text) => reasons.push({ pts, text });
   if (vix?.price != null) {
@@ -31,6 +31,11 @@ function build({ vix, spx, twii, foreign, curve }, prev) {
     if (yi < -30) add(streak >= 3 ? -2 : -1, `外資賣超約 ${Math.abs(yi).toFixed(0)} 億${streak >= 2 ? `（連 ${streak} 日）` : ''}`);
     else if (yi > 30) add(streak >= 3 ? 2 : 1, `外資買超約 ${yi.toFixed(0)} 億${streak >= 2 ? `（連 ${streak} 日）` : ''}`);
   }
+  const b = health?.tw?.breadth;
+  if (b?.above20 != null) { if (b.above20 < 25) add(-1, `台股僅 ${b.above20.toFixed(0)}% 個股站上 20 日線`); else if (b.above20 > 75) add(1, `台股 ${b.above20.toFixed(0)}% 個股站上 20 日線`); }
+  if (health?.tw?.futures?.net < -30000) add(-1, `外資台指期淨空單 ${Math.abs(health.tw.futures.net).toLocaleString()} 口`);
+  if (health?.us?.vixTerm?.ratio > 1) add(-1, 'VIX 期限結構倒掛（急性恐慌）');
+  if (health?.us?.hy?.chg > 0.5) add(-1, `高收益債利差擴大 ${health.us.hy.chg.toFixed(2)} 個百分點`);
   if (curve?.spread != null && curve.spread < 0) add(-1, `美債 10 年減 2 年利差 ${curve.spread.toFixed(2)}，曲線倒掛`);
 
   const total = reasons.reduce((s, r) => s + r.pts, 0);

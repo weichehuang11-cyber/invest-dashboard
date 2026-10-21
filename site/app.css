@@ -269,3 +269,41 @@ table.rtbl { min-width: 0; }
 #idx .seg { flex-wrap: wrap; }
 @media (max-width: 960px) { .ixgrid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .srbox { grid-template-columns: 1fr; } .rtbl td, .rtbl th { font-size: 12px; padding: 6px 4px; } }
+
+/* 市場健康度、行事曆 */
+.hgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.hp { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.hp-h { font-weight: 700; font-size: 14px; }
+.hp-n { margin: 0; font-size: 12px; color: var(--mute); }
+.hrow2 { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; font-size: 13px; }
+.hrow2 .hl { color: var(--ink2); }
+.hrow2 .hv { text-align: right; font-family: var(--mono); }
+.hrow2 .hv .small { font-family: 'Noto Sans TC', sans-serif; }
+.hrow2 .hs { grid-column: 1 / -1; }
+.spark { display: block; max-width: 100%; }
+.adbar { display: flex; height: 10px; border-radius: 4px; overflow: hidden; }
+.up-bg { background: var(--up); } .down-bg { background: var(--down); }
+.cal { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.cal li { display: grid; grid-template-columns: 92px 1fr; gap: 10px; padding: 9px 0 9px 12px; border-top: 1px solid var(--line2); position: relative; font-size: 13px; }
+.cal li:first-child { border-top: 0; }
+.cal li::before { content: ''; position: absolute; left: 0; top: 15px; width: 6px; height: 6px; border-radius: 50%; background: var(--line); }
+.cal li.imp3::before { background: var(--bad); } .cal li.imp2::before { background: #E0A526; }
+.cal li.held { background: #FFF6DC; }
+.cal .cd { display: flex; flex-direction: column; }
+.cal .tag { font-size: 10px; padding: 1px 5px; }
+
+/* 組合分析 */
+.attr { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.ar { display: grid; grid-template-columns: 1fr 1.2fr 80px; gap: 8px; align-items: center; font-size: 13px; }
+.ab { height: 10px; background: var(--line2); border-radius: 3px; position: relative; display: flex; }
+.ab > div { height: 10px; border-radius: 2px; }
+table.corr { min-width: 0; }
+.corr td, .corr th { padding: 6px 8px; font-size: 12px; }
+
+/* 市場感覺 */
+.mymood { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; }
+.mrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.verdict .seg.mood { background: var(--top2); border-color: #3A404B; }
+.verdict .seg.mood button { color: var(--topmute); border-left-color: #3A404B; min-height: 30px; padding: 0 9px; font-size: 12px; }
+.verdict .seg.mood button[aria-pressed="true"] { background: #fff; color: var(--ink); }
+.seg.mood button { padding: 0 10px; }
