@@ -345,6 +345,33 @@ async function main() {
   }
   log('個股完成', Object.keys(items).length);
 
+  // ── 4b. 模型樣本外紀錄：訓練日之後每天的模型判斷（回測頁用，避免用訓練過的資料自我評分）──
+  const mlHist = {};
+  const trainedAt = m => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'ml', 'models', m === 'tw' ? 'scaler_tw.json' : 'scaler.json'), 'utf8')).trained_at?.slice(0, 10) || null; } catch (_) { return null; } };
+  const TA_AT = { tw: trainedAt('tw'), us: trainedAt('us') };
+  if (Predictor) {
+    for (const it of Object.values(items)) {
+      const d = daily[it.key], t0 = TA_AT[it.market]; if (!d || !t0) continue;
+      const B = d.bars, out = [];
+      for (let i = B.dates.length - 1; i >= 60 && B.dates[i] > t0 && out.length < 120; i--) {
+        const sl = a => a.slice(0, i + 1);
+        try { const p = await Predictor.predict(it.key, { closes: sl(B.close), opens: sl(B.open), highs: sl(B.high), lows: sl(B.low), volumes: sl(B.volume) }, {}); if (!p.error) out.unshift({ date: B.dates[i], buy: r2(p.buyProb, 3), sell: r2(p.sellProb, 3), label: p.mlSignal }); } catch (_) { break; }
+      }
+      mlHist[it.key] = out;
+    }
+  }
+  const oos = (() => {
+    const rows = [];
+    for (const it of Object.values(items)) {
+      const B = daily[it.key]?.bars; if (!B) continue;
+      const idx = new Map(B.dates.map((x, i) => [x, i]));
+      for (const h of mlHist[it.key] || []) { const i = idx.get(h.date); if (i == null || i + 1 >= B.close.length) continue; rows.push({ market: it.market, label: h.label, r: (B.close[i + 1] / B.close[i] - 1) * 100 }); }
+    }
+    const grp = f => { const g = rows.filter(f); return { n: g.length, avg: g.length ? r2(g.reduce((s2, x) => s2 + x.r, 0) / g.length, 3) : null, up: g.length ? r2(g.filter(x => x.r > 0).length / g.length * 100, 1) : null }; };
+    return { since: TA_AT, all: grp(() => true), buy: grp(x => x.label === 'BUY'), sell: grp(x => x.label === 'SELL'), hold: grp(x => x.label === 'HOLD'),
+      hit: (() => { const g = rows.filter(x => x.label !== 'HOLD' && Math.abs(x.r) >= 0.5); return g.length ? { n: g.length, rate: r2(g.filter(x => (x.label === 'BUY') === (x.r > 0)).length / g.length * 100, 1) } : null; })() };
+  })();
+
   // ── 5. 市場環境、板塊、判斷 ─────────────────────────────────────
   const ix = k => { const d = daily[k]; if (!d) return null; return { price: d.price, changePct: d.changePct, ta: TA.compute(d.bars), date: d.marketDate }; };
   const spx = ix('^GSPC'), twii = ix('^TWII'), ndx = ix('^IXIC'), twd = ix('USDTWD=X'), dxy = ix('DX-Y.NYB');
@@ -430,6 +457,7 @@ async function main() {
     since: predictions[0]?.date || null, total: predictions.length,
     d30: { h1: rate(1, 30), h5: rate(5, 30), h20: rate(20, 45) },
     d90: { h1: rate(1, 90), h5: rate(5, 90), h20: rate(20, 120) },
+    modelOOS: oos,
     note: '收盤後記錄買進／賣出訊號，依之後第 N 個交易日收盤判定；漲跌未達 ±0.5% 不計入。',
   };
 
@@ -453,12 +481,13 @@ async function main() {
   writeJSON(path.join(OUT, 'snapshot.json'), snapshot);
   for (const key of Object.keys(items)) {
     const d = daily[key];
-    const n = 260, sl = a => a.slice(-n);
+    const n = 520, sl = a => a.slice(-n);
     writeJSON(path.join(OUT, 'bars', `${key.replace(/[^A-Za-z0-9_.-]/g, '_')}.json`), {
       key, dates: sl(d.bars.dates), open: sl(d.bars.open).map(v => r2(v, 4)), high: sl(d.bars.high).map(v => r2(v, 4)),
       low: sl(d.bars.low).map(v => r2(v, 4)), close: sl(d.bars.close).map(v => r2(v, 4)), volume: sl(d.bars.volume),
       chipHistory: heavy.tw.finmind?.[key]?.hist?.slice(-40) || null,
       predictions: predictions.filter(p => p.key === key).slice(-15),
+      mlHist: mlHist[key] || [],
     });
   }
   // 大盤日 K（個人決策紀錄用來比較「同期大盤」）

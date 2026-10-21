@@ -755,7 +755,7 @@ ${viewFin(it)}
       <div><dt>近 1 個月報酬</dt><dd class="${cls(ta.ret21)}">${pct(ta.ret21, 1)}</dd></div><div><dt>近 3 個月報酬</dt><dd class="${cls(ta.ret63)}">${pct(ta.ret63, 1)}</dd></div>`}
     </dl>${it.market === 'us' && !it.fund ? '<p class="small muted" style="margin:0">基本面於美股收盤後更新。</p>' : ''}</section>
 
-  <section class="card chart" aria-labelledby="ta-h"><div class="hd"><h2 id="ta-h">技術面</h2><span class="note">日 K・滑過或按住圖表看每天價格</span></div>
+  <section class="card chart" aria-labelledby="ta-h"><div class="hd"><h2 id="ta-h">技術面</h2><span class="note">日 K・滑過或按住圖表看每天價格</span><a class="act" href="#/backtest/${encodeURIComponent(key)}">回測這檔</a></div>
     <div class="chart-wrap">${b ? lineChart(b, it) : '<p class="empty">走勢資料載入失敗</p>'}</div>
     <div class="legend"><span><i style="background:#15181D;height:2px"></i>收盤</span><span><i style="background:#6E8EEB;height:2px"></i>20 日線 ${px(ta.ma20)}</span><span><i style="background:#B9C0CC;height:2px"></i>60 日線 ${px(ta.ma60)}</span>
       <span>相對強弱 RSI(14) ${isNum(ta.rsi) ? ta.rsi.toFixed(0) : '—'}</span><span>布林位置 ${isNum(ta.bbPct) ? ta.bbPct.toFixed(0) + '%' : '—'}</span></div></section>
@@ -1174,11 +1174,175 @@ ${footer()}`;
     $('#lm-form').onsubmit = e => { e.preventDefault(); cfg.limits = { var95: +$('#l-var').value || DEF.limits.var95, single: +$('#l-single').value || DEF.limits.single, cashMin: +$('#l-cash').value || 0 }; saveCfg(); msg.className = 'small ok-text'; msg.textContent = '風險上限已儲存。'; };
   }
 
+  // ── 策略回測（在瀏覽器計算，參數可調）────────────────────────
+  const BT_DEF = { scope: 'all', buy: 63, sell: 37, stopAtr: 2, takePct: 0, maxDays: 0, costTW: 0.585, costUS: 0.05, trend: false };
+  const BT = Object.assign({}, BT_DEF, LS.get('bt', {}));
+
+  /** 與雲端 Signal.taScore 相同的技術面分數，逐日計算（只用當天以前的資料） */
+  function taSeries(b) {
+    const c = b.close, h = b.high, l = b.low, v = b.volume, n = c.length;
+    const ema = (a, k) => { const q = 2 / (k + 1), o = [a[0]]; for (let i = 1; i < a.length; i++) o.push(a[i] * q + o[i - 1] * (1 - q)); return o; };
+    const e12 = ema(c, 12), e26 = ema(c, 26), macd = c.map((_, i) => e12[i] - e26[i]);
+    const rsi = new Array(n).fill(null); { const a = 1 / 14; let g = 0, ls = 0, den = 0; for (let i = 1; i < n; i++) { const d = c[i] - c[i - 1]; g = g * (1 - a) + Math.max(0, d); ls = ls * (1 - a) + Math.max(0, -d); den = den * (1 - a) + 1; if (i >= 14) { const ag = g / den, al = ls / den; rsi[i] = al === 0 ? 100 : 100 - 100 / (1 + ag / al); } } }
+    const sma = (i, k) => { if (i < k - 1) return null; let s = 0; for (let j = i - k + 1; j <= i; j++) s += c[j]; return s / k; };
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      if (i < 35) { out.push(null); continue; }
+      const chg = (c[i] / c[i - 1] - 1) * 100, ma20 = sma(i, 20), ma60 = sma(i, 60);
+      let sd = 0; for (let j = i - 19; j <= i; j++) sd += (c[j] - ma20) ** 2; sd = Math.sqrt(sd / 19);
+      const bb = sd > 0 ? (c[i] - (ma20 - 2 * sd)) / (4 * sd) * 100 : 50;
+      let av = 0; for (let j = i - 20; j < i; j++) av += v[j] || 0; av /= 20;
+      const rv = av > 0 ? v[i] / av : null;
+      let s = 50 + Math.max(-10, Math.min(10, chg));
+      if (rsi[i] != null) s += (50 - rsi[i]) * 0.25;
+      s += macd[i] / c[i] * 100 * 8;
+      s += (50 - bb) * 0.10;
+      s += c[i] > ma20 ? 4 : -4;
+      if (ma60 != null) s += ma20 > ma60 ? 3 : -3;
+      if (rv > 2) s += chg > 0 ? 4 : chg < 0 ? -4 : 0;
+      if (rsi[i] != null && rsi[i] < 30) s += 5;
+      if (rsi[i] != null && rsi[i] > 70) s -= 5;
+      let tr = 0; for (let j = i - 13; j <= i; j++) tr += Math.max(h[j] - l[j], Math.abs(h[j] - c[j - 1]), Math.abs(l[j] - c[j - 1])); tr /= 14;
+      out.push({ score: Math.max(5, Math.min(95, s)), atr: tr, ma60 });
+    }
+    return out;
+  }
+
+  /** 單一標的回測：收盤出訊號，隔天開盤成交；停損停利盤中觸價成交（跳空以開盤價） */
+  function backtestOne(b, market, P) {
+    const ta = taSeries(b), c = b.close, o = b.open, h = b.high, l = b.low, d = b.dates, n = c.length;
+    const start = 60, cost = (market === 'tw' ? P.costTW : P.costUS) / 100 / 2;
+    let pos = null, cash = 1, eq = [], trades = [], days = 0;
+    for (let i = start; i < n; i++) {
+      // 先處理持倉中的盤中停損／停利
+      if (pos) {
+        let exit = null, why = '';
+        if (pos.stop && l[i] <= pos.stop) { exit = Math.min(o[i], pos.stop); why = '停損'; }
+        else if (pos.take && h[i] >= pos.take) { exit = Math.max(o[i], pos.take); why = '停利'; }
+        if (exit != null) { const r = exit * (1 - cost) / pos.cost - 1; cash *= 1 + r; trades.push({ in: pos.date, out: d[i], pin: pos.px, pout: exit, r: r * 100, days: i - pos.i, why }); pos = null; }
+      }
+      // 隔日開盤執行前一天收盤的訊號
+      if (i > start && ta[i - 1]) {
+        const t = ta[i - 1];
+        if (!pos && t.score >= P.buy && (!P.trend || (t.ma60 && c[i - 1] > t.ma60))) {
+          const px = o[i]; pos = { px, cost: px * (1 + cost), date: d[i], i, stop: P.stopAtr > 0 ? c[i - 1] - P.stopAtr * t.atr : null, take: P.takePct > 0 ? px * (1 + P.takePct / 100) : null };
+          if (pos.stop && l[i] <= pos.stop) { const ex = Math.min(o[i], pos.stop), r = ex * (1 - cost) / pos.cost - 1; cash *= 1 + r; trades.push({ in: d[i], out: d[i], pin: px, pout: ex, r: r * 100, days: 0, why: '停損' }); pos = null; }
+        } else if (pos && (t.score <= P.sell || (P.maxDays > 0 && i - pos.i >= P.maxDays))) {
+          const ex = o[i], r = ex * (1 - cost) / pos.cost - 1; cash *= 1 + r; trades.push({ in: pos.date, out: d[i], pin: pos.px, pout: ex, r: r * 100, days: i - pos.i, why: t.score <= P.sell ? '賣出訊號' : '持有期滿' }); pos = null;
+        }
+      }
+      if (pos) days++;
+      eq.push({ date: d[i], v: pos ? cash * (c[i] * (1 - cost) / pos.cost) : cash });
+    }
+    const bh = eq.map((e, k) => ({ date: e.date, v: c[start + k] / c[start] }));
+    return { eq, bh, trades, open: pos ? { date: pos.date, px: pos.px, unreal: (c[n - 1] / pos.cost - 1) * 100 } : null, exposure: days / Math.max(1, n - start) * 100 };
+  }
+  function stats(eq, trades) {
+    if (!eq.length) return null;
+    const v = eq.map(e => e.v), tot = (v[v.length - 1] / v[0] - 1) * 100, yrs = eq.length / 250;
+    let pk = v[0], mdd = 0; for (const x of v) { pk = Math.max(pk, x); mdd = Math.min(mdd, x / pk - 1); }
+    const rets = v.slice(1).map((x, i) => x / v[i] - 1), m = rets.reduce((s, x) => s + x, 0) / rets.length, sd = Math.sqrt(rets.reduce((s, x) => s + (x - m) ** 2, 0) / (rets.length - 1));
+    const t = trades || [];
+    return { tot, cagr: (Math.pow(v[v.length - 1] / v[0], 1 / Math.max(yrs, 0.1)) - 1) * 100, mdd: mdd * 100, sharpe: sd > 0 ? m / sd * Math.sqrt(250) : null,
+      n: t.length, win: t.length ? t.filter(x => x.r > 0).length / t.length * 100 : null, avg: t.length ? t.reduce((s, x) => s + x.r, 0) / t.length : null, hold: t.length ? t.reduce((s, x) => s + x.days, 0) / t.length : null };
+  }
+  /** 多檔平均：每檔分配相同資金、各自進出，依日期對齊（休市日沿用前值） */
+  function combine(curves) {
+    const dates = [...new Set(curves.flatMap(c => c.map(e => e.date)))].sort();
+    const maps = curves.map(c => new Map(c.map(e => [e.date, e.v])));
+    const last = curves.map(() => 1);
+    return dates.map(d => { maps.forEach((m, i) => { if (m.has(d)) last[i] = m.get(d) / curves[i][0].v; }); return { date: d, v: last.reduce((s, x) => s + x, 0) / last.length }; });
+  }
+  function halves(curve) { const k = Math.floor(curve.length / 2); return [curve.slice(0, k + 1), curve.slice(k)].map(c => (c.length > 1 ? (c[c.length - 1].v / c[0].v - 1) * 100 : null)); }
+
+  function viewBacktest(key) {
+    const opts = Object.values(S.snap.items).map(it => `<option value="${esc(it.key)}"${BT.scope === it.key ? ' selected' : ''}>${esc(it.key)} ${esc(it.name)}</option>`).join('');
+    const f = (id, label, val, step, hint) => `<div class="field"><label for="${id}">${label}</label><input id="${id}" type="number" step="${step}" value="${val}" inputmode="decimal">${hint ? `<span class="hint">${hint}</span>` : ''}</div>`;
+    return `<div><a href="#/scorecard" class="small">← 系統成績</a></div>
+<section class="card" aria-labelledby="bt-h"><div class="hd"><h2 id="bt-h">策略回測</h2><span class="note">如果過去照技術面訊號操作，結果會怎樣・在你的瀏覽器計算</span></div>
+  <form id="bt-form" class="btform">
+    <div class="field"><label for="bt-scope">標的</label><select id="bt-scope"><option value="all"${BT.scope === 'all' ? ' selected' : ''}>全部觀察清單（每檔相同資金）</option><option value="tw"${BT.scope === 'tw' ? ' selected' : ''}>台股觀察清單</option><option value="us"${BT.scope === 'us' ? ' selected' : ''}>美股觀察清單</option>${opts}</select></div>
+    ${f('bt-buy', '買進：技術分數 ≥', BT.buy, 1, '系統預設 63')}
+    ${f('bt-sell', '賣出：技術分數 ≤', BT.sell, 1, '系統預設 37')}
+    ${f('bt-stop', '停損：進場前收盤 − N 倍 ATR', BT.stopAtr, 0.5, '0＝不停損；系統預設 2')}
+    ${f('bt-take', '停利（%）', BT.takePct, 1, '0＝不停利')}
+    ${f('bt-days', '最長持有（交易日）', BT.maxDays, 1, '0＝不限')}
+    ${f('bt-ctw', '台股交易成本（來回 %）', BT.costTW, 0.005, '手續費 0.1425%×2＋證交稅 0.3%')}
+    ${f('bt-cus', '美股交易成本（來回 %）', BT.costUS, 0.01, '')}
+    <div class="field"><label><input id="bt-trend" type="checkbox"${BT.trend ? ' checked' : ''}> 只在收盤高於 60 日線時買進（順勢濾網）</label></div>
+    <div class="actions"><button class="btn primary" type="submit">重新回測</button><button class="btn" type="button" id="bt-reset">恢復系統預設</button></div>
+  </form>
+  <div id="bt-out"><p class="loading">回測中…</p></div>
+</section>
+<section class="card" aria-labelledby="oos-h">${viewModelOOS()}</section>
+${footer()}`;
+  }
+  function viewModelOOS() {
+    const o = S.snap.scorecard?.modelOOS;
+    const since = o?.since ? `台股模型 ${esc(o.since.tw || '—')}、美股模型 ${esc(o.since.us || '—')}` : '';
+    if (!o || !o.all?.n) return `<div class="hd"><h2 id="oos-h">AI 模型的樣本外表現</h2></div><p class="empty" style="margin:0">尚無資料（下次更新後出現）。</p>`;
+    const row = (l, g) => `<tr><td>${l}</td><td class="num">${g.n}</td><td class="num ${cls(g.avg)}">${g.avg == null ? '—' : pct(g.avg, 2)}</td><td class="num">${g.up == null ? '—' : g.up.toFixed(0) + '%'}</td></tr>`;
+    return `<div class="hd"><h2 id="oos-h">AI 模型的樣本外表現</h2><span class="note">只看模型訓練日之後（${since}），避免用訓練過的資料自我評分</span></div>
+      <table class="tbl rtbl"><thead><tr><th>模型判斷</th><th class="num">次數（檔×日）</th><th class="num">隔日平均漲跌</th><th class="num">隔日上漲比例</th></tr></thead><tbody>${row('買進', o.buy)}${row('觀望', o.hold)}${row('賣出', o.sell)}${row('全部（基準）', o.all)}</tbody></table>
+      <p class="small muted" style="margin:0">${o.hit ? `買進／賣出判斷的方向命中率 ${o.hit.rate}%（${o.hit.n} 次，漲跌未達 ±0.5% 不計）。` : ''}「買進」的隔日表現要明顯好於「全部」，模型才有價值。樣本期間只有訓練日之後的幾週，數字會隨時間累積變得可靠；台股模型在這裡沒有籌碼特徵（純技術模式）。</p>`;
+  }
+  async function runBacktest() {
+    const out = $('#bt-out'); if (!out) return;
+    out.innerHTML = '<p class="loading">回測中…</p>';
+    const items = Object.values(S.snap.items).filter(it => BT.scope === 'all' || it.market === BT.scope || it.key === BT.scope);
+    const res = [];
+    for (const it of items) { const b = await loadBars(it.key); if (b && b.close.length > 120) res.push({ it, r: backtestOne(b, it.market, BT) }); }
+    if (S.route !== 'backtest' || !$('#bt-out')) return;
+    if (!res.length) { out.innerHTML = '<p class="empty">沒有足夠的歷史資料。</p>'; return; }
+    const single = res.length === 1;
+    const curve = single ? res[0].r.eq : combine(res.map(x => x.r.eq)), bh = single ? res[0].r.bh : combine(res.map(x => x.r.bh));
+    const trades = res.flatMap(x => x.r.trades.map(t => ({ ...t, key: x.it.key })));
+    const S1 = stats(curve, trades), S2 = stats(bh, null);
+    const [h1, h2] = halves(curve), [b1, b2] = halves(bh);
+    const exp = res.reduce((s, x) => s + x.r.exposure, 0) / res.length;
+    const all = [...curve.map(e => e.v), ...bh.map(e => e.v)], lo = Math.min(...all), hi = Math.max(...all), W = 1000, Hh = 220;
+    const y = t => (Hh - 6 - (t - lo) / ((hi - lo) || 1) * (Hh - 12)).toFixed(1), pth = a => a.map((e, i) => `${i ? 'L' : 'M'}${(i / (a.length - 1) * W).toFixed(1)},${y(e.v)}`).join('');
+    const better = S1.tot - S2.tot;
+    const halfOk = h1 != null && h2 != null && (h1 - b1 > 0) === (h2 - b2 > 0);
+    const verdict = better > 0
+      ? `這組規則在回測期間比一直持有${better > 0 ? '多賺' : ''} ${fix(better, 1)} 個百分點${halfOk ? '，前後兩半段都贏，結果較穩定' : '，但只在其中一半期間贏，可能是運氣或過度調整參數'}。`
+      : `這組規則在回測期間比一直持有少賺 ${fix(-better, 1)} 個百分點${S1.mdd > S2.mdd ? `，但最大回撤較小（${pct(S1.mdd, 1)} vs ${pct(S2.mdd, 1)}），風險較低` : ''}。`;
+    const per = res.map(x => { const a = stats(x.r.eq, x.r.trades), bb = stats(x.r.bh, null); return { key: x.it.key, name: x.it.name, s: a.tot, b: bb.tot, n: a.n, win: a.win, mdd: a.mdd, open: x.r.open }; }).sort((a, b) => (b.s - b.b) - (a.s - a.b));
+    out.innerHTML = `
+      <p style="margin:0;font-weight:500">${verdict}</p>
+      <div class="kpis">
+        <div class="kpi"><div class="lb">策略總報酬</div><div class="v ${cls(S1.tot)}">${pct(S1.tot, 1)}</div><div class="small muted">一直持有 ${pct(S2.tot, 1)}</div></div>
+        <div class="kpi"><div class="lb">最大回撤</div><div class="v down">${pct(S1.mdd, 1)}</div><div class="small muted">一直持有 ${pct(S2.mdd, 1)}</div></div>
+        <div class="kpi"><div class="lb">交易次數／勝率</div><div class="v">${S1.n}／${S1.win == null ? '—' : S1.win.toFixed(0) + '%'}</div><div class="small muted">每筆平均 ${pct(S1.avg, 2)}，持有 ${S1.hold == null ? '—' : S1.hold.toFixed(0)} 天</div></div>
+        <div class="kpi"><div class="lb">夏普值／持股時間</div><div class="v">${num(S1.sharpe)}</div><div class="small muted">一直持有 ${num(S2.sharpe)}・有部位 ${exp.toFixed(0)}% 的時間</div></div>
+      </div>
+      <div class="legend"><span><i style="background:#1F4FD8;height:2px"></i>策略</span><span><i style="background:#8A93A3;height:2px"></i>一直持有</span><span class="muted">${esc(curve[0].date)} → ${esc(curve[curve.length - 1].date)}（${curve.length} 個交易日）</span></div>
+      <svg viewBox="0 0 ${W} ${Hh}" style="width:100%;height:auto" role="img" aria-label="策略與一直持有的資產曲線"><line x1="0" x2="${W}" y1="${y(1)}" y2="${y(1)}" stroke="#E2E5EA" stroke-dasharray="4 4"/><path d="${pth(bh)}" fill="none" stroke="#8A93A3" stroke-width="1.5"/><path d="${pth(curve)}" fill="none" stroke="#1F4FD8" stroke-width="2"/></svg>
+      <table class="tbl rtbl"><thead><tr><th>穩定度檢查</th><th class="num">策略</th><th class="num">一直持有</th><th class="num">差異</th></tr></thead><tbody>
+        <tr><td>前半段</td><td class="num ${cls(h1)}">${pct(h1, 1)}</td><td class="num ${cls(b1)}">${pct(b1, 1)}</td><td class="num ${cls(h1 - b1)}"><b>${pct(h1 - b1, 1)}</b></td></tr>
+        <tr><td>後半段</td><td class="num ${cls(h2)}">${pct(h2, 1)}</td><td class="num ${cls(b2)}">${pct(b2, 1)}</td><td class="num ${cls(h2 - b2)}"><b>${pct(h2 - b2, 1)}</b></td></tr></tbody></table>
+      ${single ? `<div><b class="small">交易明細</b><div class="tbl-box"><table class="tbl rtbl"><thead><tr><th>進場</th><th>出場</th><th class="num">進場價</th><th class="num">出場價</th><th class="num">報酬</th><th class="num">天數</th><th>出場原因</th></tr></thead><tbody>
+        ${trades.slice().reverse().map(t => `<tr><td class="mono">${esc(t.in)}</td><td class="mono">${esc(t.out)}</td><td class="num">${px(t.pin)}</td><td class="num">${px(t.pout)}</td><td class="num ${cls(t.r)}">${pct(t.r, 1)}</td><td class="num">${t.days}</td><td class="small">${esc(t.why)}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">沒有交易</td></tr>'}</tbody></table></div>
+        ${res[0].r.open ? `<p class="small" style="margin:0">目前持有中：${esc(res[0].r.open.date)} 以 ${px(res[0].r.open.px)} 進場，未實現 <b class="${cls(res[0].r.open.unreal)}">${pct(res[0].r.open.unreal, 1)}</b></p>` : ''}</div>`
+        : `<div><b class="small">各檔結果（依「贏過一直持有」排序）</b><div class="tbl-box"><table class="tbl rtbl"><thead><tr><th>標的</th><th class="num">策略</th><th class="num">一直持有</th><th class="num">差異</th><th class="num">已平倉</th><th class="num">勝率</th><th class="num">最大回撤</th></tr></thead><tbody>
+        ${per.map(p => `<tr><td><a href="#" data-btkey="${esc(p.key)}">${esc(p.key)}</a> <span class="small muted">${esc(p.name)}</span>${p.open ? ' <span class="tag buy">持有中</span>' : ''}</td><td class="num ${cls(p.s)}">${pct(p.s, 1)}</td><td class="num ${cls(p.b)}">${pct(p.b, 1)}</td><td class="num ${cls(p.s - p.b)}"><b>${pct(p.s - p.b, 1)}</b></td><td class="num">${p.n}</td><td class="num">${p.win == null ? '—' : p.win.toFixed(0) + '%'}</td><td class="num down">${pct(p.mdd, 1)}</td></tr>`).join('')}</tbody></table></div></div>`}
+      <p class="small muted" style="margin:0">規則：收盤後計算技術分數（與系統相同公式，不含 AI 模型與 VIX 門檻調整），隔天開盤成交；停損停利在盤中觸價成交，跳空時以開盤價計。已扣交易成本，未計股利。歷史約 2 年。注意：一直調參數直到結果最好，等於「看著答案找規則」，未來不一定有效——請以前後兩半段都穩定的設定為準。</p>`;
+  }
+  function bindBacktest() {
+    const read = () => { BT.scope = $('#bt-scope').value; BT.buy = +$('#bt-buy').value || BT_DEF.buy; BT.sell = +$('#bt-sell').value || BT_DEF.sell; BT.stopAtr = +$('#bt-stop').value || 0; BT.takePct = +$('#bt-take').value || 0; BT.maxDays = +$('#bt-days').value || 0; BT.costTW = +$('#bt-ctw').value || 0; BT.costUS = +$('#bt-cus').value || 0; BT.trend = $('#bt-trend').checked; LS.set('bt', BT); };
+    $('#bt-form').onsubmit = e => { e.preventDefault(); read(); runBacktest(); };
+    $('#bt-scope').onchange = () => { read(); runBacktest(); };
+    $('#bt-reset').onclick = () => { Object.assign(BT, BT_DEF, { scope: BT.scope }); LS.set('bt', BT); render(); };
+    $('#bt-out').addEventListener('click', e => { const a = e.target.closest('[data-btkey]'); if (!a) return; e.preventDefault(); BT.scope = a.dataset.btkey; LS.set('bt', BT); $('#bt-scope').value = BT.scope; runBacktest(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+    runBacktest();
+  }
+
   // ── 模型成績 ────────────────────────────────────────────────
   function viewScorecard() {
     const sc = S.snap.scorecard, st = S.snap.status || {};
     const STZ = { yahoo: 'Yahoo 報價', vix: 'VIX 恐慌指數', treasury: '美國公債殖利率', t86: '三大法人（TWSE）', finmind: 'FinMind 法人／營收', fundamentals: '美股基本面', breadth: '台股寬度（收盤歷史）', futures: '外資台指期', putcall: '選擇權 P/C 比', valuation: '台股估值', margin: '融資餘額', usValuation: '標普本益比', fred: 'FRED 信用／壓力', indices: '指數推論' };
     return `
+<section class="card" aria-labelledby="bt0"><div class="hd"><h2 id="bt0">策略回測</h2><span class="note">過去 2 年照技術面訊號操作的結果，可自行調整門檻、停損、停利；另附 AI 模型的樣本外表現</span><a class="act btn primary sm" href="#/backtest" style="color:#fff">開始回測</a></div></section>
 <section class="card" aria-labelledby="sc1"><div class="hd"><h2 id="sc1">模型成績單</h2><span class="note">${esc(sc.note)}</span></div>
   <div class="grid2"><div style="display:flex;flex-direction:column;gap:12px"><b class="small">近 30 天</b>${scoreRows(sc.d30)}</div><div style="display:flex;flex-direction:column;gap:12px"><b class="small">近 90 天</b>${scoreRows(sc.d90)}</div></div>
   <p class="small muted" style="margin:0">黑線＝50%（擲硬幣）。灰色條＝樣本少於 30 筆，數字不穩定。${sc.since ? `自 ${esc(sc.since)} 起共 ${sc.total} 筆。` : ''}</p></section>
@@ -1222,7 +1386,7 @@ ${footer()}`;
   async function render() {
     const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
     S.route = h.startsWith('s/') ? h : (h.split('/')[0] || 'home');
-    const nav = h.startsWith('s/') ? 'home' : (S.route === 'all' ? 'home' : S.route);
+    const nav = h.startsWith('s/') ? 'home' : S.route === 'all' ? 'home' : S.route === 'backtest' ? 'scorecard' : S.route;
     document.querySelectorAll('[data-nav]').forEach(a => { a.classList.toggle('act', a.dataset.nav === nav); if (a.dataset.nav === nav) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
     const main = $('#main');
     if (!S.snap) return;
@@ -1235,6 +1399,7 @@ ${footer()}`;
       bindStock(key); bindMine(key);
       afterStock(key);
     } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); bindPortfolio(); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
+    else if (S.route === 'backtest') { const k = h.split('/')[1]; if (k) { BT.scope = decodeURIComponent(k).toUpperCase(); LS.set('bt', BT); } main.innerHTML = viewBacktest(); bindBacktest(); document.title = '策略回測・訊號終端'; }
     else if (S.route === 'journal') { main.innerHTML = viewJournal(); document.title = '我的成績單・訊號終端'; afterJournal(); }
     else if (S.route === 'scorecard') { main.innerHTML = viewScorecard(); document.title = '模型成績・訊號終端'; }
     else if (S.route === 'settings') { main.innerHTML = viewSettings(); bindSettings(); document.title = '設定・訊號終端'; }
