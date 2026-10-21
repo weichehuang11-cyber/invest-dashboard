@@ -1433,8 +1433,8 @@ ${footer()}`;
     const ser = UNIH?.c?.[key] || [];
     return `<div><a href="#/" class="small">← 回總覽</a></div>
 <section class="card" aria-labelledby="qk-h">
-  <div class="hd"><h1 id="qk-h" style="margin:0;font-size:22px">${esc(key)} ${esc(u.n)}</h1><span class="note">${u.x === 'TPEx' ? '上櫃' : u.x === 'TWSE' ? (/^00/.test(key) ? '上市 ETF' : '上市') : '美股'}・快速檢視（不在觀察清單）</span></div>
-  <div class="quote"><div><div style="display:flex;align-items:baseline;gap:12px"><span class="px">${px(u.c)}</span><span class="ch ${cls(u.p)}">${pct(u.p)}</span></div><div class="small muted">${esc((u.x === 'TPEx' ? UNI.tpexDate : UNI.date) || '')} 收盤</div></div></div>
+  <div class="hd"><h1 id="qk-h" style="margin:0;font-size:22px">${esc(key)} ${esc(u.n)}</h1><span class="note">${u.x === 'TPEx' ? '上櫃' : u.x === 'TWSE' ? (/^00/.test(key) ? '上市 ETF' : '上市') : '美股'}${u.s ? '・' + esc(u.s) : ''}・快速檢視（不在觀察清單）</span></div>
+  <div class="quote"><div><div style="display:flex;align-items:baseline;gap:12px"><span class="px">${px(u.c)}</span>${isNum(u.p) ? `<span class="ch ${cls(u.p)}">${pct(u.p)}</span>` : ''}</div><div class="small muted">${esc((u.x === 'TPEx' ? UNI.tpexDate : u.x === 'US' ? UNI.usDate : UNI.date) || '')} 收盤${u.mc ? `・市值 ${u.mc >= 1e5 ? fix(u.mc / 1e6, 2) + ' 兆' : fix(u.mc / 1e3, 1) + ' 十億'}美元` : ''}${u.x === 'US' && !isNum(u.c) ? '（目前只有名稱，價格要加入觀察清單後才有）' : ''}</div></div></div>
   ${ser.filter(isNum).length > 5 ? `<div>${spark(ser, { w: 600, h: 90 })}<div class="small muted">近 ${ser.filter(isNum).length} 個交易日收盤</div></div>` : ''}
   <dl class="facts mini">
     <div><dt>20 日線</dt><dd>${u.a20 == null ? '—' : u.a20 ? '<span class="up">站上</span>' : '<span class="down">跌破</span>'}</dd></div>
@@ -1451,14 +1451,14 @@ ${footer()}`;
 
   function setupSearch() {
     const inp = $('#search-input'), box = $('#search-results'), form = $('#search');
-    const all = () => { const w = Object.values(S.snap.items).map(it => ({ key: it.key, name: it.name, changePct: it.changePct, w: 1 })); const seen = new Set(w.map(x => x.key)); return [...w, ...(UNI?.list || []).filter(u => !seen.has(u.k)).map(u => ({ key: u.k, name: u.n, changePct: u.p, w: 0, x: u.x }))]; };
+    const all = () => { const w = Object.values(S.snap.items).map(it => ({ key: it.key, name: it.name, changePct: it.changePct, w: 1 })); const seen = new Set(w.map(x => x.key)); return [...w, ...(UNI?.list || []).filter(u => !seen.has(u.k)).map(u => ({ key: u.k, name: u.n, changePct: u.p, w: 0, x: u.x, mc: u.mc || 0 }))]; };
     const norm = v => String(v || '').trim().toUpperCase().replace(/\.TWO?$/, '');
     const find = q => {
       q = norm(q); if (!q) return [];
       const exact = all().filter(it => it.key === q);
       const starts = all().filter(it => it.key !== q && it.key.startsWith(q));
       const name = all().filter(it => !it.key.startsWith(q) && String(it.name).toUpperCase().includes(q));
-      const byW = a => a.sort((x, y) => y.w - x.w);
+      const byW = a => a.sort((x, y) => y.w - x.w || (y.mc || 0) - (x.mc || 0));
       return [...exact, ...byW(starts), ...byW(name)].slice(0, 10);
     };
     let hits = [], cur = -1;

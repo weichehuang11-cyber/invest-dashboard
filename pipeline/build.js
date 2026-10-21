@@ -266,6 +266,10 @@ async function main() {
     heavy.us.ts = Date.now();
   }
 
+  if (fullUS || (FULL && !heavy.us.universe)) {
+    try { const uu = await Market.usUniverse(); heavy.us.universe = uu; status.usUniverse = `${Object.keys(uu.rows).length} 檔（${uu.src}）`; } catch (e) { status.usUniverse = 'fail: ' + e.message; }
+  }
+
   // ── 3c. 信用與金融壓力（FRED 公開 CSV）：完整更新時抓 ───────────
   if (FULL) {
     heavy.macro = heavy.macro || {}; let fredErr = null;
@@ -515,8 +519,10 @@ async function main() {
     }
     const twIds = new Set(U.map(u => u.k));
     for (const [id, q] of Object.entries(heavy.tw.tpex?.rows || {})) if (/^(\d{4}|0\d{3,5}[A-Z]?)$/.test(id) && !twIds.has(id)) U.push({ k: id, n: q.n, m: 'tw', x: 'TPEx', c: q.c, p: r2(q.p), w: wset.has(id) ? 1 : 0 });
-    for (const k of wl.us) if (items[k]) U.push({ k, n: items[k].name, m: 'us', x: 'US', c: items[k].price, p: items[k].changePct, w: 1 });
-    writeJSON(path.join(OUT, 'universe.json'), { date: H.dates?.[nD - 1] || null, tpexDate: heavy.tw.tpex?.date || null, list: U });
+    for (const k of wl.us) if (items[k]) U.push({ k, n: items[k].name, m: 'us', x: 'US', c: items[k].price, p: items[k].changePct, mc: heavy.us.universe?.rows?.[k]?.mc ?? null, w: 1 });
+    const usW = new Set(wl.us);
+    for (const [k, q] of Object.entries(heavy.us.universe?.rows || {})) if (!usW.has(k)) U.push({ k, n: q.n, m: 'us', x: 'US', c: q.c, p: r2(q.p), mc: q.mc, s: q.s || undefined, w: 0 });
+    writeJSON(path.join(OUT, 'universe.json'), { date: H.dates?.[nD - 1] || null, tpexDate: heavy.tw.tpex?.date || null, usDate: heavy.us.universe?.date || null, usSrc: heavy.us.universe?.src || null, list: U });
     writeJSON(path.join(OUT, 'universe_hist.json'), series);
     status.universe = `${U.length} 檔`;
   }

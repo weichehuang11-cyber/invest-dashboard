@@ -225,6 +225,32 @@ async function tpexQuotes() {
   return { date: kD ? String(rows[0][kD]) : null, rows: out };
 }
 
+// ── 美股全市場清單 ─────────────────────────────────────────
+const cleanName = n => String(n || '').replace(/\s+(Common Stock|Ordinary Shares|American Depositary Shares|Class [A-C] (Common Stock|Ordinary Shares)|Common Shares|Inc\.?)( .*)?$/i, m => (/^\s+Inc/i.test(m) ? ' Inc.' : '')).trim();
+/** 優先用 Nasdaq 篩選器（一次拿到全部美股的價格、漲跌、市值、產業），失敗改用 SEC 公司代號清單（只有名稱） */
+async function usUniverse() {
+  try {
+    const j = await get('https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=25&offset=0&download=true', { timeout: 40000, headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+      Accept: 'application/json, text/plain, */*', 'Accept-Language': 'en-US,en;q=0.9', Origin: 'https://www.nasdaq.com', Referer: 'https://www.nasdaq.com/' } });
+    const rows = j?.data?.rows || j?.data?.table?.rows || [];
+    if (rows.length > 1000) {
+      const out = {};
+      for (const r of rows) {
+        const k = String(r.symbol || '').trim().toUpperCase().replace('/', '-'); if (!/^[A-Z][A-Z.\-]{0,6}$/.test(k)) continue;
+        const mc = num(r.marketCap), c = num(String(r.lastsale || '').replace('$', ''));
+        if (mc && mc < 1e8) continue;   // 市值 1 億美元以下略過，減少檔案大小
+        out[k] = { n: cleanName(r.name), c: c || null, p: r.pctchange ? num(String(r.pctchange).replace('%', '')) : null, mc: mc ? Math.round(mc / 1e6) : null, s: r.sector || '' };
+      }
+      return { src: 'Nasdaq', date: new Date().toISOString().slice(0, 10), rows: out };
+    }
+  } catch (_) { /* 改用 SEC */ }
+  const j = await get('https://www.sec.gov/files/company_tickers.json', { timeout: 30000, headers: { 'User-Agent': 'signal-terminal research bot (github actions)', Accept: 'application/json' } });
+  const out = {};
+  for (const r of Object.values(j || {})) { const k = String(r.ticker || '').toUpperCase(); if (/^[A-Z][A-Z.\-]{0,6}$/.test(k) && !out[k]) out[k] = { n: cleanName(r.title), c: null, p: null, mc: null, s: '' }; }
+  return { src: 'SEC', date: new Date().toISOString().slice(0, 10), rows: out };
+}
+
 // ── FRED（公開 CSV，不需權杖）────────────────────────────────
 async function fred(id, days = 400) {
   const key = process.env.FRED_API_KEY;
@@ -241,4 +267,4 @@ async function fred(id, days = 400) {
   return out.filter(x => x.date >= cut);
 }
 
-module.exports = { tpexQuotes, miIndex, updateTwHistory, twBreadthStats, taifexForeignTX, taifexPutCall, pickForeignTX, pickPC, twValuation, twMargin, fred, csvParse, median };
+module.exports = { usUniverse, tpexQuotes, miIndex, updateTwHistory, twBreadthStats, taifexForeignTX, taifexPutCall, pickForeignTX, pickPC, twValuation, twMargin, fred, csvParse, median };
