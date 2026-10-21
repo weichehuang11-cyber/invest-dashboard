@@ -35,30 +35,15 @@ GitHub 排程偶爾會延遲幾分鐘。預測紀錄、昨日訊號等狀態存�
 
 ## NAS 備援
 
-在 NAS 上（SSH）：
+NAS 只負責備援與歷史封存（舊的 invest 主程式可以退役）。在 NAS 上（SSH）執行一次：
 
 ```
-cd /volume2/homes
-git clone https://github.com/<你的帳號>/invest-dashboard.git
-cd invest-dashboard
-ONNXRUNTIME_NODE_INSTALL=skip npm ci --omit=dev
-bash nas/run-backup.sh all          # 第一次完整產生
+curl -fsSL https://raw.githubusercontent.com/weichehuang11-cyber/invest-dashboard/main/nas/setup.sh -o /tmp/setup.sh && bash /tmp/setup.sh
 ```
 
-DSM **控制台 → 任務排程表 → 新增 → 排定的任務 → 使用者定義的指令碼**，建立三個任務（使用者選你的帳號）：
+它會下載程式、安裝套件、第一次完整產生資料，並用 pm2 常駐 `nas/server.js`：在 `http://NAS:8765/backup/` 提供備援網站，並內建排程（盤中每 30 分鐘、台股 16:55、美股 05:45）。不需要再設 DSM 任務排程表。之後要更新程式，再執行一次同一行即可。
 
-| 任務 | 時間 | 指令 |
-|---|---|---|
-| 盤中備援 | 每天、每 30 分鐘 | `bash /volume2/homes/invest-dashboard/nas/run-backup.sh` |
-| 台股收盤 | 週一至週五 16:55 | `bash /volume2/homes/invest-dashboard/nas/run-backup.sh tw` |
-| 美股收盤 | 週二至週六 05:45 | `bash /volume2/homes/invest-dashboard/nas/run-backup.sh us` |
-
-產出在 `/volume2/homes/invest-backup/`：
-
-- `site/`：完整備援網站，NAS 伺服器以 `http://NAS:8765/backup/` 提供
-- `archive/snapshots/日期/時間.json`：每次快照，永久保留
-- `archive/daily/日期.json`：每日收盤
-- `archive/backup/`：NAS 主程式紀錄的每日備份（保留 60 天）
+產出在 `/volume2/homes/invest-backup/`：`site/`（備援網站）、`archive/snapshots/`（每次快照）、`archive/daily/`、`archive/backup/`（舊 invest 資料每日打包，保留 60 天）。狀態：`http://NAS:8765/backup/status.json`。
 
 ### 讓 GitHub 網站能讀到 NAS（Tailscale）
 

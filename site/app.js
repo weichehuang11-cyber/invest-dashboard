@@ -248,7 +248,7 @@
     <div class="k"><span>今日判斷・${esc(tpeTime(s.generatedAt))}</span>${v.trend ? `<span class="trend">${esc(v.trend)}</span>` : ''}</div>
     <h1 id="v-h">${esc(v.headline)}</h1>
     <p>${esc(v.detail)}</p>
-    <div id="ai-verdict"></div>
+    <div id="ai-verdict">${s.ai?.verdict ? `<div class="ai"><b>AI 解讀</b>${esc(s.ai.verdict)}<span class="small" style="color:var(--topmute);display:block;margin-top:4px">雲端產生・${esc(tpeTime(s.ai.at))}</span></div>` : ''}</div>
   </div>
   <div class="r">
     <div class="small" style="color:var(--topmute)">判斷依據（${v.points > 0 ? '+' : ''}${v.points} 分）</div>
@@ -380,7 +380,7 @@ ${footer()}`;
       const it = s.items[k], g = it.signal, l = S.localPreds[k];
       return `<a class="ocard" href="#/s/${encodeURIComponent(k)}"><div class="r1">${st.has(k) ? '<span class="staron" aria-label="自選">★</span>' : ''}<b>${esc(k)}</b><span class="small muted">${esc(it.name)}</span>${sigTag(g.sig)}</div>
         <div class="r2"><span class="mono" style="font-size:17px;font-weight:600">${px(it.price)}</span><span class="mono small ${cls(it.changePct)}">${pct(it.changePct)}</span><span class="small muted" style="margin-left:auto">分數 ${g.score}・停損 ${px(g.stop)}</span></div>
-        <div>${evDots(g.evidence)}${l ? `<span class="small muted" style="margin-left:10px">本機預測 5 日 <b class="${cls(l.d5)}">${pct(l.d5)}</b></span>` : ''}</div></a>`;
+        <div>${evDots(g.evidence)}${l ? `<span class="small muted" style="margin-left:10px">本機預測 5 日 <b class="${cls(l.d5)}">${pct(l.d5)}</b></span>` : ''}</div>${s.ai?.stocks?.[k] ? `<div class="small muted">💬 ${esc(s.ai.stocks[k])}</div>` : ''}</a>`;
     };
     return `
       <div class="hd"><h2 id="opp-h">機會清單</h2><span class="note">${isMob() ? '證據燈：' : `依綜合分數排序・證據：技術／籌碼／基本面／模型（`}${cfg.colors === 'us' ? '實心綠' : '實心紅'}＝支持、${cfg.colors === 'us' ? '實心紅' : '實心綠'}＝反對${isMob() ? '' : '、空心＝中性、虛線＝無資料）'}</span>${n && all.length > n ? `<a class="act" href="#/all">看全部 ${all.length} 檔</a>` : ''}</div>
@@ -752,7 +752,7 @@ ${viewDecideCard(key)}
 <section class="card" aria-labelledby="th-h">
   <div class="hd"><h2 id="th-h">系統觀點</h2><span class="note">依公開資料自動整理（和你的論點對照看）</span></div>
   <p style="margin:0;font-size:17px;font-weight:500">${SIG[g.sig]}（${g.score} 分）：${T.pros.length} 項支持、${T.cons.length} 項風險。${isNum(g.stop) ? `跌破 ${px(g.stop)}（2 倍日線 ATR）宜停損。` : ''}</p>
-  <div id="ai-stock"></div>
+  <div id="ai-stock">${S.snap.ai?.stocks?.[key] ? `<div class="ai" style="background:var(--bg);color:var(--ink2)"><b style="color:var(--ink)">AI 點評</b>${esc(S.snap.ai.stocks[key])} <span class="small muted">（雲端・${esc(tpeTime(S.snap.ai.at))}）</span></div>` : ''}</div>
   ${S.local.llm ? `<form id="ask" class="ask"><label for="ask-q" class="sr">問本機 AI</label><input id="ask-q" placeholder="問本機 AI，例如：現在適合加碼嗎？停損要設多少？" autocomplete="off"><button class="btn primary" type="submit">問</button></form><div id="ask-a"></div>` : ''}
   <div class="thesis"><div><b class="small">支持</b><ul>${T.pros.map(x => `<li>${x}</li>`).join('') || '<li class="muted">無</li>'}</ul></div>
   <div><b class="small">風險</b><ul>${T.cons.map(x => `<li>${x}</li>`).join('') || '<li class="muted">無</li>'}</ul></div></div>
@@ -1472,7 +1472,7 @@ ${footer()}`;
   // ── 模型成績 ────────────────────────────────────────────────
   function viewScorecard() {
     const sc = S.snap.scorecard, st = S.snap.status || {};
-    const STZ = { yahoo: 'Yahoo 報價', vix: 'VIX 恐慌指數', treasury: '美國公債殖利率', t86: '三大法人（TWSE）', finmind: 'FinMind 法人／營收', fundamentals: '美股基本面', breadth: '台股寬度（收盤歷史）', futures: '外資台指期', putcall: '選擇權 P/C 比', valuation: '台股估值', margin: '融資餘額', usValuation: '標普本益比', fred: 'FRED 信用／壓力', indices: '指數推論' };
+    const STZ = { yahoo: 'Yahoo 報價', vix: 'VIX 恐慌指數', treasury: '美國公債殖利率', t86: '三大法人（TWSE）', finmind: 'FinMind 法人／營收', fundamentals: '美股基本面', breadth: '台股寬度（收盤歷史）', futures: '外資台指期', putcall: '選擇權 P/C 比', valuation: '台股估值', margin: '融資餘額', usValuation: '標普本益比', fred: 'FRED 信用／壓力', indices: '指數推論', ai: '雲端 AI 解讀', tdcc: '集保大戶', exdiv: '除權息', tpex: '上櫃行情', usUniverse: '美股清單', universe: '搜尋清單', usFinancials: '美股財報', twFinancials: '台股財報' };
     return `
 <section class="card" aria-labelledby="bt0"><div class="hd"><h2 id="bt0">策略回測</h2><span class="note">過去 2 年照技術面訊號操作的結果，可自行調整門檻、停損、停利；另附 AI 模型的樣本外表現</span><a class="act btn primary sm" href="#/backtest" style="color:#fff">開始回測</a></div></section>
 <section class="card" aria-labelledby="hs0"><div class="hd"><h2 id="hs0">歷史快照</h2><span class="note">查任何一天收盤後的判斷、訊號、指標，並看當天訊號到現在的結果</span><a class="act btn sm" href="#/history">查詢</a></div></section>

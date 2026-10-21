@@ -130,6 +130,7 @@ function weekly(snap, P, barsDir) {
   const tw = barsRet(barsDir, '^TWII', 5), sp = barsRet(barsDir, '^GSPC', 5), sox = barsRet(barsDir, '^SOX', 5);
   L.push(`【市場】加權 ${pct(tw)}、標普 500 ${pct(sp)}、費半 ${pct(sox)}（近 5 個交易日）`);
   L.push(`今日判斷：${snap.verdict?.headline || '—'}`);
+  if (snap.ai?.verdict) L.push(`AI 解讀：${snap.ai.verdict}`);
   const sg = (snap.health?.signals || []).slice(0, 3).map(x => '・' + x.text); if (sg.length) L.push(...sg);
   const r5 = items.filter(i => isNum(i.ta?.ret5)).sort((a, b) => b.ta.ret5 - a.ta.ret5);
   if (r5.length) { L.push('', '【觀察清單本週】'); L.push('漲最多：' + r5.slice(0, 3).map(i => `${i.key} ${pct(i.ta.ret5)}`).join('、')); L.push('跌最多：' + r5.slice(-3).reverse().map(i => `${i.key} ${pct(i.ta.ret5)}`).join('、')); }
