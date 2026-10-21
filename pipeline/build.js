@@ -450,8 +450,10 @@ async function main() {
     const signals = Object.fromEntries(Object.values(items).map(x => [x.key, x.signal.sig]));
     const tpeDay = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
     const fullAt = { ...(last.fullAt || {}) };
-    if (fullTW) fullAt.tw = tpeDay;
-    if (fullUS) fullAt.us = tpeDay;
+    // 只有在收盤後跑的完整更新才算「今天已完成」（盤中手動補跑不影響晚上的排程）
+    const tpeHour = new Date(Date.now() + 8 * 3600000).getUTCHours();
+    if (fullTW && tpeHour >= 16) fullAt.tw = tpeDay;
+    if (fullUS && tpeHour >= 4 && tpeHour < 13) fullAt.us = tpeDay;
     writeJSON(path.join(STATE, 'last.json'), { verdict: { level: verdict.level, at: nowIso }, signals: { ...(last.signals || {}), ...signals }, at: nowIso, status, fullAt });
     writeJSON(path.join(STATE, 'heavy.json'), heavy);
     writeJSON(path.join(STATE, 'predictions.json'), predictions);
