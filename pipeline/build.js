@@ -543,6 +543,17 @@ async function main() {
     log('狀態已更新', STATE);
   }
 
+  // 每日收盤快照存進 data 分支（GitHub 上永久保存，一天一份，台股收盤後與美股收盤後各覆寫一次）
+  if (FULL && args['archive-daily']) {
+    const day = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+    const dir = path.resolve(String(args['archive-daily']));
+    writeJSON(path.join(dir, day.slice(0, 4), `${day}.json`), snapshot);
+    const idx = readJSON(path.join(dir, 'index.json'), { days: [] });
+    if (!idx.days.includes(day)) idx.days.push(day);
+    idx.days.sort(); idx.updated = nowIso;
+    writeJSON(path.join(dir, 'index.json'), idx);
+    log('每日快照已存', day);
+  }
   if (ARCHIVE) {
     const tpe = new Date(Date.now() + 8 * 3600000).toISOString();
     const day = tpe.slice(0, 10), hm = tpe.slice(11, 16).replace(':', '');

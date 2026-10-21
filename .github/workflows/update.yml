@@ -109,7 +109,7 @@ jobs:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: |
           ARGS="--out=out/data --state=state"
-          [ -n "${{ steps.mode.outputs.full }}" ] && ARGS="$ARGS --full=${{ steps.mode.outputs.full }}"
+          [ -n "${{ steps.mode.outputs.full }}" ] && ARGS="$ARGS --full=${{ steps.mode.outputs.full }} --archive-daily=state/archive"
           node pipeline/build.js $ARGS
 
       - name: 組合網站
