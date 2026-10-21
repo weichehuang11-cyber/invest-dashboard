@@ -391,3 +391,6 @@ table.corr { min-width: 0; }
 .tbl.wrap td { white-space: normal; word-break: break-word; }
 
 .topbar { padding-top: env(safe-area-inset-top); }
+
+.nudge { display: block; background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 12px 14px; text-decoration: none; font-size: 14px; }
+.nudge:hover { color: var(--warn); }

@@ -113,7 +113,12 @@ jobs:
           node pipeline/build.js $ARGS
 
       - name: 組合網站
-        run: cp -r site/. out/
+        run: |
+          cp -r site/. out/
+          # 加上版本號，避免手機瀏覽器繼續用舊的程式
+          V=$(git rev-parse --short HEAD)
+          sed -i "s|src=\"app.js\"|src=\"app.js?v=$V\"|; s|href=\"app.css\"|href=\"app.css?v=$V\"|" out/index.html
+          grep -o 'app\.[a-z]*?v=[a-z0-9]*' out/index.html
 
       - name: 推播通知（有設定通知管道才會送）
         id: notify

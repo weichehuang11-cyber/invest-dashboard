@@ -1018,7 +1018,7 @@ ${footer()}`;
   }
 
   function viewJournal() {
-    return `<section class="card"><div class="field"><label for="jn-q">搜尋我的紀錄</label><input id="jn-q" type="search" placeholder="代號、名稱、理由、結論…" autocomplete="off"><span class="hint">同時搜尋論點（含修改紀錄、已結案）與決策紀錄。持股、論點會自動加密備份（到「設定」開啟）。</span></div></section>
+    return `${!SY.get().token ? `<a class="nudge" href="#/settings">⚠️ 論點與紀錄只存在這台裝置。點這裡開啟「加密備份與同步」。</a>` : ''}<section class="card"><div class="field"><label for="jn-q">搜尋我的紀錄</label><input id="jn-q" type="search" placeholder="代號、名稱、理由、結論…" autocomplete="off"><span class="hint">同時搜尋論點（含修改紀錄、已結案）與決策紀錄。持股、論點會自動加密備份（到「設定」開啟）。</span></div></section>
 <section class="card" aria-labelledby="jn-h"><div class="hd"><h2 id="jn-h">我的成績單</h2><span class="note">依你記錄的決定，用之後的實際收盤結算・只存在這台裝置</span></div><div id="jn-body"><p class="loading">計算中…</p></div></section>
 <section class="card" aria-labelledby="md-h"><div class="hd"><h2 id="md-h">我的市場感覺準不準</h2><span class="note">每天在總覽記下感覺，依之後大盤實際走勢統計</span></div><div id="md-body"><p class="loading">計算中…</p></div></section>
 <section class="card" aria-labelledby="th2-h"><div class="hd"><h2 id="th2-h">我的論點</h2><span class="note">每次資料更新都會重新檢查</span></div>${viewThesisList()}</section>${footer()}`;
@@ -1171,7 +1171,7 @@ ${footer()}`;
   function viewPortfolio() {
     const h = H.load(), opts = Object.keys(S.snap.items).map(k => `<option value="${esc(k)}">${esc(k)} ${esc(nameOf(k))}</option>`).join('');
     const rowHtml = (x, i) => `<div class="hrow" data-i="${i}"><input aria-label="代號" list="hold-list" value="${esc(x.key || '')}" placeholder="代號，如 2330、NVDA"><input aria-label="股數" type="number" inputmode="decimal" value="${x.shares ?? ''}" placeholder="股數"><input aria-label="平均成本" type="number" inputmode="decimal" step="any" value="${x.cost ?? ''}" placeholder="成本（原幣）"><button type="button" class="iconbtn" aria-label="刪除這一列" data-del="${i}">✕</button></div>`;
-    return `${h.items.length ? `<section class="card" aria-labelledby="pa-h"><div class="hd"><h2 id="pa-h">組合分析</h2><span class="note">歸因、績效、回撤、相關性、曝險・只在你的裝置上計算</span></div><div id="pa-body"><p class="loading">計算中…</p></div></section>` : ''}
+    return `${!SY.get().token ? `<a class="nudge" href="#/settings">⚠️ 持股只存在這台裝置。點這裡開啟「加密備份與同步」，換手機或清除瀏覽器也不會遺失。</a>` : ''}${h.items.length ? `<section class="card" aria-labelledby="pa-h"><div class="hd"><h2 id="pa-h">組合分析</h2><span class="note">歸因、績效、回撤、相關性、曝險・只在你的裝置上計算</span></div><div id="pa-body"><p class="loading">計算中…</p></div></section>` : ''}
 <section class="card" aria-labelledby="pe-h">
   <div class="hd"><h2 id="pe-h">我的持股</h2><span class="note">只存在這台裝置的瀏覽器，不會上傳到網站。換裝置可用「匯出／匯入」（含論點、決策紀錄、自選、提醒）。</span></div>
   <datalist id="hold-list">${opts}</datalist>
@@ -1473,7 +1473,7 @@ ${footer()}`;
 
   // ── 設定 ────────────────────────────────────────────────────
   function viewSettings() {
-    return `
+    return `${viewSyncSettings()}
 <section class="card" aria-labelledby="st-h"><div class="hd"><h2 id="st-h">設定</h2><span class="note">只存在這台裝置</span></div>
   <form id="st-form" class="form" style="max-width:520px">
     <div class="field"><label for="st-colors">漲跌顏色</label><select id="st-colors"><option value="tw"${cfg.colors === 'tw' ? ' selected' : ''}>台股習慣：紅漲綠跌</option><option value="us"${cfg.colors === 'us' ? ' selected' : ''}>美股習慣：綠漲紅跌</option></select></div>
@@ -1482,7 +1482,8 @@ ${footer()}`;
     <div class="field"><label for="st-host">本機服務位址</label><input id="st-host" value="${esc(cfg.localHost)}" placeholder="localhost"><span class="hint">通常是 localhost；在家中其他裝置使用時可填那台電腦的區網 IP（例如 192.168.1.100）。</span></div>
     <div class="actions"><button class="btn primary" type="submit">儲存</button><button type="button" class="btn" id="st-test">測試連線</button></div>
     <p id="st-msg" class="small" role="status"></p>
-  </form></section>${viewSyncSettings()}`;
+  </form></section>
+<p class="small muted">網站版本 ${esc((document.querySelector('script[src^="app.js"]')?.getAttribute('src').split('v=')[1]) || '開發版')}</p>`;
   }
   function bindSettings() {
     bindSyncSettings();
