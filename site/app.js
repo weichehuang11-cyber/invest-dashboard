@@ -545,11 +545,19 @@ ${footer()}`;
     const sup = o?.sr?.support?.[0], res = o?.sr?.resistance?.[0];
     const vals = [...c, ...m20.filter(isNum), ...m60.filter(isNum), ...(o?.cone || []).flatMap(q => [q[0], q[4]]), ...(sup ? [sup.p] : []), ...(res ? [res.p] : [])];
     let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.05 || 1; lo -= pad; hi += pad;
-    const MOB = window.innerWidth < 760, W = MOB ? 640 : 1200, Hh = MOB ? 330 : 320, FS = MOB ? 20 : 13, x = i => (i / (T - 1) * W).toFixed(1), y = v => (Hh - (v - lo) / (hi - lo) * Hh).toFixed(1);
+    const MOB = window.innerWidth < 760, W = MOB ? 640 : 1200, Hh = MOB ? 330 : 320, FS = MOB ? 19 : 13, GL = MOB ? 92 : 78, x = i => (GL + i / (T - 1) * (W - GL)).toFixed(1), y = v => (Hh - (v - lo) / (hi - lo) * Hh).toFixed(1);
     const path = a => a.map((v, i) => (v == null ? '' : `${a[i - 1] == null ? 'M' : 'L'}${x(i)},${y(v)}`)).join('');
     const band = (a, b2) => { const top = [`${x(N - 1)},${y(c[N - 1])}`, ...o.cone.map((q, j) => `${x(N + j)},${y(q[a])}`)]; const bot = [...o.cone.map((q, j) => `${x(N + j)},${y(q[b2])}`).reverse(), `${x(N - 1)},${y(c[N - 1])}`]; return `M${top.join('L')}L${bot.join('L')}Z`; };
-    const hline = (v, txt, col, below) => `<line x1="0" x2="${x(N - 1)}" y1="${y(v)}" y2="${y(v)}" stroke="${col}" stroke-dasharray="5 4" stroke-width="1.2"/><text x="6" y="${(below ? +y(v) + FS + 2 : +y(v) - 5).toFixed(1)}" font-size="${FS}" fill="${col}">${esc(txt)}</text>`;
-    const grid = [0.25, 0.5, 0.75].map(t => { const v = lo + (hi - lo) * t; return `<line x1="0" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#EEF0F3"/><text x="${W - 4}" y="${(+y(v) - 5).toFixed(1)}" font-size="${FS}" fill="#8A93A3" text-anchor="end">${px(v)}</text>`; }).join('');
+    // 左側留一欄放數字（格線價位、支撐壓力），文字不壓在線上
+    const tags = [];
+    if (res) tags.push({ v: res.p, txt: px(res.p), col: '#B45309', bold: true });
+    if (sup) tags.push({ v: sup.p, txt: px(sup.p), col: '#0E7C4A', bold: true });
+    for (const t of [0.15, 0.5, 0.85]) { const v = lo + (hi - lo) * t; if (!tags.some(g => Math.abs(+y(g.v) - +y(v)) < FS * 1.3)) tags.push({ v, txt: px(v), col: '#8A93A3' }); }
+    // 支撐壓力太接近時，文字上下錯開
+    if (res && sup && Math.abs(+y(res.p) - +y(sup.p)) < FS * 1.2) { tags[0].dy = -FS * 0.6; tags[1].dy = FS * 0.6; }
+    const hline = (v, col) => `<line x1="${GL}" x2="${x(N - 1)}" y1="${y(v)}" y2="${y(v)}" stroke="${col}" stroke-dasharray="5 4" stroke-width="1.4"/>`;
+    const grid = tags.filter(t => !t.bold).map(t => `<line x1="${GL}" x2="${W}" y1="${y(t.v)}" y2="${y(t.v)}" stroke="#EEF0F3"/>`).join('')
+      + tags.map(t => `<text x="${GL - 8}" y="${(+y(t.v) + FS * 0.35 + (t.dy || 0)).toFixed(1)}" text-anchor="end" font-size="${FS}" fill="${t.col}"${t.bold ? ' font-weight="700"' : ''}>${esc(t.txt)}</text>`).join('');
     const f20 = o?.forecast?.h20;
     return `<svg class="cone" viewBox="0 0 ${W} ${Hh + FS + 12}" role="img" aria-label="${esc(label)}近 ${N} 個交易日走勢${f20 ? `，未來 20 個交易日 80% 推論區間 ${px(f20.q[0])} 到 ${px(f20.q[4])}` : ''}">
       ${grid}
@@ -557,12 +565,13 @@ ${footer()}`;
         <path d="${band(4, 0)}" fill="#1F4FD8" fill-opacity=".10"/><path d="${band(3, 1)}" fill="#1F4FD8" fill-opacity=".20"/>
         <path d="M${x(N - 1)},${y(c[N - 1])}${o.cone.map((q, j) => `L${x(N + j)},${y(q[2])}`).join('')}" fill="none" stroke="#1F4FD8" stroke-width="1.5" stroke-dasharray="5 4"/>
         <text x="${(+x(N - 1) + 8).toFixed(1)}" y="${FS + 4}" font-size="${FS}" fill="#5B6270">${MOB ? '推論' : '推論區間（未來 20 日）'}</text>` : ''}
-      ${sup ? hline(sup.p, `支撐 ${px(sup.p)}・${sup.label}`, '#0E7C4A', true) : ''}${res ? hline(res.p, `壓力 ${px(res.p)}・${res.label}`, '#B45309') : ''}
       <path d="${path(m60)}" fill="none" stroke="#B9C0CC" stroke-width="1.5" stroke-dasharray="4 3"/><path d="${path(m20)}" fill="none" stroke="#6E8EEB" stroke-width="1.5"/>
       <path d="${path(c)}" fill="none" stroke="#15181D" stroke-width="2"/>
       <circle cx="${x(N - 1)}" cy="${y(c[N - 1])}" r="4" fill="#15181D"/>
-      <text x="0" y="${Hh + FS + 6}" font-size="${FS}" fill="#8A93A3">${esc(d[0])}</text><text x="${x(N - 1)}" y="${Hh + FS + 6}" font-size="${FS}" fill="#8A93A3" text-anchor="middle">${esc(d[N - 1])}</text>${F && !MOB ? `<text x="${W}" y="${Hh + FS + 6}" font-size="${FS}" fill="#8A93A3" text-anchor="end">＋20 交易日</text>` : ''}</svg>
-      <div class="legend"><span><i style="background:#15181D;height:2px"></i>收盤</span><span><i style="background:#6E8EEB;height:2px"></i>20 日線</span><span><i style="background:#B9C0CC;height:2px"></i>60 日線</span>${F ? '<span><i style="background:rgba(31,79,216,.3)"></i>50% 區間</span><span><i style="background:rgba(31,79,216,.12)"></i>80% 區間</span>' : ''}</div>`;
+      ${sup ? hline(sup.p, '#0E7C4A') : ''}${res ? hline(res.p, '#B45309') : ''}
+      <text x="${GL}" y="${Hh + FS + 6}" font-size="${FS}" fill="#8A93A3">${esc(d[0])}</text><text x="${x(N - 1)}" y="${Hh + FS + 6}" font-size="${FS}" fill="#8A93A3" text-anchor="end">${esc(d[N - 1])}</text>${F && !MOB ? `<text x="${W}" y="${Hh + FS + 6}" font-size="${FS}" fill="#8A93A3" text-anchor="end">＋20 交易日</text>` : ''}</svg>
+      <div class="legend"><span><i style="background:#15181D;height:2px"></i>收盤</span><span><i style="background:#6E8EEB;height:2px"></i>20 日線</span><span><i style="background:#B9C0CC;height:2px"></i>60 日線</span>${F ? '<span><i style="background:rgba(31,79,216,.3)"></i>50% 區間</span><span><i style="background:rgba(31,79,216,.12)"></i>80% 區間</span>' : ''}
+        ${res ? `<span style="color:#B45309"><i style="background:#B45309;height:2px"></i>壓力 ${px(res.p)}（${esc(res.label)}）</span>` : ''}${sup ? `<span style="color:#0E7C4A"><i style="background:#0E7C4A;height:2px"></i>支撐 ${px(sup.p)}（${esc(sup.label)}）</span>` : ''}</div>`;
   }
 
   /** 可靠度：用回測數字說話，並翻成白話 */
@@ -681,26 +690,26 @@ ${footer()}`;
     const m20 = maS(20), m60 = maS(60), stop = it.signal.stop;
     const vals = [...c, ...m20.filter(isNum), ...m60.filter(isNum), ...(isNum(stop) ? [stop] : [])];
     let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.06 || 1; lo -= pad; hi += pad;
-    const MOB = isMob(), W = MOB ? 640 : 1200, Hh = MOB ? 380 : 300, FS = MOB ? 20 : 14, x = i => (i / (n - 1) * W).toFixed(1), y = v => (Hh - (v - lo) / (hi - lo) * Hh).toFixed(1);
-    S.chart = { n, d, c, m20, m60, prev: b.close.slice(-n - 1), off, x, y, W, Hh };
+    const MOB = isMob(), W = MOB ? 640 : 1200, Hh = MOB ? 380 : 300, FS = MOB ? 19 : 14, GL = MOB ? 92 : 78, x = i => (GL + i / (n - 1) * (W - GL)).toFixed(1), y = v => (Hh - (v - lo) / (hi - lo) * Hh).toFixed(1);
+    S.chart = { n, d, c, m20, m60, prev: b.close.slice(-n - 1), off, x, y, W, Hh, GL };
     const path = a => a.map((v, i) => (v == null ? '' : `${a[i - 1] == null ? 'M' : 'L'}${x(i)},${y(v)}`)).join('');
-    const grid = [0.25, 0.5, 0.75].map(t => { const v = lo + (hi - lo) * t; return `<line x1="0" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#EEF0F3"/><text x="4" y="${(+y(v) - 5).toFixed(1)}" font-size="${FS}" fill="#8A93A3">${px(v)}</text>`; }).join('');
+    const grid = [0.15, 0.5, 0.85].map(t => { const v = lo + (hi - lo) * t; return `<line x1="${GL}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#EEF0F3"/><text x="${GL - 8}" y="${(+y(v) + FS * 0.35).toFixed(1)}" text-anchor="end" font-size="${FS}" fill="#8A93A3">${px(v)}</text>`; }).join('');
     const chg = (c[n - 1] / c[0] - 1) * 100;
     return `<div class="chart-top"><div id="xh-read" class="small mono" aria-live="polite">${esc(d[0])} → ${esc(d[n - 1])}・區間 <b class="${cls(chg)}">${pct(chg, 1)}</b></div>
       ${seg('range', String(S.range), [['22', '1 月'], ['66', '3 月'], ['120', '6 月'], ['250', '1 年']])}</div>
       <svg id="pxchart" viewBox="0 0 ${W} ${Hh + FS + 8}" role="img" aria-label="近 ${n} 個交易日收盤價，區間 ${pct(chg, 1)}，20 日線 ${px(m20[n - 1])}，60 日線 ${px(m60[n - 1])}" style="touch-action:pan-y">
       ${grid}<path d="${path(m60)}" fill="none" stroke="#B9C0CC" stroke-width="1.5" stroke-dasharray="4 3"/><path d="${path(m20)}" fill="none" stroke="#6E8EEB" stroke-width="1.5"/>
       <path d="${path(c)}" fill="none" stroke="#15181D" stroke-width="2"/>
-      ${isNum(stop) && stop > lo ? `<line x1="0" x2="${W}" y1="${y(stop)}" y2="${y(stop)}" stroke="#B91C1C" stroke-dasharray="6 4"/><text x="${W - 4}" y="${(+y(stop) - 5).toFixed(1)}" text-anchor="end" font-size="${FS}" fill="#B91C1C">停損 ${px(stop)}</text>` : ''}
+      ${isNum(stop) && stop > lo ? `<line x1="${GL}" x2="${W}" y1="${y(stop)}" y2="${y(stop)}" stroke="#B91C1C" stroke-dasharray="6 4"/><text x="${GL - 8}" y="${(+y(stop) + FS * 0.35).toFixed(1)}" text-anchor="end" font-size="${FS}" font-weight="700" fill="#B91C1C">${px(stop)}</text>` : ''}
       <g id="xh" style="display:none"><line id="xh-l" y1="0" y2="${Hh}" stroke="#15181D" stroke-width="1" stroke-dasharray="3 3"/><circle id="xh-c" r="6" fill="#1F4FD8" stroke="#fff" stroke-width="2"/></g>
-      <rect x="0" y="0" width="${W}" height="${Hh}" fill="transparent" id="xh-hit"/>
-      <text x="0" y="${Hh + FS + 4}" font-size="${FS}" fill="#8A93A3">${esc(d[0])}</text><text x="${W}" y="${Hh + FS + 4}" font-size="${FS}" fill="#8A93A3" text-anchor="end">${esc(d[n - 1])}</text></svg>`;
+      <rect x="${GL}" y="0" width="${W - GL}" height="${Hh}" fill="transparent" id="xh-hit"/>
+      <text x="${GL}" y="${Hh + FS + 4}" font-size="${FS}" fill="#8A93A3">${esc(d[0])}</text><text x="${W}" y="${Hh + FS + 4}" font-size="${FS}" fill="#8A93A3" text-anchor="end">${esc(d[n - 1])}</text></svg>`;
   }
   function bindChart() {
     const svg = $('#pxchart'); if (!svg || !S.chart) return;
     const C = S.chart, g = $('#xh'), rd = $('#xh-read'), base = rd.innerHTML;
     const show = ev => {
-      const r = svg.getBoundingClientRect(), t = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+      const r = svg.getBoundingClientRect(), t = Math.max(0, Math.min(1, (((ev.clientX - r.left) / r.width) * C.W - C.GL) / (C.W - C.GL)));
       const i = Math.round(t * (C.n - 1)), v = C.c[i], pv = i > 0 ? C.c[i - 1] : C.prev[0];
       g.style.display = ''; $('#xh-l').setAttribute('x1', C.x(i)); $('#xh-l').setAttribute('x2', C.x(i));
       $('#xh-c').setAttribute('cx', C.x(i)); $('#xh-c').setAttribute('cy', C.y(v));
@@ -776,7 +785,7 @@ ${viewSizing(it)}
 
   <section class="card chart" aria-labelledby="ta-h"><div class="hd"><h2 id="ta-h">技術面</h2><span class="note">日 K・滑過或按住圖表看每天價格</span><a class="act" href="#/backtest/${encodeURIComponent(key)}">回測這檔</a></div>
     <div class="chart-wrap">${b ? lineChart(b, it) : '<p class="empty">走勢資料載入失敗</p>'}</div>
-    <div class="legend"><span><i style="background:#15181D;height:2px"></i>收盤</span><span><i style="background:#6E8EEB;height:2px"></i>20 日線 ${px(ta.ma20)}</span><span><i style="background:#B9C0CC;height:2px"></i>60 日線 ${px(ta.ma60)}</span>
+    <div class="legend"><span><i style="background:#15181D;height:2px"></i>收盤</span><span><i style="background:#6E8EEB;height:2px"></i>20 日線 ${px(ta.ma20)}</span><span><i style="background:#B9C0CC;height:2px"></i>60 日線 ${px(ta.ma60)}</span>${isNum(g.stop) ? `<span style="color:#B91C1C"><i style="background:#B91C1C;height:2px"></i>停損 ${px(g.stop)}</span>` : ''}
       <span>相對強弱 RSI(14) ${isNum(ta.rsi) ? ta.rsi.toFixed(0) : '—'}</span><span>布林位置 ${isNum(ta.bbPct) ? ta.bbPct.toFixed(0) + '%' : '—'}</span></div></section>
 
   ${it.market === 'tw' ? `<section class="card fold all" data-fold="s-chip" aria-labelledby="ch-h"><div class="hd"><h2 id="ch-h">籌碼</h2><span class="note">${hist.length ? `外資每日買賣超・近 ${hist.length} 個交易日（張）` : esc(c?.source === 'TWSE' ? '只有最新一日（需設定 FinMind 權杖才有歷史）' : '尚無資料')}</span></div>
