@@ -512,7 +512,7 @@ async function main() {
   };
   // 雲端 AI 解讀：收盤後完整更新時產生，盤中沿用上一次的
   if (FULL && process.env.GH_MODELS_TOKEN) {
-    try { heavy.ai = await AI.commentary(snapshot); status.ai = `ok（${heavy.ai.model}）`; } catch (e) { status.ai = 'fail: ' + e.message.slice(0, 80); }
+    try { heavy.ai = await AI.commentary(snapshot); status.ai = `ok（${heavy.ai.model}）`; } catch (e) { status.ai = 'fail: ' + e.message.slice(0, 300); }
   }
   snapshot.ai = heavy.ai || null;
   writeJSON(path.join(OUT, 'snapshot.json'), snapshot);

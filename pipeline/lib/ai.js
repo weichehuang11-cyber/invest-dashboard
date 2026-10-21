@@ -27,9 +27,9 @@ async function chat(messages, { json = false, timeout = 90000 } = {}) {
   const token = process.env.GH_MODELS_TOKEN;
   if (!token) throw new Error('沒有 GH_MODELS_TOKEN');
   const tries = [['https://models.github.ai/inference/chat/completions', MODEL], ['https://models.inference.ai.azure.com/chat/completions', MODEL.replace(/^[^/]+\//, '')]];
-  let err;
-  for (const [url, model] of tries) { try { return await post(url, model, messages, json, token, timeout); } catch (e) { err = e; } }
-  throw err;
+  const errs = [];
+  for (const [url, model] of tries) { try { return await post(url, model, messages, json, token, timeout); } catch (e) { errs.push(`${new URL(url).host}: ${e.message}${e.cause ? ' / ' + (e.cause.code || e.cause.message) : ''}`); } }
+  throw new Error(errs.join(' ｜ '));
 }
 
 const SIG = { BUY: '買進', SELL: '賣出', HOLD: '觀望' };
