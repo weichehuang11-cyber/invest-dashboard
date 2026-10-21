@@ -113,13 +113,13 @@ function analyze(raw, { market, sector } = {}) {
   const rows = Q.map((q, i) => ({
     date: q.date, rev: q.rev, eps: r2(q.eps, 2), ni: q.ni,
     gm: isNum(q.gp) && q.rev ? r2(q.gp / q.rev * 100, 1) : null, om: isNum(q.op) && q.rev ? r2(q.op / q.rev * 100, 1) : null, nm: isNum(q.ni) && q.rev ? r2(q.ni / q.rev * 100, 1) : null,
-    revYoY: r2(yoyOf(i, 'rev'), 1), epsYoY: isNum(q.eps) && isNum(Q[i - 4]?.eps) && Q[i - 4].eps > 0 ? r2((q.eps / Q[i - 4].eps - 1) * 100, 1) : null,
+    revYoY: (v => (isNum(v) && Math.abs(v) < 300 ? r2(v, 1) : null))(yoyOf(i, 'rev')), epsYoY: isNum(q.eps) && isNum(Q[i - 4]?.eps) && Q[i - 4].eps > 0 ? r2((q.eps / Q[i - 4].eps - 1) * 100, 1) : null,
     fcf: q.fcf,
   }));
   const L = Q.length - 1, q = Q[L], last = rows[L], ly = rows[L - 4];
+  const isFin = !rows.some(r => isNum(r.gm)) && market === 'tw';   // 金融股沒有毛利，營收定義也不同
   const t4 = k => sum(Q.slice(-4).map(x => x[k]));
   const ttm = { rev: t4('rev'), ni: t4('ni'), eps: t4('eps'), ocf: t4('ocf'), fcf: t4('fcf') };
-  const isFin = !rows.some(r => isNum(r.gm)) && market === 'tw';   // 金融股沒有毛利
   const ratios = {
     roe: isNum(ttm.ni) && isNum(q.equity) && q.equity > 0 ? ttm.ni / q.equity * 100 : raw.ratios?.roe ?? null,
     debtToEquity: market === 'us' ? (raw.ratios?.debtToEquity ?? (isNum(q.debt) && q.equity > 0 ? q.debt / q.equity * 100 : null)) : (isNum(q.liab) && q.equity > 0 ? q.liab / q.equity * 100 : null),
@@ -130,7 +130,7 @@ function analyze(raw, { market, sector } = {}) {
   };
   // 檢查清單
   const C = [], pos = t => C.push({ tone: 'pos', text: t }), neg = t => C.push({ tone: 'neg', text: t }), neu = t => C.push({ tone: 'neu', text: t });
-  if (isNum(last.revYoY)) {
+  if (isNum(last.revYoY) && !isFin && Math.abs(last.revYoY) < 300) {
     let streak = 0; for (let i = L; i >= 4 && isNum(rows[i].revYoY) && rows[i].revYoY > 0; i--) streak++;
     if (last.revYoY >= 15) pos(`最新一季營收年增 ${last.revYoY.toFixed(0)}%${streak >= 3 ? `，連續 ${streak} 季成長` : ''}`);
     else if (last.revYoY < 0) neg(`最新一季營收年減 ${Math.abs(last.revYoY).toFixed(0)}%`);
@@ -143,7 +143,7 @@ function analyze(raw, { market, sector } = {}) {
     else if (d <= -1) neg(`毛利率 ${last.gm.toFixed(1)}%，比去年同期低 ${Math.abs(d).toFixed(1)} 個百分點`);
   }
   if (isNum(last.om) && isNum(ly?.om)) { const d = last.om - ly.om; if (d >= 1.5) pos(`營業利益率提升到 ${last.om.toFixed(1)}%（去年同期 ${ly.om.toFixed(1)}%），本業獲利能力變好`); else if (d <= -1.5) neg(`營業利益率降到 ${last.om.toFixed(1)}%（去年同期 ${ly.om.toFixed(1)}%）`); }
-  if (isNum(last.epsYoY)) { if (last.epsYoY >= 20) pos(`EPS 年增 ${last.epsYoY.toFixed(0)}%`); else if (last.epsYoY <= -10) neg(`EPS 年減 ${Math.abs(last.epsYoY).toFixed(0)}%`); }
+  if (isNum(last.epsYoY) && last.epsYoY < 300) { if (last.epsYoY >= 20) pos(`EPS 年增 ${last.epsYoY.toFixed(0)}%`); else if (last.epsYoY <= -10) neg(`EPS 年減 ${Math.abs(last.epsYoY).toFixed(0)}%`); }
   else if (isNum(q.eps) && q.eps < 0) neg(`最新一季虧損（EPS ${q.eps.toFixed(2)}）`);
   if (!isFin) {
     if (isNum(ttm.fcf)) { if (ttm.fcf > 0 && isNum(ratios.fcfMargin) && ratios.fcfMargin >= 10) pos(`近 4 季自由現金流為正，占營收 ${ratios.fcfMargin.toFixed(0)}%`); else if (ttm.fcf < 0) neg('近 4 季自由現金流為負（營運現金不足以支應資本支出）'); }

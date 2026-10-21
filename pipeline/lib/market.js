@@ -114,7 +114,7 @@ function twBreadthStats(hist) {
 
 // ── 期交所 ───────────────────────────────────────────────────
 const big5 = buf => { try { return new TextDecoder('big5').decode(buf); } catch (_) { return Buffer.from(buf).toString('latin1'); } };
-async function getBuf(url, timeout = 20000) {
+async function getBuf(url, timeout = 45000) {
   const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), timeout);
   try {
     const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', Accept: '*/*' }, signal: ctl.signal });
@@ -146,7 +146,7 @@ function pickForeignTX(rows) {
 }
 async function taifexForeignTX(date) {
   try {
-    const t = await get('https://openapi.taifex.com.tw/v1/MarketDataOfMajorInstitutionalTradersDetailsOfFuturesContractsBytheDate', { as: 'text', timeout: 20000 });
+    const t = await get('https://openapi.taifex.com.tw/v1/MarketDataOfMajorInstitutionalTradersDetailsOfFuturesContractsBytheDate', { as: 'text', timeout: 35000 });
     const r = pickForeignTX(JSON.parse(stripBom(t)));
     if (r && !r.error) return { ...r, src: 'openapi' };
   } catch (_) { /* 改用 CSV */ }
