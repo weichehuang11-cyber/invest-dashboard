@@ -538,42 +538,6 @@ ${footer()}`;
 
   // ── 指數走勢、技術解讀與推論 ─────────────────────────────────
   /** 走勢圖＋未來 20 個交易日的推論區間（深色 50%、淺色 80%、虛線中位數） */
-  function coneChart(b, o, label) {
-    const N = Math.min(120, b.close.length), c = b.close.slice(-N), d = b.dates.slice(-N), F = o?.cone?.length || 0, T = N + F;
-    const ma = k => b.close.map((_, i) => i < k - 1 ? null : b.close.slice(i - k + 1, i + 1).reduce((s, v) => s + v, 0) / k).slice(-N);
-    const m20 = ma(20), m60 = ma(60);
-    const sup = o?.sr?.support?.[0], res = o?.sr?.resistance?.[0];
-    const vals = [...c, ...m20.filter(isNum), ...m60.filter(isNum), ...(o?.cone || []).flatMap(q => [q[0], q[4]]), ...(sup ? [sup.p] : []), ...(res ? [res.p] : [])];
-    let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.05 || 1; lo -= pad; hi += pad;
-    const MOB = window.innerWidth < 760, W = MOB ? 640 : 1200, Hh = MOB ? 330 : 320, FS = MOB ? 19 : 13, GL = MOB ? 92 : 78, x = i => (GL + i / (T - 1) * (W - GL)).toFixed(1), y = v => (Hh - (v - lo) / (hi - lo) * Hh).toFixed(1);
-    const path = a => a.map((v, i) => (v == null ? '' : `${a[i - 1] == null ? 'M' : 'L'}${x(i)},${y(v)}`)).join('');
-    const band = (a, b2) => { const top = [`${x(N - 1)},${y(c[N - 1])}`, ...o.cone.map((q, j) => `${x(N + j)},${y(q[a])}`)]; const bot = [...o.cone.map((q, j) => `${x(N + j)},${y(q[b2])}`).reverse(), `${x(N - 1)},${y(c[N - 1])}`]; return `M${top.join('L')}L${bot.join('L')}Z`; };
-    // 左側留一欄放數字（格線價位、支撐壓力），文字不壓在線上
-    const tags = [];
-    if (res) tags.push({ v: res.p, txt: px(res.p), col: '#B45309', bold: true });
-    if (sup) tags.push({ v: sup.p, txt: px(sup.p), col: '#0E7C4A', bold: true });
-    for (const t of [0.15, 0.5, 0.85]) { const v = lo + (hi - lo) * t; if (!tags.some(g => Math.abs(+y(g.v) - +y(v)) < FS * 1.3)) tags.push({ v, txt: px(v), col: '#8A93A3' }); }
-    // 支撐壓力太接近時，文字上下錯開
-    if (res && sup && Math.abs(+y(res.p) - +y(sup.p)) < FS * 1.2) { tags[0].dy = -FS * 0.6; tags[1].dy = FS * 0.6; }
-    const hline = (v, col) => `<line x1="${GL}" x2="${x(N - 1)}" y1="${y(v)}" y2="${y(v)}" stroke="${col}" stroke-dasharray="5 4" stroke-width="1.4"/>`;
-    const grid = tags.filter(t => !t.bold).map(t => `<line x1="${GL}" x2="${W}" y1="${y(t.v)}" y2="${y(t.v)}" stroke="#EEF0F3"/>`).join('')
-      + tags.map(t => `<text x="${GL - 8}" y="${(+y(t.v) + FS * 0.35 + (t.dy || 0)).toFixed(1)}" text-anchor="end" font-size="${FS}" fill="${t.col}"${t.bold ? ' font-weight="700"' : ''}>${esc(t.txt)}</text>`).join('');
-    const f20 = o?.forecast?.h20;
-    return `<svg class="cone" viewBox="0 0 ${W} ${Hh + FS + 12}" role="img" aria-label="${esc(label)}近 ${N} 個交易日走勢${f20 ? `，未來 20 個交易日 80% 推論區間 ${px(f20.q[0])} 到 ${px(f20.q[4])}` : ''}">
-      ${grid}
-      ${F ? `<rect x="${x(N - 1)}" y="0" width="${(W - +x(N - 1)).toFixed(1)}" height="${Hh}" fill="#F6F8FC"/>
-        <path d="${band(4, 0)}" fill="#1F4FD8" fill-opacity=".10"/><path d="${band(3, 1)}" fill="#1F4FD8" fill-opacity=".20"/>
-        <path d="M${x(N - 1)},${y(c[N - 1])}${o.cone.map((q, j) => `L${x(N + j)},${y(q[2])}`).join('')}" fill="none" stroke="#1F4FD8" stroke-width="1.5" stroke-dasharray="5 4"/>
-        <text x="${(+x(N - 1) + 8).toFixed(1)}" y="${FS + 4}" font-size="${FS}" fill="#5B6270">${MOB ? '推論' : '推論區間（未來 20 日）'}</text>` : ''}
-      <path d="${path(m60)}" fill="none" stroke="#B9C0CC" stroke-width="1.5" stroke-dasharray="4 3"/><path d="${path(m20)}" fill="none" stroke="#6E8EEB" stroke-width="1.5"/>
-      <path d="${path(c)}" fill="none" stroke="#15181D" stroke-width="2"/>
-      <circle cx="${x(N - 1)}" cy="${y(c[N - 1])}" r="4" fill="#15181D"/>
-      ${sup ? hline(sup.p, '#0E7C4A') : ''}${res ? hline(res.p, '#B45309') : ''}
-      <text x="${GL}" y="${Hh + FS + 6}" font-size="${FS}" fill="#8A93A3">${esc(d[0])}</text><text x="${x(N - 1)}" y="${Hh + FS + 6}" font-size="${FS}" fill="#8A93A3" text-anchor="end">${esc(d[N - 1])}</text>${F && !MOB ? `<text x="${W}" y="${Hh + FS + 6}" font-size="${FS}" fill="#8A93A3" text-anchor="end">＋20 交易日</text>` : ''}</svg>
-      <div class="legend"><span><i style="background:#15181D;height:2px"></i>收盤</span><span><i style="background:#6E8EEB;height:2px"></i>20 日線</span><span><i style="background:#B9C0CC;height:2px"></i>60 日線</span>${F ? '<span><i style="background:rgba(31,79,216,.3)"></i>50% 區間</span><span><i style="background:rgba(31,79,216,.12)"></i>80% 區間</span>' : ''}
-        ${res ? `<span style="color:#B45309"><i style="background:#B45309;height:2px"></i>壓力 ${px(res.p)}（${esc(res.label)}）</span>` : ''}${sup ? `<span style="color:#0E7C4A"><i style="background:#0E7C4A;height:2px"></i>支撐 ${px(sup.p)}（${esc(sup.label)}）</span>` : ''}</div>`;
-  }
-
   /** 可靠度：用回測數字說話，並翻成白話 */
   function relBlock(rel) {
     const r5 = rel?.h5, r20 = rel?.h20;
@@ -614,13 +578,13 @@ ${footer()}`;
     const it = ix[S.idx], b = await loadBars(S.idx);
     return `<div class="hd"><h2 id="ix-h">指數走勢與推論</h2><span class="note">${it.years ? `以 ${it.years} 年日 K 回測` : ''}・${esc(it.marketDate || '')}</span></div>
       ${seg('idx', S.idx, ks.map(k => [k, ix[k].name]))}
-      <div class="ixgrid"><div class="chart"><div class="ixq"><b class="mono" style="font-size:22px">${px(it.price)}</b><span class="mono ${cls(it.changePct)}">${pct(it.changePct)}</span></div>${b ? coneChart(b, it.outlook, it.name) : '<p class="empty">走勢資料載入失敗</p>'}<div class="fh">${outlookLeft(it.outlook)}</div></div>
+      <div class="ixgrid"><div class="chart"><div class="ixq"><b class="mono" style="font-size:22px">${px(it.price)}</b><span class="mono ${cls(it.changePct)}">${pct(it.changePct)}</span></div>${b ? chartHtml('idx', b, { outlook: it.outlook, label: it.name, kind: 'idx' }) : '<p class="empty">走勢資料載入失敗</p>'}<div class="fh">${outlookLeft(it.outlook)}</div></div>
       <div class="opanel fh">${outlookPanel(it.outlook, it.price)}</div></div>`;
   }
   async function fillIndexSection() {
     const box = $('#idx'); if (!box) return;
     const html = await viewIndexSection();
-    if ($('#idx') && S.route === 'home') { box.innerHTML = html; box.hidden = !html; setupFolds(); }
+    if ($('#idx') && S.route === 'home') { box.innerHTML = html; box.hidden = !html; setupFolds(); bindCharts(); }
   }
 
   // ── 財報重點 ──────────────────────────────────────────────────
@@ -682,44 +646,99 @@ ${footer()}`;
     return { pros, cons, pos };
   }
 
-  /** 互動走勢圖：可切換區間，滑鼠移動或手指按住拖曳看每天的價格 */
-  function lineChart(b, it) {
-    const n = Math.min(S.range, b.close.length), off = b.close.length - n;
-    const c = b.close.slice(-n), d = b.dates.slice(-n);
-    const maS = k => b.close.map((_, i) => i < k - 1 ? null : b.close.slice(i - k + 1, i + 1).reduce((s, v) => s + v, 0) / k).slice(-n);
-    const m20 = maS(20), m60 = maS(60), stop = it.signal.stop;
-    const vals = [...c, ...m20.filter(isNum), ...m60.filter(isNum), ...(isNum(stop) ? [stop] : [])];
-    let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.06 || 1; lo -= pad; hi += pad;
-    const MOB = isMob(), W = MOB ? 640 : 1200, Hh = MOB ? 380 : 300, FS = MOB ? 19 : 14, GL = MOB ? 92 : 78, x = i => (GL + i / (n - 1) * (W - GL)).toFixed(1), y = v => (Hh - (v - lo) / (hi - lo) * Hh).toFixed(1);
-    S.chart = { n, d, c, m20, m60, prev: b.close.slice(-n - 1), off, x, y, W, Hh, GL };
-    const path = a => a.map((v, i) => (v == null ? '' : `${a[i - 1] == null ? 'M' : 'L'}${x(i)},${y(v)}`)).join('');
-    const grid = [0.15, 0.5, 0.85].map(t => { const v = lo + (hi - lo) * t; return `<line x1="${GL}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#EEF0F3"/><text x="${GL - 8}" y="${(+y(v) + FS * 0.35).toFixed(1)}" text-anchor="end" font-size="${FS}" fill="#8A93A3">${px(v)}</text>`; }).join('');
-    const chg = (c[n - 1] / c[0] - 1) * 100;
-    return `<div class="chart-top"><div id="xh-read" class="small mono" aria-live="polite">${esc(d[0])} → ${esc(d[n - 1])}・區間 <b class="${cls(chg)}">${pct(chg, 1)}</b></div>
-      ${seg('range', String(S.range), [['22', '1 月'], ['66', '3 月'], ['120', '6 月'], ['250', '1 年']])}</div>
-      <svg id="pxchart" viewBox="0 0 ${W} ${Hh + FS + 8}" role="img" aria-label="近 ${n} 個交易日收盤價，區間 ${pct(chg, 1)}，20 日線 ${px(m20[n - 1])}，60 日線 ${px(m60[n - 1])}" style="touch-action:pan-y">
-      ${grid}<path d="${path(m60)}" fill="none" stroke="#B9C0CC" stroke-width="1.5" stroke-dasharray="4 3"/><path d="${path(m20)}" fill="none" stroke="#6E8EEB" stroke-width="1.5"/>
-      <path d="${path(c)}" fill="none" stroke="#15181D" stroke-width="2"/>
-      ${isNum(stop) && stop > lo ? `<line x1="${GL}" x2="${W}" y1="${y(stop)}" y2="${y(stop)}" stroke="#B91C1C" stroke-dasharray="6 4"/><text x="${GL - 8}" y="${(+y(stop) + FS * 0.35).toFixed(1)}" text-anchor="end" font-size="${FS}" font-weight="700" fill="#B91C1C">${px(stop)}</text>` : ''}
-      <g id="xh" style="display:none"><line id="xh-l" y1="0" y2="${Hh}" stroke="#15181D" stroke-width="1" stroke-dasharray="3 3"/><circle id="xh-c" r="6" fill="#1F4FD8" stroke="#fff" stroke-width="2"/></g>
-      <rect x="${GL}" y="0" width="${W - GL}" height="${Hh}" fill="transparent" id="xh-hit"/>
-      <text x="${GL}" y="${Hh + FS + 4}" font-size="${FS}" fill="#8A93A3">${esc(d[0])}</text><text x="${W}" y="${Hh + FS + 4}" font-size="${FS}" fill="#8A93A3" text-anchor="end">${esc(d[n - 1])}</text></svg>`;
+  // ── 互動走勢圖（指數與個股共用）：期間切換、左右拖動、按住看單日 ──
+  const PC_RANGES = [[10, '10日'], [30, '30日'], [60, '60日'], [90, '90日'], [126, '6月'], [252, '1年'], [756, '3年'], [1260, '5年']];
+  const PCR = {};   // 每張圖的狀態
+  const smaArr = (c, k) => { const o = new Array(c.length).fill(null); let s = 0; for (let i = 0; i < c.length; i++) { s += c[i]; if (i >= k) s -= c[i - k]; if (i >= k - 1) o[i] = s / k; } return o; };
+  function chartHtml(id, b, { outlook = null, stop = null, label = '', kind = 'stock' } = {}) {
+    if (!b?.close?.length) return '<p class="empty">走勢資料載入失敗</p>';
+    const defR = LS.get('pcRange:' + kind, kind === 'idx' ? 126 : 126);
+    PCR[id] = { b, outlook, stop, label, kind, range: defR, offset: 0, ma: { 20: smaArr(b.close, 20), 60: smaArr(b.close, 60), 120: smaArr(b.close, 120), 240: smaArr(b.close, 240) } };
+    const avail = PC_RANGES.filter(([n]) => n <= b.close.length + 5 || n === 10);
+    return `<div class="pc" id="pc-${id}">
+      <div class="seg pc-rng" role="group" aria-label="期間">${avail.map(([n, l]) => `<button type="button" data-pcr="${id}" data-v="${n}" aria-pressed="${n === defR}">${l}</button>`).join('')}</div>
+      <div class="pc-read small mono" aria-live="polite"></div>
+      <div class="pc-svg"></div>
+      <div class="pc-nav"><button type="button" class="btn sm" data-pcn="${id}" data-v="-1" aria-label="往前（較舊）">◀ 較舊</button><span class="small muted pc-pos"></span><button type="button" class="btn sm" data-pcn="${id}" data-v="1" aria-label="往後（較新）">較新 ▶</button><button type="button" class="btn sm" data-pcn="${id}" data-v="0">最新</button></div>
+      <div class="legend pc-leg"></div>
+      <p class="small muted pc-hint" style="margin:0">左右滑動圖表可看更早的走勢；按住或滑鼠移過可看單日數字。</p></div>`;
   }
-  function bindChart() {
-    const svg = $('#pxchart'); if (!svg || !S.chart) return;
-    const C = S.chart, g = $('#xh'), rd = $('#xh-read'), base = rd.innerHTML;
-    const show = ev => {
-      const r = svg.getBoundingClientRect(), t = Math.max(0, Math.min(1, (((ev.clientX - r.left) / r.width) * C.W - C.GL) / (C.W - C.GL)));
-      const i = Math.round(t * (C.n - 1)), v = C.c[i], pv = i > 0 ? C.c[i - 1] : C.prev[0];
-      g.style.display = ''; $('#xh-l').setAttribute('x1', C.x(i)); $('#xh-l').setAttribute('x2', C.x(i));
-      $('#xh-c').setAttribute('cx', C.x(i)); $('#xh-c').setAttribute('cy', C.y(v));
-      const ch = pv ? (v / pv - 1) * 100 : null, fromEnd = (C.c[C.n - 1] / v - 1) * 100;
-      rd.innerHTML = `${esc(C.d[i])}・收盤 <b>${px(v)}</b> <span class="${cls(ch)}">${pct(ch)}</span>・20 日線 ${px(C.m20[i])}・至今 <span class="${cls(fromEnd)}">${pct(fromEnd, 1)}</span>`;
-    };
-    const hide = () => { g.style.display = 'none'; rd.innerHTML = base; };
-    svg.addEventListener('pointermove', show);
-    svg.addEventListener('pointerdown', show);
-    svg.addEventListener('pointerleave', hide);
+  function drawChart(id) {
+    const R = PCR[id], box = $('#pc-' + id); if (!R || !box) return;
+    const b = R.b, all = b.close, L = all.length, n = Math.min(R.range, L);
+    R.offset = Math.max(0, Math.min(L - n, R.offset));
+    const e = L - R.offset, s = e - n, c = all.slice(s, e), d = b.dates.slice(s, e);
+    const latest = R.offset === 0, o = latest ? R.outlook : null, F = o?.cone?.length && n <= 260 ? o.cone.length : 0, T = n + F;
+    const longR = n >= 252, MA = longR ? [[20, '#6E8EEB', ''], [60, '#B9C0CC', '4 3'], [120, '#D99A00', ''], [240, '#7C3AED', '6 3']] : [[20, '#6E8EEB', ''], [60, '#B9C0CC', '4 3']];
+    const mas = MA.map(([k, col, dash]) => ({ k, col, dash, v: R.ma[k].slice(s, e) }));
+    const sup = o?.sr?.support?.[0], res = o?.sr?.resistance?.[0], stop = latest ? R.stop : null;
+    const vals = [...c, ...mas.flatMap(m => m.v.filter(isNum)), ...(F ? o.cone.flatMap(q => [q[0], q[4]]) : []), ...(sup ? [sup.p] : []), ...(res ? [res.p] : []), ...(isNum(stop) ? [stop] : [])];
+    let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.05 || 1; lo -= pad; hi += pad;
+    const MOB = isMob(), W = MOB ? 640 : 1200, Hh = MOB ? 330 : 320, FS = MOB ? 19 : 13, GL = MOB ? 92 : 78;
+    const xw = W - GL - (F ? 0 : 6), x = i => (GL + (T > 1 ? i / (T - 1) : 0) * xw).toFixed(1), y = v => (Hh - (v - lo) / (hi - lo) * Hh).toFixed(1);
+    const path = a => a.map((v, i) => (v == null ? '' : `${a[i - 1] == null ? 'M' : 'L'}${x(i)},${y(v)}`)).join('');
+    const tags = [];
+    if (res) tags.push({ v: res.p, txt: px(res.p), col: '#B45309', bold: true });
+    if (sup) tags.push({ v: sup.p, txt: px(sup.p), col: '#0E7C4A', bold: true });
+    if (isNum(stop) && stop > lo) tags.push({ v: stop, txt: px(stop), col: '#B91C1C', bold: true });
+    for (const t of [0.15, 0.5, 0.85]) { const v = lo + (hi - lo) * t; if (!tags.some(g => Math.abs(+y(g.v) - +y(v)) < FS * 1.3)) tags.push({ v, txt: px(v), col: '#8A93A3' }); }
+    const bolds = tags.filter(t => t.bold).sort((a, b2) => +y(a.v) - +y(b2.v));
+    for (let i = 1; i < bolds.length; i++) { const gap = +y(bolds[i].v) + (bolds[i].dy || 0) - (+y(bolds[i - 1].v) + (bolds[i - 1].dy || 0)); if (gap < FS * 1.15) bolds[i].dy = (bolds[i].dy || 0) + (FS * 1.15 - gap); }
+    const hl = (v, col, dash) => `<line x1="${GL}" x2="${x(n - 1)}" y1="${y(v)}" y2="${y(v)}" stroke="${col}" stroke-dasharray="${dash}" stroke-width="1.4"/>`;
+    const band = (a, b2) => { const top = [`${x(n - 1)},${y(c[n - 1])}`, ...o.cone.map((q, j) => `${x(n + j)},${y(q[a])}`)]; const bot = [...o.cone.map((q, j) => `${x(n + j)},${y(q[b2])}`).reverse(), `${x(n - 1)},${y(c[n - 1])}`]; return `M${top.join('L')}L${bot.join('L')}Z`; };
+    const ticks = [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i);
+    const svg = `<svg viewBox="0 0 ${W} ${Hh + FS + 12}" role="img" aria-label="${esc(R.label)} ${esc(d[0])} 到 ${esc(d[n - 1])} 收盤走勢" style="touch-action:pan-y;user-select:none;-webkit-user-select:none">
+      ${tags.filter(t => !t.bold).map(t => `<line x1="${GL}" x2="${W}" y1="${y(t.v)}" y2="${y(t.v)}" stroke="#EEF0F3"/>`).join('')}
+      ${tags.map(t => `<text x="${GL - 8}" y="${(+y(t.v) + FS * 0.35 + (t.dy || 0)).toFixed(1)}" text-anchor="end" font-size="${FS}" fill="${t.col}"${t.bold ? ' font-weight="700"' : ''}>${esc(t.txt)}</text>`).join('')}
+      ${F ? `<rect x="${x(n - 1)}" y="0" width="${(W - +x(n - 1)).toFixed(1)}" height="${Hh}" fill="#F6F8FC"/><path d="${band(4, 0)}" fill="#1F4FD8" fill-opacity=".10"/><path d="${band(3, 1)}" fill="#1F4FD8" fill-opacity=".20"/>
+        <path d="M${x(n - 1)},${y(c[n - 1])}${o.cone.map((q, j) => `L${x(n + j)},${y(q[2])}`).join('')}" fill="none" stroke="#1F4FD8" stroke-width="1.5" stroke-dasharray="5 4"/><text x="${(+x(n - 1) + 6).toFixed(1)}" y="${FS + 4}" font-size="${FS}" fill="#5B6270">推論</text>` : ''}
+      ${sup ? hl(sup.p, '#0E7C4A', '5 4') : ''}${res ? hl(res.p, '#B45309', '5 4') : ''}${isNum(stop) && stop > lo ? hl(stop, '#B91C1C', '6 4') : ''}
+      ${mas.map(m => `<path d="${path(m.v)}" fill="none" stroke="${m.col}" stroke-width="1.5"${m.dash ? ` stroke-dasharray="${m.dash}"` : ''}/>`).join('')}
+      <path d="${path(c)}" fill="none" stroke="#15181D" stroke-width="${n > 400 ? 1.4 : 2}"/>
+      ${latest ? `<circle cx="${x(n - 1)}" cy="${y(c[n - 1])}" r="4" fill="#15181D"/>` : ''}
+      <g class="xh" style="display:none"><line y1="0" y2="${Hh}" stroke="#15181D" stroke-width="1" stroke-dasharray="3 3"/><circle r="6" fill="#1F4FD8" stroke="#fff" stroke-width="2"/></g>
+      ${ticks.map((t, k) => `<text x="${x(t)}" y="${Hh + FS + 6}" font-size="${FS}" fill="#8A93A3" text-anchor="${k === 0 ? 'start' : k === ticks.length - 1 ? 'end' : 'middle'}">${esc(d[t])}</text>`).join('')}</svg>`;
+    box.querySelector('.pc-svg').innerHTML = svg;
+    const chg = (c[n - 1] / c[0] - 1) * 100;
+    R.view = { s, e, n, c, d, x, y, W, GL, xw, T, mas, prev: all[s - 1] };
+    R.base = `${esc(d[0])} → ${esc(d[n - 1])}・區間 <b class="${cls(chg)}">${pct(chg, 1)}</b>${!latest ? '・<span class="bad-text">歷史區段</span>' : ''}`;
+    box.querySelector('.pc-read').innerHTML = R.base;
+    box.querySelector('.pc-pos').textContent = latest ? '' : `往前 ${R.offset} 個交易日`;
+    box.querySelectorAll('[data-pcn]').forEach(bt => { const v = +bt.dataset.v; bt.disabled = v === 1 || v === 0 ? latest : R.offset >= L - n; });
+    box.querySelector('.pc-nav').hidden = n >= L;
+    box.querySelector('.pc-leg').innerHTML = `<span><i style="background:#15181D;height:2px"></i>收盤</span>${mas.map(m => `<span><i style="background:${m.col};height:2px"></i>${m.k} 日線${m.k === 240 ? '（年線）' : m.k === 60 ? '（季線）' : ''}</span>`).join('')}${F ? '<span><i style="background:rgba(31,79,216,.3)"></i>50% 推論區間</span><span><i style="background:rgba(31,79,216,.12)"></i>80% 推論區間</span>' : ''}${res ? `<span style="color:#B45309"><i style="background:#B45309;height:2px"></i>壓力 ${px(res.p)}（${esc(res.label)}）</span>` : ''}${sup ? `<span style="color:#0E7C4A"><i style="background:#0E7C4A;height:2px"></i>支撐 ${px(sup.p)}（${esc(sup.label)}）</span>` : ''}${isNum(stop) ? `<span style="color:#B91C1C"><i style="background:#B91C1C;height:2px"></i>停損 ${px(stop)}</span>` : ''}`;
+  }
+  function bindCharts() {
+    document.querySelectorAll('.pc').forEach(box => {
+      const id = box.id.slice(3); if (!PCR[id]) return;
+      drawChart(id);
+      if (box.dataset.bound) return; box.dataset.bound = '1';
+      const area = box.querySelector('.pc-svg');
+      let down = null;
+      const idxAt = ev => { const R = PCR[id], V = R.view, svg = area.querySelector('svg'); if (!svg) return null; const r = svg.getBoundingClientRect(); const ux = (ev.clientX - r.left) / r.width * V.W; const t = (ux - V.GL) / V.xw; return Math.max(0, Math.min(V.n - 1, Math.round(t * (V.T - 1)))); };
+      const show = ev => {
+        const R = PCR[id], V = R.view, i = idxAt(ev); if (i == null) return;
+        const g = area.querySelector('.xh'); if (!g) return;
+        g.style.display = ''; g.querySelector('line').setAttribute('x1', V.x(i)); g.querySelector('line').setAttribute('x2', V.x(i));
+        g.querySelector('circle').setAttribute('cx', V.x(i)); g.querySelector('circle').setAttribute('cy', V.y(V.c[i]));
+        const pv = i > 0 ? V.c[i - 1] : V.prev, ch = isNum(pv) ? (V.c[i] / pv - 1) * 100 : null, toEnd = (V.c[V.n - 1] / V.c[i] - 1) * 100;
+        box.querySelector('.pc-read').innerHTML = `${esc(V.d[i])}・收盤 <b>${px(V.c[i])}</b> <span class="${cls(ch)}">${pct(ch)}</span>・20 日線 ${px(V.mas[0].v[i])}・到區間結束 <span class="${cls(toEnd)}">${pct(toEnd, 1)}</span>`;
+      };
+      const hide = () => { const g = area.querySelector('.xh'); if (g) g.style.display = 'none'; const R = PCR[id]; box.querySelector('.pc-read').innerHTML = R.base; };
+      area.addEventListener('pointerdown', ev => { down = { x: ev.clientX, off: PCR[id].offset, moved: false }; show(ev); });
+      area.addEventListener('pointermove', ev => {
+        if (!down) { if (ev.pointerType === 'mouse') show(ev); return; }
+        const dx = ev.clientX - down.x;
+        if (!down.moved && Math.abs(dx) < 10) { show(ev); return; }
+        down.moved = true;
+        const R = PCR[id], V = R.view, svg = area.querySelector('svg'), pxPerBar = svg.getBoundingClientRect().width * (V.xw / V.W) / Math.max(1, V.T - 1);
+        const off = Math.round(down.off + dx / pxPerBar);
+        if (off !== R.offset) { R.offset = off; drawChart(id); }
+      });
+      const end = () => { down = null; };
+      area.addEventListener('pointerup', end); area.addEventListener('pointercancel', end);
+      area.addEventListener('pointerleave', () => { down = null; hide(); });
+    });
   }
 
   function viewStock(key, b) {
@@ -763,7 +782,7 @@ ${viewOwnership(it)}
 ${viewSizing(it)}
 
 <section class="card fold" data-fold="s-ol" aria-labelledby="ol-h"><div class="hd"><h2 id="ol-h">技術解讀與走勢推論</h2><span class="note">日 K・規則化解讀＋歷史模擬推論，附回測可靠度</span></div>
-  <div class="ixgrid"><div class="chart">${b ? coneChart(b, it.outlook, it.name) : ''}<div class="fh">${outlookLeft(it.outlook)}</div></div><div class="opanel fh">${outlookPanel(it.outlook, it.price)}</div></div>
+  <div class="ixgrid"><div class="chart"><div class="fh">${outlookLeft(it.outlook)}</div></div><div class="opanel fh">${outlookPanel(it.outlook, it.price)}</div></div>
 </section>
 
 <div class="grid2">
@@ -783,10 +802,9 @@ ${viewSizing(it)}
       <div><dt>近 1 個月報酬</dt><dd class="${cls(ta.ret21)}">${pct(ta.ret21, 1)}</dd></div><div><dt>近 3 個月報酬</dt><dd class="${cls(ta.ret63)}">${pct(ta.ret63, 1)}</dd></div>`}
     </dl>${it.market === 'us' && !it.fund ? '<p class="small muted" style="margin:0">基本面於美股收盤後更新。</p>' : ''}</section>
 
-  <section class="card chart" aria-labelledby="ta-h"><div class="hd"><h2 id="ta-h">技術面</h2><span class="note">日 K・滑過或按住圖表看每天價格</span><a class="act" href="#/backtest/${encodeURIComponent(key)}">回測這檔</a></div>
-    <div class="chart-wrap">${b ? lineChart(b, it) : '<p class="empty">走勢資料載入失敗</p>'}</div>
-    <div class="legend"><span><i style="background:#15181D;height:2px"></i>收盤</span><span><i style="background:#6E8EEB;height:2px"></i>20 日線 ${px(ta.ma20)}</span><span><i style="background:#B9C0CC;height:2px"></i>60 日線 ${px(ta.ma60)}</span>${isNum(g.stop) ? `<span style="color:#B91C1C"><i style="background:#B91C1C;height:2px"></i>停損 ${px(g.stop)}</span>` : ''}
-      <span>相對強弱 RSI(14) ${isNum(ta.rsi) ? ta.rsi.toFixed(0) : '—'}</span><span>布林位置 ${isNum(ta.bbPct) ? ta.bbPct.toFixed(0) + '%' : '—'}</span></div></section>
+  <section class="card chart" aria-labelledby="ta-h"><div class="hd"><h2 id="ta-h">技術面</h2><span class="note">日 K・期間可切換、左右滑動看更早</span><a class="act" href="#/backtest/${encodeURIComponent(key)}">回測這檔</a></div>
+    ${b ? chartHtml('stk', b, { outlook: it.outlook, stop: it.signal.stop, label: `${key} ${it.name}` }) : '<p class="empty">走勢資料載入失敗</p>'}
+    <div class="legend"><span>20 日線 ${px(ta.ma20)}</span><span>60 日線 ${px(ta.ma60)}</span><span>相對強弱 RSI(14) ${isNum(ta.rsi) ? ta.rsi.toFixed(0) : '—'}</span><span>布林位置 ${isNum(ta.bbPct) ? ta.bbPct.toFixed(0) + '%' : '—'}</span></div></section>
 
   ${it.market === 'tw' ? `<section class="card fold all" data-fold="s-chip" aria-labelledby="ch-h"><div class="hd"><h2 id="ch-h">籌碼</h2><span class="note">${hist.length ? `外資每日買賣超・近 ${hist.length} 個交易日（張）` : esc(c?.source === 'TWSE' ? '只有最新一日（需設定 FinMind 權杖才有歷史）' : '尚無資料')}</span></div>
     ${hist.length ? `<div class="flows" style="grid-template-columns:repeat(${hist.length},minmax(0,1fr))" role="img" aria-label="外資近 ${hist.length} 日買賣超">${hist.map(h => `<div><div class="p"><div style="height:${h.foreign > 0 ? h.foreign / fmx * 100 : 0}%"></div></div><div class="n"><div style="height:${h.foreign < 0 ? -h.foreign / fmx * 100 : 0}%"></div></div></div>`).join('')}</div>` : ''}
@@ -842,7 +860,7 @@ ${footer()}`;
   }
 
   function bindStock(key) {
-    bindChart();
+    bindCharts();
     const cap = $('#sz-cap'); if (cap) cap.onchange = () => { LS.set('sizingCap', +cap.value || 0); render(); };
     const f = $('#al-form');
     if (f) {
@@ -1391,7 +1409,7 @@ ${(h.log || []).length ? `<section class="card" aria-labelledby="hl2-h"><div cla
     const opts = Object.values(S.snap.items).map(it => `<option value="${esc(it.key)}"${BT.scope === it.key ? ' selected' : ''}>${esc(it.key)} ${esc(it.name)}</option>`).join('');
     const f = (id, label, val, step, hint) => `<div class="field"><label for="${id}">${label}</label><input id="${id}" type="number" step="${step}" value="${val}" inputmode="decimal">${hint ? `<span class="hint">${hint}</span>` : ''}</div>`;
     return `<div><a href="#/scorecard" class="small">← 系統成績</a></div>
-<section class="card" aria-labelledby="bt-h"><div class="hd"><h2 id="bt-h">策略回測</h2><span class="note">如果過去照技術面訊號操作，結果會怎樣・在你的瀏覽器計算</span></div>
+<section class="card" aria-labelledby="bt-h"><div class="hd"><h2 id="bt-h">策略回測</h2><span class="note">如果過去 5 年照技術面訊號操作，結果會怎樣・在你的瀏覽器計算</span></div>
   <form id="bt-form" class="btform">
     <div class="field"><label for="bt-scope">標的</label><select id="bt-scope"><option value="all"${BT.scope === 'all' ? ' selected' : ''}>全部觀察清單（每檔相同資金）</option><option value="tw"${BT.scope === 'tw' ? ' selected' : ''}>台股觀察清單</option><option value="us"${BT.scope === 'us' ? ' selected' : ''}>美股觀察清單</option>${opts}</select></div>
     ${f('bt-buy', '買進：技術分數 ≥', BT.buy, 1, '系統預設 63')}
@@ -1458,7 +1476,7 @@ ${footer()}`;
         ${res[0].r.open ? `<p class="small" style="margin:0">目前持有中：${esc(res[0].r.open.date)} 以 ${px(res[0].r.open.px)} 進場，未實現 <b class="${cls(res[0].r.open.unreal)}">${pct(res[0].r.open.unreal, 1)}</b></p>` : ''}</div>`
         : `<div><b class="small">各檔結果（依「贏過一直持有」排序）</b><div class="tbl-box"><table class="tbl rtbl"><thead><tr><th>標的</th><th class="num">策略</th><th class="num">一直持有</th><th class="num">差異</th><th class="num">已平倉</th><th class="num">勝率</th><th class="num">最大回撤</th></tr></thead><tbody>
         ${per.map(p => `<tr><td><a href="#" data-btkey="${esc(p.key)}">${esc(p.key)}</a> <span class="small muted">${esc(p.name)}</span>${p.open ? ' <span class="tag buy">持有中</span>' : ''}</td><td class="num ${cls(p.s)}">${pct(p.s, 1)}</td><td class="num ${cls(p.b)}">${pct(p.b, 1)}</td><td class="num ${cls(p.s - p.b)}"><b>${pct(p.s - p.b, 1)}</b></td><td class="num">${p.n}</td><td class="num">${p.win == null ? '—' : p.win.toFixed(0) + '%'}</td><td class="num down">${pct(p.mdd, 1)}</td></tr>`).join('')}</tbody></table></div></div>`}
-      <p class="small muted" style="margin:0">規則：收盤後計算技術分數（與系統相同公式，不含 AI 模型與 VIX 門檻調整），隔天開盤成交；停損停利在盤中觸價成交，跳空時以開盤價計。已扣交易成本，未計股利。歷史約 2 年。</p>`;
+      <p class="small muted" style="margin:0">規則：收盤後計算技術分數（與系統相同公式，不含 AI 模型與 VIX 門檻調整），隔天開盤成交；停損停利在盤中觸價成交，跳空時以開盤價計。已扣交易成本，未計股利。歷史約 5 年。</p>`;
   }
   function bindBacktest() {
     const read = () => { BT.scope = $('#bt-scope').value; BT.buy = +$('#bt-buy').value || BT_DEF.buy; BT.sell = +$('#bt-sell').value || BT_DEF.sell; BT.stopAtr = +$('#bt-stop').value || 0; BT.takePct = +$('#bt-take').value || 0; BT.maxDays = +$('#bt-days').value || 0; BT.costTW = +$('#bt-ctw').value || 0; BT.costUS = +$('#bt-cus').value || 0; BT.trend = $('#bt-trend').checked; LS.set('bt', BT); };
@@ -1785,11 +1803,14 @@ ${footer()}`;
     if (SY.get().token) syncNow(false).then(() => { if (!['settings', 'portfolio'].includes(S.route)) render(); });
     window.addEventListener('hashchange', render);
     document.addEventListener('click', e => {
+      const pr = e.target.closest('[data-pcr]');
+      if (pr) { const R = PCR[pr.dataset.pcr]; if (R) { R.range = +pr.dataset.v; R.offset = 0; LS.set('pcRange:' + R.kind, R.range); pr.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === pr)); drawChart(pr.dataset.pcr); } return; }
+      const pn = e.target.closest('[data-pcn]');
+      if (pn) { const R = PCR[pn.dataset.pcn]; if (R) { const v = +pn.dataset.v, step = Math.max(5, Math.round(R.range / 2)); R.offset = v === 0 ? 0 : R.offset - v * step; drawChart(pn.dataset.pcn); } return; }
       const f = e.target.closest('[data-of]');
       if (f) {
         const k = f.dataset.of, v = f.dataset.v;
         if (k === 'idx') { S.idx = v; LS.set('idx', v); fillIndexSection(); return; }
-        if (k === 'range') { S.range = +v; LS.set('range', S.range); const b = S.bars[S.route.slice(2).toUpperCase()]; const box = $('#pxchart')?.closest('.card'); if (b && box) { const it = S.snap.items[b.key]; box.querySelector('.chart-wrap').innerHTML = lineChart(b, it); bindChart(); } return; }
         if (k === 'reset') { e.preventDefault(); UI.mk = 'all'; UI.cat = 'all'; UI.sort = 'score'; LS.set('oppF', UI); const bx = $('#opps'); if (bx) bx.innerHTML = viewOpps(S.route === 'all' ? 0 : isMob() ? 6 : 10); return; }
         UI[k] = v; LS.set('oppF', UI);
         const box = $('#opps'); if (box) box.innerHTML = viewOpps(S.route === 'all' ? 0 : isMob() ? 6 : 10);

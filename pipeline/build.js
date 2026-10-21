@@ -142,7 +142,8 @@ async function main() {
   // ── 1. 日 K + 報價 ─────────────────────────────────────────────
   const keys = [...wl.us, ...wl.tw, ...Object.keys(INDEX), ...Object.keys(SECTORS), 'RSP', 'SPY', '^VIX3M'];
   const daily = {};
-  await mapSeries(keys, async k => { const d = await Yahoo.daily(k); if (d) daily[k] = d; }, 300);
+  const wset0 = new Set([...wl.us, ...wl.tw]);
+  await mapSeries(keys, async k => { const d = await Yahoo.daily(k, wset0.has(k) ? '5y' : '2y'); if (d) daily[k] = d; }, 300);   // 觀察清單抓 5 年（走勢圖 3／5 年、回測），其他 2 年
   // 指數另抓 10 年日 K：走勢推論與回測需要較長歷史
   const IDX = ['^TWII', '^GSPC', '^IXIC', '^SOX'];
   const longDaily = {};
@@ -517,7 +518,7 @@ async function main() {
   writeJSON(path.join(OUT, 'snapshot.json'), snapshot);
   for (const key of Object.keys(items)) {
     const d = daily[key];
-    const n = 520, sl = a => a.slice(-n);
+    const n = 1260, sl = a => a.slice(-n);
     writeJSON(path.join(OUT, 'bars', `${key.replace(/[^A-Za-z0-9_.-]/g, '_')}.json`), {
       key, dates: sl(d.bars.dates), open: sl(d.bars.open).map(v => r2(v, 4)), high: sl(d.bars.high).map(v => r2(v, 4)),
       low: sl(d.bars.low).map(v => r2(v, 4)), close: sl(d.bars.close).map(v => r2(v, 4)), volume: sl(d.bars.volume),
@@ -529,7 +530,7 @@ async function main() {
   // 大盤日 K（個人決策紀錄用來比較「同期大盤」）
   for (const key of [...IDX, 'USDTWD=X']) {
     const d = longDaily[key] || daily[key]; if (!d) continue;
-    const sl = a => a.slice(-260);
+    const sl = a => a.slice(-1260);
     writeJSON(path.join(OUT, 'bars', `${key.replace(/[^A-Za-z0-9_.-]/g, '_')}.json`), {
       key, dates: sl(d.bars.dates), open: sl(d.bars.open).map(v => r2(v, 4)), high: sl(d.bars.high).map(v => r2(v, 4)),
       low: sl(d.bars.low).map(v => r2(v, 4)), close: sl(d.bars.close).map(v => r2(v, 4)), volume: sl(d.bars.volume),

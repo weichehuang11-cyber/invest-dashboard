@@ -407,3 +407,13 @@ tr.clk { cursor: pointer; }
 tr.clk:hover td, tr.clk:active td { background: var(--acc-bg); }
 .tbl.cm td, .tbl.cm th { padding: 8px 6px; }
 .tbl.cm a { color: var(--ink); font-weight: 600; text-decoration: none; }
+
+/* 互動走勢圖 */
+.pc { display: flex; flex-direction: column; gap: 8px; }
+.pc-rng { display: flex; width: 100%; overflow-x: auto; scrollbar-width: none; }
+.pc-rng::-webkit-scrollbar { display: none; }
+.pc-rng button { flex: 1 0 auto; padding: 0 8px; min-height: 32px; font-size: 13px; }
+.pc-read { min-height: 20px; color: var(--ink2); }
+.pc-svg svg { width: 100%; height: auto; display: block; cursor: crosshair; }
+.pc-nav { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.pc-nav .pc-pos { flex: 1; text-align: center; }
