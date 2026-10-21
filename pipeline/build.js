@@ -301,6 +301,13 @@ async function main() {
       predictions: predictions.filter(p => p.key === key).slice(-15),
     });
   }
+  // 大盤日 K（個人決策紀錄用來比較「同期大盤」）
+  for (const key of ['^TWII', '^GSPC']) {
+    const d = daily[key]; if (!d) continue;
+    writeJSON(path.join(OUT, 'bars', `${key.replace(/[^A-Za-z0-9_.-]/g, '_')}.json`), {
+      key, dates: d.bars.dates.slice(-260), close: d.bars.close.slice(-260).map(v => r2(v, 4)),
+    });
+  }
   log('輸出完成', OUT);
 
   // 狀態只在收盤後完整更新時寫入（盤中更新只讀取）

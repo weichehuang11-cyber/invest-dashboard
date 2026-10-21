@@ -239,7 +239,7 @@
       const c = s.changes.find(x => x.key === r.key);
       if (c) holdChanges.push({ ...c, tag: c.tag, title: '（持有中）' + c.title });
     }
-    const changes = [...S.alertsHit, ...holdChanges, ...s.changes.filter(c => !P.rows.some(r => r.key === c.key))].slice(0, 10);
+    const changes = [...S.alertsHit, ...thesisAlerts(), ...holdChanges, ...s.changes.filter(c => !P.rows.some(r => r.key === c.key))].slice(0, 10);
     return `
 <section class="verdict" aria-labelledby="v-h">
   <div class="l">
@@ -518,8 +518,11 @@ ${footer()}`;
   </div>
 </section>
 
+${viewThesisCard(key)}
+${viewDecideCard(key)}
+
 <section class="card" aria-labelledby="th-h">
-  <div class="hd"><h2 id="th-h">投資論點</h2><span class="note">依資料自動整理</span></div>
+  <div class="hd"><h2 id="th-h">系統觀點</h2><span class="note">依公開資料自動整理（和你的論點對照看）</span></div>
   <p style="margin:0;font-size:17px;font-weight:500">${SIG[g.sig]}（${g.score} 分）：${T.pros.length} 項支持、${T.cons.length} 項風險。${isNum(g.stop) ? `跌破 ${px(g.stop)}（2 倍日線 ATR）宜停損。` : ''}</p>
   <div id="ai-stock"></div>
   ${S.local.llm ? `<form id="ask" class="ask"><label for="ask-q" class="sr">問本機 AI</label><input id="ask-q" placeholder="問本機 AI，例如：現在適合加碼嗎？停損要設多少？" autocomplete="off"><button class="btn primary" type="submit">問</button></form><div id="ask-a"></div>` : ''}
@@ -625,13 +628,197 @@ ${footer()}`;
     };
   }
 
+  // ── 我的論點與決策紀錄（只存在這台裝置）────────────────────
+  const J = {
+    load: () => Object.assign({ theses: {}, decisions: [] }, LS.get('journal', {})),
+    save: j => LS.set('journal', j),
+  };
+  /** 可自動檢查的出場／警示條件（全部用網站已有的資料判斷） */
+  const COND = {
+    priceBelow: { label: '價格跌破', unit: '元', need: true, check: (it, v) => [it.price <= v, `現價 ${px(it.price)}`] },
+    priceAbove: { label: '價格漲到（目標價）', unit: '元', need: true, check: (it, v) => [it.price >= v, `現價 ${px(it.price)}`] },
+    lossPct: { label: '從我的成本虧損超過', unit: '%', need: true, check: (it, v, ctx) => { const c = ctx.cost; if (!isNum(c)) return [null, '沒有成本資料（到持股頁輸入，或記一筆「我買了」）']; const r = (it.price / c - 1) * 100; return [r <= -v, `目前 ${pct(r, 1)}（成本 ${px(c)}）`]; } },
+    belowMa20: { label: '收盤跌破 20 日線', check: it => isNum(it.ta?.ma20) ? [it.price < it.ta.ma20, `20 日線 ${px(it.ta.ma20)}`] : [null, '無資料'] },
+    belowMa60: { label: '收盤跌破 60 日線', check: it => isNum(it.ta?.ma60) ? [it.price < it.ta.ma60, `60 日線 ${px(it.ta.ma60)}`] : [null, '無資料'] },
+    foreignSell: { label: '外資連續賣超（天）', unit: '天', need: true, check: (it, v) => isNum(it.chip?.foreignStreak) ? [it.chip.foreignStreak <= -v, it.chip.foreignStreak < 0 ? `目前連賣 ${-it.chip.foreignStreak} 天` : it.chip.foreignStreak > 0 ? `目前連買 ${it.chip.foreignStreak} 天` : '外資無連續買賣'] : [null, '無籌碼資料'] },
+    revenueNeg: { label: '月營收轉為年減', check: it => isNum(it.fund?.revenueYoY) ? [it.fund.revenueYoY < 0, `月營收年增 ${pct(it.fund.revenueYoY, 1)}`] : [null, '無營收資料'] },
+    rsiAbove: { label: 'RSI 過熱（高於）', unit: '', need: true, check: (it, v) => isNum(it.ta?.rsi) ? [it.ta.rsi >= v, `RSI ${it.ta.rsi.toFixed(0)}`] : [null, '無資料'] },
+    scoreBelow: { label: '綜合分數低於', unit: '分', need: true, check: (it, v) => [it.signal.score < v, `目前 ${it.signal.score} 分`] },
+    sellSignal: { label: '出現賣出訊號', check: it => [it.signal.sig === 'SELL', `目前 ${SIG[it.signal.sig]}`] },
+    earnings: { label: '財報前（天內）', unit: '天', need: true, check: (it, v) => { const e = it.fund?.earningsDate; if (!e) return [null, '無財報日']; const d = Math.round((Date.parse(e) - Date.now()) / 86400000); return [d >= 0 && d <= v, `財報 ${e}（${d} 天後）`]; } },
+  };
+  function costOf(key) {
+    const h = H.load().items.find(x => x.key === key); if (h && isNum(h.cost)) return h.cost;
+    const b = J.load().decisions.filter(d => d.key === key && d.action === 'buy').pop(); return b ? b.price : null;
+  }
+  function checkThesis(key) {
+    const t = J.load().theses[key], it = S.snap.items[key]; if (!t || !it) return null;
+    const ctx = { cost: costOf(key) };
+    const rows = (t.conds || []).map(c => { const d = COND[c.type]; if (!d) return null; const [hit, now] = d.check(it, c.value, ctx); return { ...c, label: d.label + (d.need ? ` ${c.value}${!d.unit || d.unit === '%' ? (d.unit || '') : ' ' + d.unit}` : ''), hit, now }; }).filter(Boolean);
+    return { t, rows, hits: rows.filter(r => r.hit) };
+  }
+  function thesisAlerts() {
+    const out = [];
+    for (const k of Object.keys(J.load().theses)) { const r = checkThesis(k); if (r?.hits.length) out.push({ key: k, tag: '論點', title: `${k} ${nameOf(k)}：你設定的條件「${r.hits.map(h => h.label).join('、')}」已觸發`, detail: '回頭看你當初的論點，決定是否照計畫執行' }); }
+    return out;
+  }
+
+  /** 決策當下的情境（之後用來找出你的習慣） */
+  function contextOf(key) {
+    const it = S.snap.items[key], ta = it.ta || {}, vix = S.snap.env.find(e => e.key === 'vix')?.value;
+    return { sig: it.signal.sig, score: it.signal.score, rsi: isNum(ta.rsi) ? Math.round(ta.rsi) : null, chg: isNum(it.changePct) ? +it.changePct.toFixed(2) : null,
+      aboveMa20: isNum(ta.ma20) ? it.price > ta.ma20 : null, foreign: it.chip?.foreignStreak ?? null, vix: isNum(vix) ? +vix.toFixed(1) : null, market: S.snap.verdict.level, ret21: isNum(ta.ret21) ? +ta.ret21.toFixed(1) : null };
+  }
+  const ACT = { buy: '我買了', sell: '我賣了', hold: '決定不動' };
+  const TAGS = ['技術突破', '跌深反彈', '法人買超', '基本面', '財報／消息', '跟著模型', '別人推薦', '直覺', '停損', '獲利了結', '資金調度'];
+
+  /** 用日 K 結算每筆決策 1／5／20 個交易日後的結果，並與同期大盤比較 */
+  async function scoreDecisions() {
+    const ds = J.load().decisions; if (!ds.length) return [];
+    const keys = [...new Set(ds.map(d => d.key))];
+    const bars = {}; await Promise.all([...keys, '^TWII', '^GSPC'].map(async k => { bars[k] = await loadBars(k); }));
+    const at = (b, date, n) => { if (!b) return null; const i = b.dates.findIndex(d => d >= date); if (i < 0) return null; const j = i + n; return j < b.dates.length ? b.close[j] : null; };
+    return ds.map(d => {
+      const b = bars[d.key], bm = bars[d.market === 'us' ? '^GSPC' : '^TWII'], day = d.at.slice(0, 10), r = {};
+      for (const n of [1, 5, 20]) {
+        const p = at(b, day, n); if (!isNum(p)) continue;
+        const raw = (p / d.price - 1) * 100;
+        const m0 = at(bm, day, 0), m1 = at(bm, day, n), mk = isNum(m0) && isNum(m1) ? (m1 / m0 - 1) * 100 : null;
+        // 買進看漲幅；賣出看「避開的跌幅」；不動看持有的漲跌
+        const eff = d.action === 'sell' ? -raw : raw;
+        r[n] = { raw, eff, mk, ex: isNum(mk) ? eff - (d.action === 'sell' ? -mk : mk) : null, win: d.action === 'hold' ? null : eff > 0.5 ? true : eff < -0.5 ? false : null };
+      }
+      return { ...d, r };
+    });
+  }
+  function insights(rows) {
+    const done = rows.filter(d => d.r[5] && d.action !== 'hold');
+    const grp = (name, f) => { const g = done.filter(f); if (g.length < 3) return null; const avg = g.reduce((s, d) => s + d.r[5].eff, 0) / g.length; const win = g.filter(d => d.r[5].win).length / g.length * 100; return { name, n: g.length, avg, win }; };
+    const list = [
+      grp('買在 RSI 70 以上（追高）', d => d.action === 'buy' && d.ctx?.rsi >= 70),
+      grp('買在 RSI 30 以下（抄底）', d => d.action === 'buy' && d.ctx?.rsi != null && d.ctx.rsi <= 30),
+      grp('當天大漲 3% 以上才買', d => d.action === 'buy' && d.ctx?.chg >= 3),
+      grp('跌破 20 日線時買', d => d.action === 'buy' && d.ctx?.aboveMa20 === false),
+      grp('站上 20 日線時買', d => d.action === 'buy' && d.ctx?.aboveMa20 === true),
+      grp('外資連賣時買', d => d.action === 'buy' && d.ctx?.foreign <= -3),
+      grp('大盤判斷偏空時買', d => d.action === 'buy' && /空/.test(d.ctx?.market || '')),
+      grp('VIX 高於 25 時買', d => d.action === 'buy' && d.ctx?.vix > 25),
+      grp('跟模型同方向', d => (d.action === 'buy' && d.ctx?.sig === 'BUY') || (d.action === 'sell' && d.ctx?.sig === 'SELL')),
+      grp('跟模型反方向', d => (d.action === 'buy' && d.ctx?.sig === 'SELL') || (d.action === 'sell' && d.ctx?.sig === 'BUY')),
+      ...TAGS.map(t => grp(`理由「${t}」`, d => (d.tags || []).includes(t))),
+    ].filter(Boolean);
+    return list.sort((a, b) => Math.abs(b.avg) - Math.abs(a.avg));
+  }
+
+  function viewThesisCard(key) {
+    const it = S.snap.items[key], r = checkThesis(key), t = r?.t || { why: '', conds: [] };
+    const opts = Object.entries(COND).map(([k, d]) => `<option value="${k}">${d.label}</option>`).join('');
+    const condRow = (c, i) => { const d = COND[c.type]; return `<div class="crow" data-i="${i}"><select aria-label="條件">${Object.entries(COND).map(([k, x]) => `<option value="${k}"${k === c.type ? ' selected' : ''}>${x.label}</option>`).join('')}</select><input aria-label="數值" type="number" step="any" value="${c.value ?? ''}" placeholder="${d?.need ? '數值' : '不需填'}"${d?.need ? '' : ' disabled'}><button type="button" class="iconbtn" aria-label="刪除條件">✕</button></div>`; };
+    return `<section class="card mine" aria-labelledby="my-h">
+  <div class="hd"><h2 id="my-h">我的論點</h2><span class="note">你自己的理由與出場條件，系統每次更新都幫你檢查・只存在這台裝置</span>${r ? `<span class="tag ${r.hits.length ? 't-論點' : 't-訊號'}" style="margin-left:auto">${r.hits.length ? `${r.hits.length} 項觸發` : '論點仍成立'}</span>` : ''}</div>
+  ${r ? `<ul class="checks">${r.rows.map(x => `<li class="${x.hit ? 'hit' : x.hit === false ? 'ok' : 'na'}"><span class="ic" aria-hidden="true">${x.hit ? '!' : x.hit === false ? '✓' : '–'}</span><b>${esc(x.label)}</b><span class="small muted">${x.hit ? '已觸發' : x.hit === false ? '未觸發' : '無法判斷'}・${esc(x.now)}</span></li>`).join('') || '<li class="na small muted">還沒有設定條件</li>'}</ul>
+    ${t.why ? `<blockquote class="why">${esc(t.why)}<div class="small muted">寫於 ${esc((t.created || '').slice(0, 10))}${t.updated && t.updated !== t.created ? `，更新 ${esc(t.updated.slice(0, 10))}` : ''}${isNum(t.target) ? `・目標價 ${px(t.target)}（距現價 ${pct((t.target / it.price - 1) * 100, 1)}）` : ''}</div></blockquote>` : ''}` : '<p class="empty" style="margin:0">寫下你為什麼看好（或看壞）這檔，以及什麼情況代表你錯了。之後條件一觸發，總覽會提醒你。</p>'}
+  <details${r ? '' : ' open'}><summary>${r ? '編輯論點' : '寫下論點'}</summary>
+  <form id="th-form" class="form" style="margin-top:10px">
+    <div class="field"><label for="th-why">我的理由</label><textarea id="th-why" rows="3" placeholder="例：AI 伺服器訂單能見度到明年，回檔到季線是加碼機會">${esc(t.why || '')}</textarea></div>
+    <div class="field" style="max-width:240px"><label for="th-tg">我的目標價</label><input id="th-tg" type="number" step="any" value="${t.target ?? ''}"></div>
+    <div class="field"><label>出場／警示條件（任一觸發就提醒）</label><div id="conds" class="form">${(t.conds || []).map(condRow).join('')}</div>
+      <div class="actions"><select id="c-new" aria-label="新增條件">${opts}</select><button type="button" class="btn sm" id="c-add">＋ 加入條件</button></div></div>
+    <div class="actions"><button class="btn primary" type="submit">儲存論點</button>${r ? '<button type="button" class="btn danger" id="th-del">刪除論點</button>' : ''}</div>
+  </form></details>
+</section>`;
+  }
+
+  function viewDecideCard(key) {
+    const it = S.snap.items[key], mine = J.load().decisions.filter(d => d.key === key).slice(-5).reverse();
+    return `<section class="card mine" aria-labelledby="dc-h">
+  <div class="hd"><h2 id="dc-h">記錄我的決定</h2><span class="note">每次操作或「決定不動」都記一筆，之後自動算你的成績、找出你的習慣</span><a class="act" href="#/journal">我的成績單</a></div>
+  <div class="actions" role="group" aria-label="記錄決定">${Object.entries(ACT).map(([k, l]) => `<button type="button" class="btn${k === 'buy' ? ' primary' : ''}" data-act="${k}">${l}</button>`).join('')}</div>
+  <form id="dc-form" class="form" hidden>
+    <div class="alform"><div class="field"><label for="dc-px">價格</label><input id="dc-px" type="number" step="any" inputmode="decimal" value="${it.price}"></div>
+    <div class="field"><label for="dc-sh">股數（可不填）</label><input id="dc-sh" type="number" inputmode="decimal"></div></div>
+    <div class="field"><label>理由（可複選）</label><div class="tagpick">${TAGS.map(t => `<label><input type="checkbox" value="${esc(t)}"><span>${esc(t)}</span></label>`).join('')}</div></div>
+    <div class="field"><label for="dc-note">補充（可不填）</label><input id="dc-note" placeholder="例：法說會後毛利率上修"></div>
+    <div class="actions"><button class="btn primary" type="submit" id="dc-ok">儲存</button><button type="button" class="btn" id="dc-cancel">取消</button></div>
+  </form>
+  ${mine.length ? `<ol class="list">${mine.map(d => `<li><span class="tag ${d.action === 'buy' ? 'buy' : d.action === 'sell' ? 'sell' : ''}">${ACT[d.action].replace('我', '').replace('決定', '')}</span><div><div class="t">${esc(d.at.slice(0, 10))}・${px(d.price)}${d.shares ? `・${int(d.shares)} 股` : ''}</div><div class="d">${esc([...(d.tags || []), d.note].filter(Boolean).join('、') || '沒有寫理由')}・當時系統判斷 ${SIG[d.ctx?.sig] || '—'} ${d.ctx?.score ?? ''} 分</div></div></li>`).join('')}</ol>` : ''}
+</section>`;
+  }
+
+  function bindMine(key) {
+    const f = $('#th-form');
+    if (f) {
+      const conds = $('#conds');
+      const rowHtml = type => { const d = COND[type]; return `<div class="crow"><select aria-label="條件">${Object.entries(COND).map(([k, x]) => `<option value="${k}"${k === type ? ' selected' : ''}>${x.label}</option>`).join('')}</select><input aria-label="數值" type="number" step="any" placeholder="${d.need ? '數值' : '不需填'}"${d.need ? '' : ' disabled'}><button type="button" class="iconbtn" aria-label="刪除條件">✕</button></div>`; };
+      $('#c-add').onclick = () => { conds.insertAdjacentHTML('beforeend', rowHtml($('#c-new').value)); const i = conds.lastElementChild.querySelector('input:not([disabled])'); if (i) i.focus(); };
+      conds.addEventListener('click', e => { const b = e.target.closest('.iconbtn'); if (b) b.closest('.crow').remove(); });
+      conds.addEventListener('change', e => { if (e.target.tagName === 'SELECT') { const d = COND[e.target.value], i = e.target.nextElementSibling; i.disabled = !d.need; i.placeholder = d.need ? '數值' : '不需填'; if (!d.need) i.value = ''; } });
+      f.onsubmit = e => {
+        e.preventDefault();
+        const j = J.load(), now = new Date().toISOString(), old = j.theses[key];
+        const cs = [...conds.querySelectorAll('.crow')].map(r => { const [s, i] = r.querySelectorAll('select,input'); return { type: s.value, value: i.value === '' ? null : parseFloat(i.value) }; }).filter(c => !COND[c.type].need || isNum(c.value));
+        j.theses[key] = { why: $('#th-why').value.trim(), target: $('#th-tg').value === '' ? null : parseFloat($('#th-tg').value), conds: cs, created: old?.created || now, updated: now };
+        J.save(j); toast('論點已儲存'); render();
+      };
+      const del = $('#th-del'); if (del) del.onclick = () => { if (!confirm('刪除這檔的論點？')) return; const j = J.load(); delete j.theses[key]; J.save(j); render(); };
+    }
+    const df = $('#dc-form'); if (!df) return;
+    let act = null;
+    document.querySelectorAll('[data-act]').forEach(b => b.onclick = () => { act = b.dataset.act; df.hidden = false; $('#dc-ok').textContent = `儲存「${ACT[act]}」`; $('#dc-px').focus(); });
+    $('#dc-cancel').onclick = () => { df.hidden = true; };
+    df.onsubmit = e => {
+      e.preventDefault();
+      const price = parseFloat($('#dc-px').value); if (!isNum(price)) return;
+      const j = J.load(), it = S.snap.items[key];
+      j.decisions.push({ id: Date.now().toString(36), key, market: it.market, action: act, price, shares: parseFloat($('#dc-sh').value) || null,
+        tags: [...df.querySelectorAll('.tagpick input:checked')].map(i => i.value), note: $('#dc-note').value.trim(), at: new Date(Date.now() + 8 * 3600000).toISOString().replace('Z', '+08:00'), ctx: contextOf(key) });
+      J.save(j); toast(`已記錄：${ACT[act]} ${key}`); render();
+    };
+  }
+
+  function viewJournal() {
+    return `<section class="card" aria-labelledby="jn-h"><div class="hd"><h2 id="jn-h">我的成績單</h2><span class="note">依你記錄的決定，用之後的實際收盤結算・只存在這台裝置</span></div><div id="jn-body"><p class="loading">計算中…</p></div></section>
+<section class="card" aria-labelledby="th2-h"><div class="hd"><h2 id="th2-h">我的論點</h2><span class="note">每次資料更新都會重新檢查</span></div>${viewThesisList()}</section>${footer()}`;
+  }
+  function viewThesisList() {
+    const ks = Object.keys(J.load().theses);
+    if (!ks.length) return '<p class="empty" style="margin:0">還沒有寫論點。到任一個股頁的「我的論點」寫下理由和出場條件。</p>';
+    return `<ol class="list">${ks.map(k => { const r = checkThesis(k); if (!r) return `<li><span class="tag">已移除</span><div class="t">${esc(k)}（不在觀察清單）</div></li>`; return `<li><span class="tag ${r.hits.length ? 't-論點' : 't-訊號'}">${r.hits.length ? '觸發' : '成立'}</span><div><a class="t" href="#/s/${encodeURIComponent(k)}">${esc(k)} ${esc(nameOf(k))}</a><div class="d">${esc(r.t.why || '（沒有寫理由）')}</div>${r.hits.length ? `<div class="d bad-text">已觸發：${esc(r.hits.map(h => h.label).join('、'))}</div>` : ''}</div></li>`; }).join('')}</ol>`;
+  }
+  async function afterJournal() {
+    const rows = await scoreDecisions(), box = $('#jn-body'); if (!box || S.route !== 'journal') return;
+    if (!rows.length) { box.innerHTML = '<p class="empty" style="margin:0">還沒有紀錄。到個股頁按「我買了／我賣了／決定不動」記下你的決定，5 個交易日後就會開始出現成績。</p>'; return; }
+    const act = rows.filter(d => d.action !== 'hold'), d5 = act.filter(d => d.r[5]);
+    const avg = (a, f) => a.length ? a.reduce((s, x) => s + f(x), 0) / a.length : null;
+    const win = d5.length ? d5.filter(d => d.r[5].win).length / d5.length * 100 : null;
+    const ex = avg(d5.filter(d => isNum(d.r[5].ex)), d => d.r[5].ex);
+    const model = d5.filter(d => d.ctx?.sig && d.ctx.sig !== 'HOLD');
+    const modelWin = model.length ? model.filter(d => { const raw = d.r[5].raw; return d.ctx.sig === 'BUY' ? raw > 0.5 : raw < -0.5; }).length / model.length * 100 : null;
+    const ins = insights(rows);
+    const res = (r, n) => !r[n] ? '<span class="muted">待結算</span>' : `<span class="${cls(r[n].eff)}">${pct(r[n].eff, 1)}</span>${isNum(r[n].ex) ? `<div class="small muted">贏大盤 ${pct(r[n].ex, 1)}</div>` : ''}`;
+    box.innerHTML = `
+      <div class="kpis">
+        <div class="kpi"><div class="lb">紀錄筆數</div><div class="v">${rows.length}</div><div class="small muted">已結算 5 日：${d5.length} 筆</div></div>
+        <div class="kpi"><div class="lb">我的 5 日勝率</div><div class="v">${win == null ? '—' : win.toFixed(0) + '%'}</div><div class="small muted">賣出以「之後下跌」算對</div></div>
+        <div class="kpi"><div class="lb">平均贏大盤（5 日）</div><div class="v ${cls(ex)}">${ex == null ? '—' : pct(ex, 1)}</div></div>
+        <div class="kpi"><div class="lb">同樣時點系統的勝率</div><div class="v">${modelWin == null ? '—' : modelWin.toFixed(0) + '%'}</div><div class="small muted">${model.length} 筆系統有給買賣訊號</div></div>
+      </div>
+      <div><b class="small">我的習慣</b>${ins.length ? `<ul class="habits">${ins.slice(0, 6).map(g => `<li><span>${esc(g.name)}</span><span class="small muted">${g.n} 次・勝率 ${g.win.toFixed(0)}%</span><b class="mono ${cls(g.avg)}">5 日平均 ${pct(g.avg, 1)}</b></li>`).join('')}</ul>` : '<p class="small muted" style="margin:4px 0 0">同一種情況累積 3 筆已結算的紀錄後，這裡會告訴你哪些習慣幫你賺、哪些讓你賠。</p>'}</div>
+      <div class="tbl-box"><table class="tbl" style="min-width:680px"><thead><tr><th>日期</th><th>標的</th><th>決定</th><th class="num">價格</th><th>理由</th><th>當時系統</th><th class="num">1 日</th><th class="num">5 日</th><th class="num">20 日</th><th></th></tr></thead><tbody>
+      ${rows.slice().reverse().map(d => `<tr><td class="mono">${esc(d.at.slice(0, 10))}</td><td><a class="sym" href="#/s/${encodeURIComponent(d.key)}">${esc(d.key)}</a></td><td>${esc(ACT[d.action])}</td><td class="num">${px(d.price)}</td>
+        <td class="small" style="white-space:normal;max-width:220px">${esc([...(d.tags || []), d.note].filter(Boolean).join('、') || '—')}</td><td class="small">${SIG[d.ctx?.sig] || '—'} ${d.ctx?.score ?? ''}</td>
+        <td class="num">${res(d.r, 1)}</td><td class="num">${res(d.r, 5)}</td><td class="num">${res(d.r, 20)}</td><td><button type="button" class="iconbtn" data-deld="${esc(d.id)}" aria-label="刪除這筆">✕</button></td></tr>`).join('')}</tbody></table></div>
+      <p class="small muted" style="margin:0">「決定不動」不算勝率，只記錄之後的漲跌，讓你回頭看「不動」對不對。漲跌未達 ±0.5% 不計入勝負。</p>`;
+    box.onclick = e => { const b = e.target.closest('[data-deld]'); if (!b || !confirm('刪除這筆紀錄？')) return; const j = J.load(); j.decisions = j.decisions.filter(x => x.id !== b.dataset.deld); J.save(j); render(); };
+  }
+
   // ── 持股編輯 ────────────────────────────────────────────────
   function viewPortfolio() {
     const h = H.load(), opts = Object.keys(S.snap.items).map(k => `<option value="${esc(k)}">${esc(k)} ${esc(nameOf(k))}</option>`).join('');
     const rowHtml = (x, i) => `<div class="hrow" data-i="${i}"><input aria-label="代號" list="hold-list" value="${esc(x.key || '')}" placeholder="代號，如 2330、NVDA"><input aria-label="股數" type="number" inputmode="decimal" value="${x.shares ?? ''}" placeholder="股數"><input aria-label="平均成本" type="number" inputmode="decimal" step="any" value="${x.cost ?? ''}" placeholder="成本（原幣）"><button type="button" class="iconbtn" aria-label="刪除這一列" data-del="${i}">✕</button></div>`;
     return `
 <section class="card" aria-labelledby="pe-h">
-  <div class="hd"><h2 id="pe-h">我的持股</h2><span class="note">只存在這台裝置的瀏覽器，不會上傳到網站。換裝置可用「匯出／匯入」。</span></div>
+  <div class="hd"><h2 id="pe-h">我的持股</h2><span class="note">只存在這台裝置的瀏覽器，不會上傳到網站。換裝置可用「匯出／匯入」（含論點、決策紀錄、自選、提醒）。</span></div>
   <datalist id="hold-list">${opts}</datalist>
   <form id="pf-form" class="form">
     <div class="hrow small muted" aria-hidden="true"><span>代號</span><span>股數</span><span>平均成本（原幣）</span><span></span></div>
@@ -659,8 +846,8 @@ ${footer()}`;
     rows.addEventListener('click', e => { const b = e.target.closest('.iconbtn'); if (b) b.closest('.hrow').remove(); });
     $('#pf-form').onsubmit = e => { e.preventDefault(); const items = read(); H.save({ items, cash: parseFloat($('#cash').value) || 0 }); msg.className = 'small ok-text'; msg.textContent = `已儲存 ${items.length} 檔持股。`; };
     $('#clr').onclick = () => { if (confirm('確定清除這台裝置上的所有持股資料？')) { H.save({ items: [], cash: 0 }); render(); } };
-    $('#exp').onclick = () => { const blob = new Blob([JSON.stringify(H.load(), null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'holdings.json'; a.click(); URL.revokeObjectURL(a.href); };
-    $('#imp').onclick = () => { const i = document.createElement('input'); i.type = 'file'; i.accept = 'application/json'; i.onchange = async () => { try { const d = JSON.parse(await i.files[0].text()); if (!Array.isArray(d.items)) throw 0; H.save({ items: d.items, cash: d.cash || 0 }); render(); } catch (_) { msg.className = 'small bad-text'; msg.textContent = '檔案格式不正確。'; } }; i.click(); };
+    $('#exp').onclick = () => { const blob = new Blob([JSON.stringify({ ...H.load(), journal: J.load(), stars: stars(), alerts: alerts() }, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'signal-terminal-mine.json'; a.click(); URL.revokeObjectURL(a.href); };
+    $('#imp').onclick = () => { const i = document.createElement('input'); i.type = 'file'; i.accept = 'application/json'; i.onchange = async () => { try { const d = JSON.parse(await i.files[0].text()); if (!Array.isArray(d.items)) throw 0; H.save({ items: d.items, cash: d.cash || 0 }); if (d.journal) J.save(d.journal); if (d.stars) LS.set('stars', d.stars); if (d.alerts) LS.set('alerts', d.alerts); render(); } catch (_) { msg.className = 'small bad-text'; msg.textContent = '檔案格式不正確。'; } }; i.click(); };
     $('#lm-form').onsubmit = e => { e.preventDefault(); cfg.limits = { var95: +$('#l-var').value || DEF.limits.var95, single: +$('#l-single').value || DEF.limits.single, cashMin: +$('#l-cash').value || 0 }; saveCfg(); msg.className = 'small ok-text'; msg.textContent = '風險上限已儲存。'; };
   }
 
@@ -722,9 +909,10 @@ ${footer()}`;
       const b = await loadBars(key);
       if (S.route !== 's/' + key) return;
       main.innerHTML = viewStock(key, b); document.title = `${key} ${nameOf(key)}・訊號終端`;
-      bindStock(key);
+      bindStock(key); bindMine(key);
       afterStock(key);
     } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); bindPortfolio(); document.title = '持股・訊號終端'; }
+    else if (S.route === 'journal') { main.innerHTML = viewJournal(); document.title = '我的成績單・訊號終端'; afterJournal(); }
     else if (S.route === 'scorecard') { main.innerHTML = viewScorecard(); document.title = '模型成績・訊號終端'; }
     else if (S.route === 'settings') { main.innerHTML = viewSettings(); bindSettings(); document.title = '設定・訊號終端'; }
     else if (S.route === 'all') { main.innerHTML = `<div><a href="#/" class="small">← 回總覽</a></div><section class="card" id="opps">${viewOpps(0)}</section>${footer()}`; document.title = '全部標的・訊號終端'; }

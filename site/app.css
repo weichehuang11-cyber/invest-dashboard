@@ -185,7 +185,7 @@ footer.src { font-size: 12px; color: var(--mute); }
   .quote .px { font-size: 28px; }
   .grid2 { grid-template-columns: 1fr; }
   .sec { grid-template-columns: 84px 1fr 1fr 54px; }
-  .bottomnav { display: grid; grid-template-columns: repeat(4, 1fr); position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); z-index: 5; }
+  .bottomnav { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); z-index: 5; }
   .bottomnav a { min-height: 56px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 11px; color: var(--mute); text-decoration: none; }
   .bottomnav a.act { color: var(--acc); font-weight: 600; }
   .bottomnav svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; }
@@ -221,3 +221,28 @@ footer.src { font-size: 12px; color: var(--mute); }
   .toast { bottom: calc(72px + env(safe-area-inset-bottom)); }
   .seg button { padding: 0 10px; }
 }
+
+/* 我的論點與決策 */
+.card.mine { border-color: #C9D6FF; box-shadow: inset 4px 0 0 var(--acc); }
+.tag.t-論點 { background: var(--bad-bg); color: var(--bad); }
+.checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.checks li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 8px 10px; border-radius: 8px; background: var(--bg); }
+.checks li.hit { background: var(--bad-bg); }
+.checks .ic { width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 11px; font-weight: 700; background: var(--line); color: var(--ink2); flex: none; align-self: center; }
+.checks li.hit .ic { background: var(--bad); color: #fff; } .checks li.ok .ic { background: var(--ok); color: #fff; }
+blockquote.why { margin: 0; padding: 10px 14px; border-left: 3px solid var(--acc2); background: var(--acc-bg); border-radius: 0 8px 8px 0; font-size: 15px; display: flex; flex-direction: column; gap: 4px; }
+details summary { cursor: pointer; color: var(--acc); font-size: 13px; font-weight: 500; }
+.field textarea { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font: inherit; resize: vertical; }
+.crow { display: grid; grid-template-columns: 1fr 120px 44px; gap: 8px; }
+.crow select, .crow input, #c-new { height: 40px; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; background: #fff; min-width: 0; }
+.crow input:disabled { background: var(--bg); }
+.tagpick { display: flex; flex-wrap: wrap; gap: 6px; }
+.tagpick label { cursor: pointer; }
+.tagpick input { position: absolute; opacity: 0; }
+.tagpick span { display: inline-block; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); font-size: 13px; font-weight: 400; }
+.tagpick input:checked + span { background: var(--acc); border-color: var(--acc); color: #fff; }
+.tagpick input:focus-visible + span { outline: 2px solid var(--acc); outline-offset: 2px; }
+.habits { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; }
+.habits li { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: baseline; padding: 9px 0; border-top: 1px solid var(--line2); }
+.habits li:first-child { border-top: 0; }
+@media (max-width: 760px) { .habits li { grid-template-columns: 1fr auto; } .habits li .small { grid-column: 1; grid-row: 2; } }
