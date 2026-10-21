@@ -397,3 +397,8 @@ table.corr { min-width: 0; }
 
 .spark-cap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px 10px; font-size: 11px; color: var(--mute); margin-top: 2px; }
 .spark-cap b { color: var(--ink2); font-weight: 600; }
+
+/* 分段按鈕填滿整列，不留空白 */
+#idx .seg, .filters .seg { display: flex; width: 100%; }
+#idx .seg button, .filters .seg button { flex: 1 1 auto; padding: 0 8px; }
+@media (min-width: 761px) { .filters .seg { width: auto; } .filters .seg button { flex: 0 0 auto; padding: 0 12px; } }
