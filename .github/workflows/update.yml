@@ -115,8 +115,23 @@ jobs:
       - name: 組合網站
         run: cp -r site/. out/
 
-      - name: 儲存狀態（只有完整更新會改變）
-        if: steps.mode.outputs.full != ''
+      - name: 推播通知（有設定通知管道才會送）
+        id: notify
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BACKUP_GIST_ID: ${{ secrets.BACKUP_GIST_ID }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: |
+          OUT=$(node pipeline/notify.js --snap=out/data/snapshot.json --state=state || true)
+          echo "$OUT"
+          if echo "$OUT" | grep -q NOTIFIED_CHANGED; then echo "changed=1" >> "$GITHUB_OUTPUT"; fi
+
+      - name: 儲存狀態（完整更新，或通知紀錄有變）
+        if: steps.mode.outputs.full != '' || steps.notify.outputs.changed == '1'
         run: |
           cd state
           if [ ! -d .git ] && [ ! -f .git ]; then

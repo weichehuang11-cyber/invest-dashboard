@@ -201,12 +201,25 @@ async function main() {
     } catch (e) { status.putcall = 'fail: ' + e.message; }
     try {
       const v = await Market.twValuation();
-      if (v && !v.error && v.pe) { push('valHist', { date: lastDate, pe: r2(v.pe), dy: r2(v.dy), pb: r2(v.pb), n: v.n }, 1500); status.valuation = 'ok'; } else status.valuation = 'fail: ' + (v?.error || '無資料');
+      if (v && !v.error && v.pe) { push('valHist', { date: lastDate, pe: r2(v.pe), dy: r2(v.dy), pb: r2(v.pb), n: v.n }, 1500); heavy.tw.valPer = v.per; status.valuation = 'ok'; } else status.valuation = 'fail: ' + (v?.error || '無資料');
     } catch (e) { status.valuation = 'fail: ' + e.message; }
     try {
       const m = await Market.twMargin(lastDate);
       if (m) { push('marginHist', { date: lastDate, balance: r2(m.balance, 1) }); if (m.prev != null && !(heavy.tw.marginHist.length > 1)) heavy.tw.marginHist.unshift({ date: TWSE.prevTradingDate(lastDate), balance: r2(m.prev, 1) }); status.margin = 'ok'; } else status.margin = 'fail';
     } catch (e) { status.margin = 'fail: ' + e.message; }
+    // 集保大戶持股（每週五更新；超過 6 天才重抓）
+    if (!heavy.tw.tdccTs || Date.now() - heavy.tw.tdccTs > 6 * 86400000) {
+      try {
+        const td = await Market.tdcc(null);
+        if (td && !td.error) {
+          heavy.tw.tdccAll = Object.fromEntries(Object.entries(td.rows).filter(([id]) => /^(\d{4}|0\d{3,5}[A-Z]?)$/.test(id)).map(([id, o]) => [id, o.b1000]));
+          heavy.tw.tdcc = heavy.tw.tdcc || {};
+          for (const id of wl.tw) { const o = td.rows[id]; if (!o) continue; const h = (heavy.tw.tdcc[id] || []).filter(x => x.date !== td.date); h.push({ date: td.date, ...o }); heavy.tw.tdcc[id] = h.slice(-26); }
+          heavy.tw.tdccTs = Date.now(); status.tdcc = `${td.date}（${Object.keys(td.rows).length} 檔）`;
+        } else status.tdcc = 'fail: ' + (td?.error || '無資料');
+      } catch (e) { status.tdcc = 'fail: ' + e.message; }
+    }
+    try { const xd = await Market.twExDividend(); if (xd && !xd.error) { heavy.tw.exdiv = xd; status.exdiv = `${Object.keys(xd).length} 檔`; } else status.exdiv = 'fail: ' + (xd?.error || '無資料'); } catch (e) { status.exdiv = 'fail: ' + e.message; }
     try { const tq = await Market.tpexQuotes(); if (tq && !tq.error) { heavy.tw.tpex = tq; status.tpex = `${Object.keys(tq.rows).length} 檔`; } else status.tpex = 'fail: ' + (tq?.error || '無資料'); } catch (e) { status.tpex = 'fail: ' + e.message; }
     // 財報（季報變動慢：每 5 天更新一次；有 FINMIND_TOKEN 用權杖，沒有用免權杖額度）
     heavy.tw.fin = heavy.tw.fin || {};
@@ -228,7 +241,7 @@ async function main() {
       const yf = typeof YF === 'function' ? new YF({ suppressNotices: ['yahooSurvey'] }) : YF;
       heavy.us.fund = heavy.us.fund || {};
       await mapSeries(wl.us, async s => {
-        const q = await yf.quoteSummary(s, { modules: ['financialData', 'calendarEvents', 'summaryDetail', 'defaultKeyStatistics'] }, { validateResult: false });
+        const q = await yf.quoteSummary(s, { modules: ['financialData', 'calendarEvents', 'summaryDetail', 'defaultKeyStatistics', 'netSharePurchaseActivity', 'majorHoldersBreakdown'] }, { validateResult: false });
         const fd = q.financialData || {}, sd = q.summaryDetail || {}, ks = q.defaultKeyStatistics || {};
         const ed = q.calendarEvents?.earnings?.earningsDate?.[0];
         heavy.us.fund[s] = {
@@ -238,6 +251,10 @@ async function main() {
           pe: sd.trailingPE ?? null, forwardPE: sd.forwardPE ?? ks.forwardPE ?? null, eps: ks.trailingEps ?? null,
           dividendYield: sd.dividendYield != null ? sd.dividendYield * 100 : null,
           earningsDate: ed ? new Date(ed).toISOString().slice(0, 10) : null,
+          exDividendDate: q.calendarEvents?.exDividendDate ? new Date(q.calendarEvents.exDividendDate).toISOString().slice(0, 10) : null,
+          pb: ks.priceToBook ?? null,
+          insider: q.netSharePurchaseActivity ? { buy: q.netSharePurchaseActivity.buyInfoShares ?? null, sell: q.netSharePurchaseActivity.sellInfoShares ?? null, net: q.netSharePurchaseActivity.netInfoShares ?? null, netPct: q.netSharePurchaseActivity.netPercentInsiderShares != null ? q.netSharePurchaseActivity.netPercentInsiderShares * 100 : null, buyN: q.netSharePurchaseActivity.buyInfoCount ?? null, sellN: q.netSharePurchaseActivity.sellInfoCount ?? null, period: q.netSharePurchaseActivity.period || '6m' } : null,
+          holders: q.majorHoldersBreakdown ? { insiders: q.majorHoldersBreakdown.insidersPercentHeld != null ? q.majorHoldersBreakdown.insidersPercentHeld * 100 : null, institutions: q.majorHoldersBreakdown.institutionsPercentHeld != null ? q.majorHoldersBreakdown.institutionsPercentHeld * 100 : null } : null,
         };
       }, 600);
       status.fundamentals = `${Object.keys(heavy.us.fund).length}/${wl.us.length}`;
@@ -324,6 +341,8 @@ async function main() {
         chip = { date: heavy.tw.chipMarket?.date, source: 'TWSE', foreign1: Math.round(t.foreign / 1000), trust1: Math.round(t.trust / 1000), foreign5: null, trust5: null, volume5: r2(vol5, 0) };
       }
       if (fm?.rev) fund = { revenueYoY: r2(fm.rev.yoy, 1), revenuePeriod: fm.rev.period };
+      const vp = heavy.tw.valPer?.[key], xd = heavy.tw.exdiv?.[key];
+      if (vp || xd) fund = { ...(fund || {}), pe: vp?.pe ?? null, dividendYield: vp?.dy ?? null, pb: vp?.pb ?? null, exDividendDate: xd?.date ?? null, exDividendCash: xd?.cash ?? null, exDividendType: xd?.type || null };
     } else {
       fund = heavy.us.fund?.[key] || null;
     }
@@ -345,6 +364,7 @@ async function main() {
       ta: ta && Object.fromEntries(Object.entries(ta).map(([k, v]) => [k, typeof v === 'number' ? r2(v, 4) : v])),
       chip, fund, ml, signal: { ...sig, stop: ta?.stopLong ? r2(ta.stopLong, 2) : null },
       fin: (market === 'tw' ? heavy.tw.fin?.[key] : heavy.us.fin?.[key]) || null,
+      tdcc: market === 'tw' ? (heavy.tw.tdcc?.[key] || null) : null,
       outlook: (() => { try { return Outlook.analyze(d.bars, { window: 500, backtestDays: 400 }); } catch (e) { log('outlook 失敗', key, e.message); return null; } })(),
     };
   }
@@ -421,6 +441,11 @@ async function main() {
       const days = Math.round((Date.parse(it.fund.earningsDate) - Date.parse(today)) / 86400000);
       if (days >= 0 && days <= 7) changes.push({ tag: '事件', sev: days <= 3 ? 3 : 1, key: it.key, title: `${it.name}（${it.key}）財報${days === 0 ? '今天' : ` ${days} 天後`}（${it.fund.earningsDate}）`, detail: it.ta?.vol20 ? `年化波動 ${it.ta.vol20.toFixed(0)}%，財報前後波動通常放大` : '財報前後波動通常放大' });
     }
+    const td = it.tdcc;
+    if (td?.length >= 2) {
+      const a = td[td.length - 1], b0 = td[td.length - 2], d1 = a.b1000 - b0.b1000;
+      if (Math.abs(d1) >= 0.8) changes.push({ tag: '籌碼', sev: 2, key: it.key, title: `${it.key} ${it.name} 千張大戶持股${d1 > 0 ? '增加' : '減少'} ${Math.abs(d1).toFixed(2)} 個百分點`, detail: `目前 ${a.b1000.toFixed(1)}%（集保 ${a.date}），股東人數 ${a.holders?.toLocaleString() ?? '—'}` });
+    }
     if (it.changePct != null && Math.abs(it.changePct) >= 4) {
       changes.push({ tag: '價格', sev: 2, key: it.key, title: `${it.key} ${it.name} ${it.changePct > 0 ? '大漲' : '大跌'} ${Math.abs(it.changePct).toFixed(1)}%`, detail: it.ta?.relVolume ? `成交量為 20 日均量的 ${it.ta.relVolume.toFixed(1)} 倍` : '' });
     }
@@ -496,7 +521,7 @@ async function main() {
     });
   }
   // 大盤日 K（個人決策紀錄用來比較「同期大盤」）
-  for (const key of IDX) {
+  for (const key of [...IDX, 'USDTWD=X']) {
     const d = longDaily[key] || daily[key]; if (!d) continue;
     const sl = a => a.slice(-260);
     writeJSON(path.join(OUT, 'bars', `${key.replace(/[^A-Za-z0-9_.-]/g, '_')}.json`), {
@@ -514,11 +539,12 @@ async function main() {
       const cl = arr.slice(-60);
       const ma = k => { const w = arr.slice(-k); return w.length === k && w.every(v => v > 0) ? w.reduce((a, b) => a + b, 0) / k : null; };
       const m20 = ma(20), m60 = ma(60), r20 = arr[nD - 21] > 0 ? (last / arr[nD - 21] - 1) * 100 : null;
-      U.push({ k: id, n: H.names?.[id] || id, m: 'tw', x: 'TWSE', c: last, p: r2(H.lastChg?.[id] ?? null), a20: m20 ? last > m20 : null, a60: m60 ? last > m60 : null, r20: r2(r20, 1), w: wset.has(id) ? 1 : 0 });
+      const vp = heavy.tw.valPer?.[id];
+      U.push({ k: id, n: H.names?.[id] || id, m: 'tw', x: 'TWSE', c: last, p: r2(H.lastChg?.[id] ?? null), a20: m20 ? last > m20 : null, a60: m60 ? last > m60 : null, r20: r2(r20, 1), pe: vp?.pe ?? undefined, dy: vp?.dy ?? undefined, b: heavy.tw.tdccAll?.[id] ?? undefined, w: wset.has(id) ? 1 : 0 });
       series.c[id] = cl.map(v => (v > 0 ? r2(v, 2) : null));
     }
     const twIds = new Set(U.map(u => u.k));
-    for (const [id, q] of Object.entries(heavy.tw.tpex?.rows || {})) if (/^(\d{4}|0\d{3,5}[A-Z]?)$/.test(id) && !twIds.has(id)) U.push({ k: id, n: q.n, m: 'tw', x: 'TPEx', c: q.c, p: r2(q.p), w: wset.has(id) ? 1 : 0 });
+    for (const [id, q] of Object.entries(heavy.tw.tpex?.rows || {})) if (/^(\d{4}|0\d{3,5}[A-Z]?)$/.test(id) && !twIds.has(id)) U.push({ k: id, n: q.n, m: 'tw', x: 'TPEx', c: q.c, p: r2(q.p), b: heavy.tw.tdccAll?.[id] ?? undefined, w: wset.has(id) ? 1 : 0 });
     for (const k of wl.us) if (items[k]) U.push({ k, n: items[k].name, m: 'us', x: 'US', c: items[k].price, p: items[k].changePct, mc: heavy.us.universe?.rows?.[k]?.mc ?? null, w: 1 });
     const usW = new Set(wl.us);
     for (const [k, q] of Object.entries(heavy.us.universe?.rows || {})) if (!usW.has(k)) U.push({ k, n: q.n, m: 'us', x: 'US', c: q.c, p: r2(q.p), mc: q.mc, s: q.s || undefined, w: 0 });

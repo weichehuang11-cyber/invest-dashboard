@@ -194,7 +194,9 @@ async function twValuation() {
   if (!kPE) return { error: `欄位無法辨識：${Object.keys(s).join('|')}` };
   const st = rows.filter(r => /^\d{4}$/.test(String(r[kC] || '').trim()));
   const pe = st.map(r => num(r[kPE])).filter(v => v > 0 && v < 200);
-  return { pe: median(pe), dy: median(st.map(r => num(r[kDY])).filter(v => v > 0)), pb: median(st.map(r => num(r[kPB])).filter(v => v > 0)), n: pe.length };
+  const per = {};
+  for (const r of rows) { const id = String(r[kC] || '').trim(); if (!/^(\d{4}|0\d{3,5}[A-Z]?)$/.test(id)) continue; const a = num(r[kPE]), b = kDY ? num(r[kDY]) : 0, c = kPB ? num(r[kPB]) : 0; per[id] = { pe: a > 0 ? a : null, dy: b > 0 ? b : null, pb: c > 0 ? c : null }; }
+  return { pe: median(pe), dy: median(st.map(r => num(r[kDY])).filter(v => v > 0)), pb: median(st.map(r => num(r[kPB])).filter(v => v > 0)), n: pe.length, per };
 }
 /** 信用交易統計（全市場）：融資金額今日餘額（億元） */
 async function twMargin(date) {
@@ -223,6 +225,44 @@ async function tpexQuotes() {
     out[id] = { n: String(r[kN] || '').trim(), c, p: c - ch > 0 ? ch / (c - ch) * 100 : 0 };
   }
   return { date: kD ? String(rows[0][kD]) : null, rows: out };
+}
+
+// ── 集保股權分散表（每週）：千張大戶、400 張以上、散戶（50 張以下）、股東人數 ──
+async function tdcc(ids) {
+  const t = await get('https://opendata.tdcc.com.tw/getOD.ashx?id=1-5', { as: 'text', timeout: 90000 });
+  const want = ids ? new Set(ids) : null, by = {};
+  const lines = stripBom(t).split(/\r?\n/);
+  const head = (lines.shift() || '').split(',').map(x => x.replace(/"/g, '').trim());
+  const iD = head.findIndex(h => /日期/.test(h)), iC = head.findIndex(h => /代號/.test(h)), iL = head.findIndex(h => /分級/.test(h)), iN = head.findIndex(h => /人數/.test(h)), iP = head.findIndex(h => /比例/.test(h));
+  if (iC < 0 || iL < 0 || iP < 0) return { error: `欄位無法辨識：${head.join('|')}` };
+  let date = null;
+  for (const l of lines) {
+    if (!l) continue;
+    const v = l.split(',').map(x => x.replace(/"/g, '').trim()), id = v[iC];
+    if (want && !want.has(id)) continue;
+    const lv = +v[iL], pct = +v[iP], n = +v[iN];
+    date = date || v[iD];
+    const o = by[id] = by[id] || { b1000: 0, b400: 0, retail: 0, holders: null };
+    if (lv === 15) o.b1000 += pct;
+    if (lv >= 12 && lv <= 15) o.b400 += pct;
+    if (lv >= 1 && lv <= 8) o.retail += pct;
+    if (lv === 17) o.holders = n;
+  }
+  for (const o of Object.values(by)) for (const k of ['b1000', 'b400', 'retail']) o[k] = Math.round(o[k] * 100) / 100;
+  return { date, rows: by };
+}
+
+/** 除權除息預告（上市）：代號 → 日期、現金股利 */
+const rocDate = s => { const m = String(s || '').replace(/\D/g, ''); if (m.length === 7) return `${+m.slice(0, 3) + 1911}-${m.slice(3, 5)}-${m.slice(5, 7)}`; if (m.length === 8) return `${m.slice(0, 4)}-${m.slice(4, 6)}-${m.slice(6, 8)}`; return null; };
+async function twExDividend() {
+  const rows = await get('https://openapi.twse.com.tw/v1/exchangeReport/TWT48U_ALL', { timeout: 30000 });
+  if (!Array.isArray(rows) || !rows.length) return null;
+  const s = rows[0];
+  const kC = findKey(s, /^Code$/i, /代號/), kD = findKey(s, /^Date$/i, /除權除息日期|日期/), kN = findKey(s, /^Name$/i, /名稱/), kT = findKey(s, /Exdividend|除權息|權\/息/i), kCash = findKey(s, /Cash|現金股利|息值/i);
+  if (!kC || !kD) return { error: `欄位無法辨識：${Object.keys(s).join('|')}` };
+  const out = {};
+  for (const r of rows) { const id = String(r[kC] || '').trim(), d = rocDate(r[kD]); if (!id || !d) continue; out[id] = { date: d, name: kN ? String(r[kN]).trim() : id, type: kT ? String(r[kT]).trim() : '', cash: kCash ? num(r[kCash]) || null : null }; }
+  return out;
 }
 
 // ── 美股全市場清單 ─────────────────────────────────────────
@@ -267,4 +307,4 @@ async function fred(id, days = 400) {
   return out.filter(x => x.date >= cut);
 }
 
-module.exports = { usUniverse, tpexQuotes, miIndex, updateTwHistory, twBreadthStats, taifexForeignTX, taifexPutCall, pickForeignTX, pickPC, twValuation, twMargin, fred, csvParse, median };
+module.exports = { tdcc, twExDividend, rocDate, usUniverse, tpexQuotes, miIndex, updateTwHistory, twBreadthStats, taifexForeignTX, taifexPutCall, pickForeignTX, pickPC, twValuation, twMargin, fred, csvParse, median };

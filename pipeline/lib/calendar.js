@@ -15,6 +15,8 @@ function build({ config = [], items = {}, today, days = 21 }) {
   for (const it of Object.values(items)) {
     const d = it.fund?.earningsDate;
     if (d && d >= today && d <= end) out.push({ date: d, title: `${it.key} ${it.name} 財報`, region: it.market, importance: 2, kind: 'earnings', key: it.key });
+    const x = it.fund?.exDividendDate;
+    if (x && x >= today && x <= end) out.push({ date: x, title: `${it.key} ${it.name} 除${it.fund.exDividendType && /權/.test(it.fund.exDividendType) && !/息/.test(it.fund.exDividendType) ? '權' : '息'}${it.fund.exDividendCash ? `（現金 ${it.fund.exDividendCash} 元）` : ''}`, region: it.market, importance: 1, kind: 'exdiv', key: it.key });
   }
   return out.filter(e => e.date >= today && e.date <= end).sort((a, b) => a.date.localeCompare(b.date) || b.importance - a.importance);
 }

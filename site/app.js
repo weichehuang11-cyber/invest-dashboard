@@ -12,7 +12,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (_) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} },
   };
-  const DEF = { colors: 'tw', nasUrl: '', localHost: 'localhost', localEnabled: true, limits: { var95: 2.5, single: 20, cashMin: 10 } };
+  const DEF = { colors: 'tw', nasUrl: '', localHost: 'localhost', localEnabled: true, limits: { var95: 2.5, single: 20, cashMin: 10, riskPct: 1 } };
   const cfg = Object.assign({}, DEF, LS.get('cfg', {}));
   cfg.limits = Object.assign({}, DEF.limits, cfg.limits || {});
   const saveCfg = () => LS.set('cfg', cfg);
@@ -654,6 +654,9 @@ ${footer()}`;
     if (isNum(f?.revenueGrowth) && f.revenueGrowth < 0) cons.push(`營收年減 ${Math.abs(f.revenueGrowth).toFixed(0)}%`);
     if (m && isNum(m.buyProb)) { if (it.signal.evidence.model === 'pos') pros.push(`模型隔日上漲機率 ${(m.buyProb * 100).toFixed(0)}%`); else if (it.signal.evidence.model === 'neg') cons.push(`模型隔日下跌機率 ${(m.sellProb * 100).toFixed(0)}%`); }
     if (f?.earningsDate) { const d = Math.round((Date.parse(f.earningsDate) - Date.now()) / 86400000); if (d >= 0 && d <= 14) cons.push(`財報 ${esc(f.earningsDate)}（${d} 天後），前後波動放大`); }
+    const T2 = it.tdcc; if (T2?.length >= 5) { const d4 = T2[T2.length - 1].b1000 - T2[T2.length - 5].b1000; if (d4 >= 1) pros.push(`千張大戶近 4 週增加 ${d4.toFixed(1)} 個百分點`); else if (d4 <= -1) cons.push(`千張大戶近 4 週減少 ${Math.abs(d4).toFixed(1)} 個百分點`); }
+    const I2 = it.fund?.insider; if (I2?.buyN >= 3 && I2.net > 0) pros.push(`內部人近 6 個月淨買進（${I2.buyN} 筆買進）`);
+    if (f?.exDividendDate) { const d = Math.round((Date.parse(f.exDividendDate) - Date.now()) / 86400000); if (d >= 0 && d <= 14) pros.push(`除${it.market === 'tw' ? '權息' : '息'}日 ${esc(f.exDividendDate)}（${d} 天後）`); }
     for (const c of (it.fin?.checks || []).slice(0, 4)) { if (c.tone === 'pos') pros.push('財報：' + esc(c.text)); else if (c.tone === 'neg') cons.push('財報：' + esc(c.text)); }
     if (isNum(ta.var95) && ta.var95 > 3.5) cons.push(`1 日風險值 ${ta.var95.toFixed(1)}%，波動偏大`);
     const pos = P.rows.find(r => r.key === it.key);
@@ -738,6 +741,8 @@ ${viewDecideCard(key)}
 </section>
 
 ${viewFin(it)}
+${viewOwnership(it)}
+${viewSizing(it)}
 
 <section class="card fold" data-fold="s-ol" aria-labelledby="ol-h"><div class="hd"><h2 id="ol-h">技術解讀與走勢推論</h2><span class="note">日 K・規則化解讀＋歷史模擬推論，附回測可靠度</span></div>
   <div class="ixgrid"><div class="chart">${b ? coneChart(b, it.outlook, it.name) : ''}<div class="fh">${outlookLeft(it.outlook)}</div></div><div class="opanel fh">${outlookPanel(it.outlook, it.price)}</div></div>
@@ -752,7 +757,10 @@ ${viewFin(it)}
       <div><dt>本益比（近 4 季）</dt><dd>${num(f.pe, 1)}</dd></div><div><dt>預估本益比</dt><dd>${num(f.forwardPE, 1)}</dd></div>
       <div><dt>每股盈餘（近 4 季）</dt><dd>${num(f.eps)}</dd></div><div><dt>殖利率</dt><dd>${isNum(f.dividendYield) ? f.dividendYield.toFixed(2) + '%' : '—'}</dd></div>
       <div><dt>分析師目標價</dt><dd>${px(f.targetPrice)}</dd></div><div><dt>營收年增率</dt><dd class="${cls(f.revenueGrowth)}">${pct(f.revenueGrowth, 1)}</dd></div>
-      <div><dt>下次財報</dt><dd style="font-size:15px">${esc(f.earningsDate || '—')}</dd></div>` : `
+      <div><dt>下次財報</dt><dd style="font-size:15px">${esc(f.earningsDate || '—')}</dd></div>
+      <div><dt>股價淨值比</dt><dd>${num(f.pb, 2)}</dd></div><div><dt>除息日</dt><dd style="font-size:15px">${esc(f.exDividendDate || '—')}</dd></div>` : `
+      <div><dt>本益比</dt><dd>${num(f.pe, 1)}</dd></div><div><dt>殖利率</dt><dd>${isNum(f.dividendYield) ? f.dividendYield.toFixed(2) + '%' : '—'}</dd></div>
+      <div><dt>股價淨值比</dt><dd>${num(f.pb, 2)}</dd></div><div><dt>除權息日</dt><dd style="font-size:15px">${esc(f.exDividendDate || '—')}${f.exDividendCash ? ` <small class="muted">現金 ${f.exDividendCash} 元</small>` : ''}</dd></div>
       <div><dt>月營收年增率</dt><dd class="${cls(f.revenueYoY)}">${pct(f.revenueYoY, 1)}</dd></div><div><dt>營收月份</dt><dd style="font-size:15px">${esc(f.revenuePeriod || '—')}</dd></div>
       <div><dt>近 1 個月報酬</dt><dd class="${cls(ta.ret21)}">${pct(ta.ret21, 1)}</dd></div><div><dt>近 3 個月報酬</dt><dd class="${cls(ta.ret63)}">${pct(ta.ret63, 1)}</dd></div>`}
     </dl>${it.market === 'us' && !it.fund ? '<p class="small muted" style="margin:0">基本面於美股收盤後更新。</p>' : ''}</section>
@@ -817,6 +825,7 @@ ${footer()}`;
 
   function bindStock(key) {
     bindChart();
+    const cap = $('#sz-cap'); if (cap) cap.onchange = () => { LS.set('sizingCap', +cap.value || 0); render(); };
     const f = $('#al-form');
     if (f) {
       f.onsubmit = async e => {
@@ -948,7 +957,7 @@ ${footer()}`;
     <div class="field" style="max-width:240px"><label for="th-tg">我的目標價</label><input id="th-tg" type="number" step="any" value="${t.target ?? ''}"></div>
     <div class="field"><label>出場／警示條件（任一觸發就提醒）</label><div id="conds" class="form">${(t.conds || []).map(condRow).join('')}</div>
       <div class="actions"><select id="c-new" aria-label="新增條件">${opts}</select><button type="button" class="btn sm" id="c-add">＋ 加入條件</button></div></div>
-    <div class="actions"><button class="btn primary" type="submit">儲存論點</button>${r ? '<button type="button" class="btn danger" id="th-del">刪除論點</button>' : ''}</div>
+    <div class="actions"><button class="btn primary" type="submit">儲存論點</button>${r ? '<button type="button" class="btn" id="th-del">結案論點</button>' : ''}</div>
   </form></details>
 </section>`;
   }
@@ -983,10 +992,11 @@ ${footer()}`;
         e.preventDefault();
         const j = J.load(), now = new Date().toISOString(), old = j.theses[key];
         const cs = [...conds.querySelectorAll('.crow')].map(r => { const [s, i] = r.querySelectorAll('select,input'); return { type: s.value, value: i.value === '' ? null : parseFloat(i.value) }; }).filter(c => !COND[c.type].need || isNum(c.value));
-        j.theses[key] = { why: $('#th-why').value.trim(), target: $('#th-tg').value === '' ? null : parseFloat($('#th-tg').value), conds: cs, created: old?.created || now, updated: now };
+        const hist = old ? [...(old.history || []), { at: old.updated || old.created, why: old.why, target: old.target, conds: old.conds }].slice(-30) : [];
+        j.theses[key] = { why: $('#th-why').value.trim(), target: $('#th-tg').value === '' ? null : parseFloat($('#th-tg').value), conds: cs, created: old?.created || now, updated: now, priceAtCreate: old?.priceAtCreate ?? S.snap.items[key]?.price ?? null, history: hist };
         J.save(j); toast('論點已儲存'); render();
       };
-      const del = $('#th-del'); if (del) del.onclick = () => { if (!confirm('刪除這檔的論點？')) return; const j = J.load(); delete j.theses[key]; J.save(j); render(); };
+      const del = $('#th-del'); if (del) del.onclick = () => { const why = prompt('結案這個論點？可以寫下結論（例如：目標達成、論點失效、停損出場）', ''); if (why === null) return; const j = J.load(), t = j.theses[key], it = S.snap.items[key]; j.archived = [...(j.archived || []), { key, name: it?.name || key, closed: new Date().toISOString(), result: why, priceAtClose: it?.price ?? null, ...t }]; delete j.theses[key]; J.save(j); toast('論點已結案，可在「我的」查到'); render(); };
     }
     const df = $('#dc-form'); if (!df) return;
     let act = null, basis = null, mood = null;
@@ -1005,15 +1015,28 @@ ${footer()}`;
   }
 
   function viewJournal() {
-    return `<section class="card" aria-labelledby="jn-h"><div class="hd"><h2 id="jn-h">我的成績單</h2><span class="note">依你記錄的決定，用之後的實際收盤結算・只存在這台裝置</span></div><div id="jn-body"><p class="loading">計算中…</p></div></section>
+    return `<section class="card"><div class="field"><label for="jn-q">搜尋我的紀錄</label><input id="jn-q" type="search" placeholder="代號、名稱、理由、結論…" autocomplete="off"><span class="hint">同時搜尋論點（含修改紀錄、已結案）與決策紀錄。持股、論點會自動加密備份（到「設定」開啟）。</span></div></section>
+<section class="card" aria-labelledby="jn-h"><div class="hd"><h2 id="jn-h">我的成績單</h2><span class="note">依你記錄的決定，用之後的實際收盤結算・只存在這台裝置</span></div><div id="jn-body"><p class="loading">計算中…</p></div></section>
 <section class="card" aria-labelledby="md-h"><div class="hd"><h2 id="md-h">我的市場感覺準不準</h2><span class="note">每天在總覽記下感覺，依之後大盤實際走勢統計</span></div><div id="md-body"><p class="loading">計算中…</p></div></section>
 <section class="card" aria-labelledby="th2-h"><div class="hd"><h2 id="th2-h">我的論點</h2><span class="note">每次資料更新都會重新檢查</span></div>${viewThesisList()}</section>${footer()}`;
   }
   function viewThesisList() {
-    const ks = Object.keys(J.load().theses);
-    if (!ks.length) return '<p class="empty" style="margin:0">還沒有寫論點。到任一個股頁的「我的論點」寫下理由和出場條件。</p>';
-    return `<ol class="list">${ks.map(k => { const r = checkThesis(k); if (!r) return `<li><span class="tag">已移除</span><div class="t">${esc(k)}（不在觀察清單）</div></li>`; return `<li><span class="tag ${r.hits.length ? 't-論點' : 't-訊號'}">${r.hits.length ? '觸發' : '成立'}</span><div><a class="t" href="#/s/${encodeURIComponent(k)}">${esc(k)} ${esc(nameOf(k))}</a><div class="d">${esc(r.t.why || '（沒有寫理由）')}</div>${r.hits.length ? `<div class="d bad-text">已觸發：${esc(r.hits.map(h => h.label).join('、'))}</div>` : ''}</div></li>`; }).join('')}</ol>`;
+    const J0 = J.load(), ks = Object.keys(J0.theses), arc = (J0.archived || []).slice().reverse();
+    if (!ks.length && !arc.length) return '<p class="empty" style="margin:0">還沒有寫論點。到任一個股頁的「我的論點」寫下理由和出場條件。</p>';
+    const txt = (...a) => esc(a.filter(Boolean).join(' ').toLowerCase());
+    const verRow = h => `<li class="small"><span class="muted">${esc((h.at || '').slice(0, 10))}</span> ${esc(h.why || '（沒有寫理由）')}${isNum(h.target) ? `・目標 ${px(h.target)}` : ''}</li>`;
+    const active = ks.map(k => { const r = checkThesis(k), t = J0.theses[k], it = S.snap.items[k], since = isNum(t.priceAtCreate) && it ? (it.price / t.priceAtCreate - 1) * 100 : null;
+      return `<li data-text="${txt(k, it?.name, t.why, t.history?.map(h => h.why).join(' '))}"><span class="tag ${r?.hits.length ? 't-論點' : 't-訊號'}">${r ? (r.hits.length ? '觸發' : '成立') : '—'}</span><div>
+        <a class="t" href="#/s/${encodeURIComponent(k)}">${esc(k)} ${esc(it?.name || '')}</a><div class="d">${esc(t.why || '（沒有寫理由）')}</div>
+        <div class="d">寫於 ${esc((t.created || '').slice(0, 10))}${isNum(since) ? `・之後 <b class="${cls(since)}">${pct(since, 1)}</b>` : ''}${isNum(t.target) ? `・目標 ${px(t.target)}` : ''}</div>
+        ${r?.hits.length ? `<div class="d bad-text">已觸發：${esc(r.hits.map(h => h.label).join('、'))}</div>` : ''}
+        ${t.history?.length ? `<details><summary class="small">修改紀錄（${t.history.length}）</summary><ul style="margin:4px 0 0;padding-left:18px">${t.history.slice().reverse().map(verRow).join('')}</ul></details>` : ''}</div></li>`; }).join('');
+    const closed = arc.map(x => { const ch = isNum(x.priceAtCreate) && isNum(x.priceAtClose) ? (x.priceAtClose / x.priceAtCreate - 1) * 100 : null;
+      return `<li data-text="${txt(x.key, x.name, x.why, x.result)}"><span class="tag">結案</span><div><a class="t" href="#/s/${encodeURIComponent(x.key)}">${esc(x.key)} ${esc(x.name || '')}</a>
+        <div class="d">${esc(x.why || '（沒有寫理由）')}</div><div class="d">${esc((x.created || '').slice(0, 10))} → ${esc(x.closed.slice(0, 10))}${isNum(ch) ? `・期間 <b class="${cls(ch)}">${pct(ch, 1)}</b>` : ''}${x.result ? `・結論：${esc(x.result)}` : ''}</div></div></li>`; }).join('');
+    return `${active ? `<b class="small">進行中（${ks.length}）</b><ol class="list jlist">${active}</ol>` : ''}${closed ? `<b class="small">已結案（${arc.length}）</b><ol class="list jlist">${closed}</ol>` : ''}`;
   }
+
   async function moodStats() {
     const ms = J.load().moods; if (!ms.length) return null;
     const bars = { tw: await loadBars('^TWII'), us: await loadBars('^GSPC') };
@@ -1043,6 +1066,8 @@ ${footer()}`;
   }
   async function afterJournal() {
     fillMood();
+    const q = $('#jn-q');
+    if (q) q.oninput = () => { const v = q.value.trim().toLowerCase(); document.querySelectorAll('[data-text]').forEach(el => { el.hidden = !!v && !el.dataset.text.includes(v); }); };
     const rows = await scoreDecisions(), box = $('#jn-body'); if (!box || S.route !== 'journal') return;
     if (!rows.length) { box.innerHTML = '<p class="empty" style="margin:0">還沒有紀錄。到個股頁按「我買了／我賣了／決定不動」記下你的決定，5 個交易日後就會開始出現成績。</p>'; return; }
     const act = rows.filter(d => d.action !== 'hold'), d5 = act.filter(d => d.r[5]);
@@ -1062,11 +1087,11 @@ ${footer()}`;
       </div>
       <div><b class="small">我的習慣</b>${ins.length ? `<ul class="habits">${ins.slice(0, 6).map(g => `<li><span>${esc(g.name)}</span><span class="small muted">${g.n} 次・勝率 ${g.win.toFixed(0)}%</span><b class="mono ${cls(g.avg)}">5 日平均 ${pct(g.avg, 1)}</b></li>`).join('')}</ul>` : '<p class="small muted" style="margin:4px 0 0">同一種情況累積 3 筆已結算的紀錄後，這裡會告訴你哪些習慣幫你賺、哪些讓你賠。</p>'}</div>
       <div class="tbl-box"><table class="tbl" style="min-width:680px"><thead><tr><th>日期</th><th>標的</th><th>決定</th><th class="num">價格</th><th>理由</th><th>當時系統</th><th class="num">1 日</th><th class="num">5 日</th><th class="num">20 日</th><th></th></tr></thead><tbody>
-      ${rows.slice().reverse().map(d => `<tr><td class="mono">${esc(d.at.slice(0, 10))}</td><td><a class="sym" href="#/s/${encodeURIComponent(d.key)}">${esc(d.key)}</a></td><td>${esc(ACT[d.action])}</td><td class="num">${px(d.price)}</td>
+      ${rows.slice().reverse().map(d => `<tr data-text="${esc([d.key, nameOf(d.key), ACT[d.action], d.basis ? BASIS[d.basis] : '', ...(d.tags || []), d.note, d.at.slice(0, 10)].filter(Boolean).join(' ').toLowerCase())}"><td class="mono">${esc(d.at.slice(0, 10))}</td><td><a class="sym" href="#/s/${encodeURIComponent(d.key)}">${esc(d.key)}</a></td><td>${esc(ACT[d.action])}</td><td class="num">${px(d.price)}</td>
         <td class="small" style="white-space:normal;max-width:220px">${esc([d.basis ? BASIS[d.basis] : '', d.mood != null ? '感覺' + moodZh(d.mood) : '', ...(d.tags || []), d.note].filter(Boolean).join('、') || '—')}</td><td class="small">${SIG[d.ctx?.sig] || '—'} ${d.ctx?.score ?? ''}</td>
         <td class="num">${res(d.r, 1)}</td><td class="num">${res(d.r, 5)}</td><td class="num">${res(d.r, 20)}</td><td><button type="button" class="iconbtn" data-deld="${esc(d.id)}" aria-label="刪除這筆">✕</button></td></tr>`).join('')}</tbody></table></div>
       <p class="small muted" style="margin:0">「決定不動」不算勝率，只記錄之後的漲跌，讓你回頭看「不動」對不對。漲跌未達 ±0.5% 不計入勝負。</p>`;
-    box.onclick = e => { const b = e.target.closest('[data-deld]'); if (!b || !confirm('刪除這筆紀錄？')) return; const j = J.load(); j.decisions = j.decisions.filter(x => x.id !== b.dataset.deld); J.save(j); render(); };
+    box.onclick = e => { const b = e.target.closest('[data-deld]'); if (!b || !confirm('刪除這筆紀錄？')) return; const j = J.load(); j.decisions = j.decisions.filter(x => x.id !== b.dataset.deld); j.deleted = [...(j.deleted || []), b.dataset.deld]; J.save(j); render(); };
   }
 
   // ── 組合分析（歸因、回撤、相關性、曝險）──────────────────────
@@ -1074,7 +1099,7 @@ ${footer()}`;
     const rows = P.rows.filter(r => r.mv > 0 && r.it);
     if (!rows.length || !P.total) return null;
     const keys = rows.map(r => r.key), bars = {};
-    await Promise.all([...keys, '^TWII', '^GSPC'].map(async k => { bars[k] = await loadBars(k); }));
+    await Promise.all([...keys, '^TWII', '^GSPC', 'USDTWD=X'].map(async k => { bars[k] = await loadBars(k); }));
     if (keys.some(k => !bars[k])) return { error: '部分持股走勢資料載入失敗' };
     const maps = Object.fromEntries(Object.entries(bars).filter(([, b]) => b).map(([k, b]) => [k, new Map(b.dates.map((d, i) => [d, b.close[i]]))]));
     let dates = bars[keys[0]].dates.slice();
@@ -1106,6 +1131,7 @@ ${footer()}`;
       beta, effN: hhi > 0 ? 1 / hhi : null, top3: rows.slice().sort((a, b) => b.mv - a.mv).slice(0, 3).reduce((s, r) => s + r.mv, 0) / P.total * 100,
       today: rows.map(r => ({ key: r.key, day: r.day || 0 })).sort((a, b) => Math.abs(b.day) - Math.abs(a.day)),
       todayP: P.dayPct, todayB: (wTW * (S.snap.indices?.['^TWII']?.changePct || 0) + wUS * (S.snap.indices?.['^GSPC']?.changePct || 0)),
+      fxRet: (() => { const fb = bars['USDTWD=X']; if (!fb) return null; const c = fb.close, n = c.length; const r = k => (n > k ? (c[n - 1] / c[n - 1 - k] - 1) * 100 : null); return [['近 1 個月', 21], ['近 3 個月', 63], ['近 1 年', 252]].map(([l, k]) => ({ l, fx: r(k), contrib: r(k) != null ? r(k) * wUS : null })); })(),
       curve, curveB, soonEarn: soonEarn.map(r => r.key), soonW: soonEarn.reduce((s, r) => s + r.mv, 0) / P.total * 100,
     };
   }
@@ -1126,6 +1152,7 @@ ${footer()}`;
           <table class="tbl rtbl" style="margin-top:6px"><thead><tr><th></th><th class="num">我的組合</th><th class="num">同配置大盤</th><th class="num">差異</th></tr></thead><tbody>
           ${A.perf.map(x => `<tr><td>${x.l}</td><td class="num ${cls(x.p)}">${pct(x.p, 1)}</td><td class="num ${cls(x.b)}">${pct(x.b, 1)}</td><td class="num ${cls(x.p - x.b)}"><b>${pct(x.p - x.b, 1)}</b></td></tr>`).join('')}
           <tr><td>年化波動（60 日）</td><td class="num">${num(A.vol, 1)}%</td><td class="num">${num(A.volB, 1)}%</td><td></td></tr>
+          ${A.fxRet && P.us > 0 ? A.fxRet.map(x => `<tr><td>匯率影響（${x.l}）</td><td class="num ${cls(x.contrib)}" colspan="2">美元兌台幣 ${pct(x.fx, 1)} → 組合 ${pct(x.contrib, 2)}</td><td></td></tr>`).join('') : ''}
           <tr><td>最大回撤（1 年）</td><td class="num down">${pct(A.mdd, 1)}</td><td class="num down">${pct(A.mddB, 1)}</td><td></td></tr></tbody></table>
           <div class="legend" style="margin-top:6px"><span><i style="background:#1F4FD8;height:2px"></i>我的組合</span><span><i style="background:#8A93A3;height:2px"></i>同配置大盤</span><span class="muted">近 120 個交易日</span></div>
           ${(() => { const all = [...A.curve, ...A.curveB]; const lo = Math.min(...all), hi = Math.max(...all), W = 600, Hh = 120; const y = t => (Hh - 4 - (t - lo) / ((hi - lo) || 1) * (Hh - 8)).toFixed(1); const pth = a => a.map((t, i) => `${i ? 'L' : 'M'}${(i / (a.length - 1) * W).toFixed(1)},${y(t)}`).join(''); return `<svg viewBox="0 0 ${W} ${Hh}" style="width:100%;height:auto" role="img" aria-label="組合與大盤近 120 日走勢"><path d="${pth(A.curveB)}" fill="none" stroke="#8A93A3" stroke-width="1.5"/><path d="${pth(A.curve)}" fill="none" stroke="#1F4FD8" stroke-width="2"/></svg>`; })()}
@@ -1154,12 +1181,15 @@ ${footer()}`;
     <p id="pf-msg" class="small" role="status"></p>
   </form>
 </section>
+${(h.log || []).length ? `<section class="card" aria-labelledby="hl2-h"><div class="hd"><h2 id="hl2-h">持股變動紀錄</h2><span class="note">每次儲存前的持股都會留一份（最近 100 次），會一起加密備份</span></div>
+  <ol class="list">${h.log.slice().reverse().map((x, i) => `<li><span class="tag">${esc(x.at.slice(5, 10).replace('-', '/'))}</span><div><div class="t">${x.items.length} 檔・現金 ${int(x.cash)}</div><div class="d">${esc(x.items.map(r => `${r.key} ${int(r.shares)} 股`).join('、') || '（空）')}</div><button type="button" class="btn sm" data-restore="${h.log.length - 1 - i}" style="margin-top:6px">還原成這一版</button></div></li>`).join('')}</ol></section>` : ''}
 <section class="card" aria-labelledby="lm-h">
   <div class="hd"><h2 id="lm-h">風險上限</h2><span class="note">總覽的「風險 vs 自訂上限」用這些數字</span></div>
   <form id="lm-form" class="form" style="max-width:420px">
     <div class="field"><label for="l-var">1 日風險值上限（%）</label><input id="l-var" type="number" step="0.1" value="${cfg.limits.var95}"></div>
     <div class="field"><label for="l-single">單一持股上限（% 總資產）</label><input id="l-single" type="number" step="1" value="${cfg.limits.single}"></div>
     <div class="field"><label for="l-cash">現金比例下限（%）</label><input id="l-cash" type="number" step="1" value="${cfg.limits.cashMin}"></div>
+    <div class="field"><label for="l-risk">單筆交易風險（% 總資產，部位建議用）</label><input id="l-risk" type="number" step="0.1" value="${cfg.limits.riskPct ?? 1}"></div>
     <div class="actions"><button class="btn primary" type="submit">儲存上限</button></div>
   </form>
 </section>`;
@@ -1169,11 +1199,93 @@ ${footer()}`;
     const read = () => [...rows.querySelectorAll('.hrow')].map(r => { const [k, s, c] = r.querySelectorAll('input'); return { key: k.value.trim().toUpperCase().replace(/\.TWO?$/, ''), shares: parseFloat(s.value), cost: c.value === '' ? null : parseFloat(c.value) }; }).filter(x => x.key && x.shares > 0);
     $('#add-row').onclick = () => { const i = rows.children.length; rows.insertAdjacentHTML('beforeend', `<div class="hrow" data-i="${i}"><input aria-label="代號" list="hold-list" placeholder="代號，如 2330、NVDA"><input aria-label="股數" type="number" inputmode="decimal" placeholder="股數"><input aria-label="平均成本" type="number" inputmode="decimal" step="any" placeholder="成本（原幣）"><button type="button" class="iconbtn" aria-label="刪除這一列">✕</button></div>`); rows.lastElementChild.querySelector('input').focus(); };
     rows.addEventListener('click', e => { const b = e.target.closest('.iconbtn'); if (b) b.closest('.hrow').remove(); });
-    $('#pf-form').onsubmit = e => { e.preventDefault(); const items = read(); H.save({ items, cash: parseFloat($('#cash').value) || 0 }); msg.className = 'small ok-text'; msg.textContent = `已儲存 ${items.length} 檔持股。`; };
-    $('#clr').onclick = () => { if (confirm('確定清除這台裝置上的所有持股資料？')) { H.save({ items: [], cash: 0 }); render(); } };
+    $('#pf-form').onsubmit = e => { e.preventDefault(); const items = read(), old = H.load(); const log = JSON.stringify(old.items) !== JSON.stringify(items) || old.cash !== (parseFloat($('#cash').value) || 0) ? [...(old.log || []), { at: new Date().toISOString(), items: old.items, cash: old.cash }].slice(-100) : (old.log || []); H.save({ items, cash: parseFloat($('#cash').value) || 0, log }); msg.className = 'small ok-text'; msg.textContent = `已儲存 ${items.length} 檔持股。`; };
+    document.querySelectorAll('[data-restore]').forEach(b => b.onclick = () => { const h0 = H.load(), v = h0.log[+b.dataset.restore]; if (!v || !confirm('把持股還原成這一版？（目前的版本會先存進紀錄）')) return; H.save({ items: v.items, cash: v.cash, log: [...h0.log, { at: new Date().toISOString(), items: h0.items, cash: h0.cash }].slice(-100) }); toast('已還原'); render(); });
+    $('#clr').onclick = () => { if (confirm('確定清除持股？（目前的版本會先存進變動紀錄）')) { const h0 = H.load(); H.save({ items: [], cash: 0, log: [...(h0.log || []), { at: new Date().toISOString(), items: h0.items, cash: h0.cash }].slice(-100) }); render(); } };
     $('#exp').onclick = () => { const blob = new Blob([JSON.stringify({ ...H.load(), journal: J.load(), stars: stars(), alerts: alerts() }, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'signal-terminal-mine.json'; a.click(); URL.revokeObjectURL(a.href); };
     $('#imp').onclick = () => { const i = document.createElement('input'); i.type = 'file'; i.accept = 'application/json'; i.onchange = async () => { try { const d = JSON.parse(await i.files[0].text()); if (!Array.isArray(d.items)) throw 0; H.save({ items: d.items, cash: d.cash || 0 }); if (d.journal) J.save(d.journal); if (d.stars) LS.set('stars', d.stars); if (d.alerts) LS.set('alerts', d.alerts); render(); } catch (_) { msg.className = 'small bad-text'; msg.textContent = '檔案格式不正確。'; } }; i.click(); };
-    $('#lm-form').onsubmit = e => { e.preventDefault(); cfg.limits = { var95: +$('#l-var').value || DEF.limits.var95, single: +$('#l-single').value || DEF.limits.single, cashMin: +$('#l-cash').value || 0 }; saveCfg(); msg.className = 'small ok-text'; msg.textContent = '風險上限已儲存。'; };
+    $('#lm-form').onsubmit = e => { e.preventDefault(); cfg.limits = { var95: +$('#l-var').value || DEF.limits.var95, single: +$('#l-single').value || DEF.limits.single, cashMin: +$('#l-cash').value || 0, riskPct: +$('#l-risk').value || 1 }; saveCfg(); stamp('limits'); scheduleSync(); msg.className = 'small ok-text'; msg.textContent = '風險上限已儲存。'; };
+  }
+
+  // ── 部位建議（依停損距離與風險預算）──────────────────────────
+  function viewSizing(it) {
+    const P = holdings(), g = it.signal, rate = it.market === 'us' ? fx() : 1;
+    const capTWD = P.total || +(LS.get('sizingCap', 0)) || 0;
+    const riskPct = cfg.limits.riskPct ?? 1, stop = g.stop;
+    const per = isNum(stop) && it.price > stop ? (it.price - stop) * rate : null;      // 每股風險（新台幣）
+    const lot = it.market === 'tw' ? 1000 : 1;
+    let sh = per && capTWD ? Math.floor(capTWD * riskPct / 100 / per) : null;
+    const capBySingle = capTWD ? Math.floor(capTWD * cfg.limits.single / 100 / (it.price * rate)) : null;
+    const limited = sh != null && capBySingle != null && sh > capBySingle; if (limited) sh = capBySingle;
+    const amt = sh != null ? sh * it.price * rate : null;
+    const vol = it.ta?.vol20, volW = isNum(vol) && vol > 0 ? Math.min(100, 15 / vol * 100) : null;   // 年化波動 15% 為基準的部位權重
+    return `<section class="card fold all" data-fold="s-size" aria-labelledby="sz-h"><div class="hd"><h2 id="sz-h">部位建議</h2><span class="note">依停損距離與風險預算計算：觸及停損時，最多虧總資產的 ${riskPct}%</span></div>
+      ${!capTWD ? `<div class="field" style="max-width:260px"><label for="sz-cap">總資金（新台幣）</label><input id="sz-cap" type="number" inputmode="decimal" placeholder="例如 1000000"><span class="hint">輸入持股後會自動用你的總資產。</span></div>` : ''}
+      ${per && capTWD ? `<dl class="facts mini">
+        <div><dt>建議股數</dt><dd>${int(sh)}${it.market === 'tw' ? ` <small class="muted">（約 ${(sh / lot).toFixed(1)} 張）</small>` : ''}</dd></div>
+        <div><dt>投入金額（新台幣）</dt><dd>${int(amt)}</dd></div>
+        <div><dt>占總資產</dt><dd>${(amt / capTWD * 100).toFixed(1)}%</dd></div>
+        <div><dt>觸及停損 ${px(stop)} 虧損</dt><dd class="down">−${int(sh * per)}</dd></div></dl>
+        ${limited ? `<p class="small" style="margin:0">已受「單一持股上限 ${cfg.limits.single}%」限制。</p>` : ''}` : (capTWD ? '<p class="empty" style="margin:0">沒有停損價，無法計算。</p>' : '')}
+      ${volW != null ? `<p class="small muted" style="margin:0">波動調整：這檔年化波動 ${vol.toFixed(0)}%，若以「年化 15% 波動」為一單位，建議權重約為一般部位的 ${volW.toFixed(0)}%。</p>` : ''}
+      <p class="small muted" style="margin:0">單筆風險比例可在「持股 → 風險上限」修改。</p></section>`;
+  }
+
+  // ── 大戶持股（集保）＋美股內部人 ────────────────────────────
+  function viewOwnership(it) {
+    if (it.market === 'tw') {
+      const T = it.tdcc || []; if (!T.length) return '';
+      const a = T[T.length - 1], b = T[T.length - 2], c4 = T[T.length - 5];
+      const mx = Math.max(...T.map(x => x.b1000)), mn = Math.min(...T.map(x => x.b1000));
+      return `<section class="card fold" data-fold="s-own" aria-labelledby="ow-h"><div class="hd"><h2 id="ow-h">大戶持股</h2><span class="note">集保股權分散表・每週更新（${esc(a.date)}）</span></div>
+        <dl class="facts mini">
+          <div><dt>千張大戶持股</dt><dd>${a.b1000.toFixed(1)}% ${b ? `<small class="${cls(a.b1000 - b.b1000)}">${sign(a.b1000 - b.b1000)}${fix(a.b1000 - b.b1000, 2)}</small>` : ''}</dd></div>
+          <div><dt>400 張以上</dt><dd>${a.b400.toFixed(1)}%</dd></div>
+          <div><dt>散戶（50 張以下）</dt><dd>${a.retail.toFixed(1)}%</dd></div>
+          <div><dt>股東人數</dt><dd>${int(a.holders)} ${b?.holders ? `<small class="${cls(-(a.holders - b.holders))}">${sign(a.holders - b.holders)}${int(Math.abs(a.holders - b.holders))}</small>` : ''}</dd></div>
+        </dl>
+        ${T.length >= 2 ? `<div class="fh"><div class="small muted">千張大戶持股比例（近 ${T.length} 週）</div>${spark(T.map(x => x.b1000), { w: 600, h: 70 })}</div>` : ''}
+        <p class="small muted" style="margin:0">${c4 ? `近 4 週千張大戶 ${sign(a.b1000 - c4.b1000)}${fix(a.b1000 - c4.b1000, 2)} 個百分點。` : '歷史累積中。'}大戶增加、股東人數減少，通常代表籌碼集中。</p></section>`;
+    }
+    const f = it.fund || {}, I = f.insider, Hh = f.holders;
+    if (!I && !Hh) return '';
+    return `<section class="card fold" data-fold="s-own" aria-labelledby="ow-h"><div class="hd"><h2 id="ow-h">持股結構與內部人</h2><span class="note">近 6 個月內部人交易（SEC Form 4，經 Yahoo 彙整）</span></div>
+      <dl class="facts mini">
+        ${I ? `<div><dt>內部人買進／賣出（筆）</dt><dd>${I.buyN ?? '—'}／${I.sellN ?? '—'}</dd></div><div><dt>內部人淨買賣（股）</dt><dd class="${cls(I.net)}">${I.net == null ? '—' : sign(I.net) + int(Math.abs(I.net))}</dd></div><div><dt>占內部人持股</dt><dd class="${cls(I.netPct)}">${pct(I.netPct, 2)}</dd></div>` : ''}
+        ${Hh ? `<div><dt>機構持股</dt><dd>${isNum(Hh.institutions) ? Hh.institutions.toFixed(1) + '%' : '—'}</dd></div><div><dt>內部人持股</dt><dd>${isNum(Hh.insiders) ? Hh.insiders.toFixed(2) + '%' : '—'}</dd></div>` : ''}
+      </dl><p class="small muted" style="margin:0">內部人賣出很常見（薪酬、稅務）；淨買進則較少見，較具參考性。</p></section>`;
+  }
+
+  // ── 歷史快照查詢 ────────────────────────────────────────────
+  const rawBase = () => { const { owner, repo } = repoInfo(); return `https://raw.githubusercontent.com/${owner}/${repo}/data/archive/`; };
+  let HIST_IDX = null;
+  async function viewHistory(day) {
+    if (!HIST_IDX) { try { HIST_IDX = await getJSON(rawBase() + 'index.json'); } catch (_) { HIST_IDX = { days: [] }; } }
+    const days = (HIST_IDX.days || []).slice().reverse();
+    if (!days.length) return `<div><a href="#/scorecard" class="small">← 系統成績</a></div><section class="card"><div class="hd"><h2>歷史快照</h2></div><p class="empty" style="margin:0">還沒有封存資料。每次收盤後完整更新都會存一份，明天起就能查詢。</p></section>`;
+    day = day && days.includes(day) ? day : days[0];
+    let snap = null; try { snap = await getJSON(rawBase() + `${day.slice(0, 4)}/${day}.json`); } catch (_) {}
+    const now = S.snap;
+    const head = `<div><a href="#/scorecard" class="small">← 系統成績</a></div>
+<section class="card" aria-labelledby="hs-h"><div class="hd"><h2 id="hs-h">歷史快照</h2><span class="note">每天收盤後的完整紀錄，永久保存在 GitHub</span></div>
+  <div class="field" style="max-width:260px"><label for="hs-day">日期</label><select id="hs-day">${days.map(d => `<option${d === day ? ' selected' : ''}>${d}</option>`).join('')}</select></div></section>`;
+    if (!snap) return head + '<section class="card"><p class="empty">這一天的資料讀取失敗。</p></section>';
+    const v = snap.verdict;
+    const rows = (snap.ranking || []).map(k => { const a = snap.items[k], b = now.items[k]; return { k, name: a.name, sig: a.signal.sig, score: a.signal.score, px: a.price, nowPx: b?.price, nowSig: b?.signal.sig, chg: b && a.price ? (b.price / a.price - 1) * 100 : null }; });
+    const hitBuy = rows.filter(r => r.sig === 'BUY' && isNum(r.chg)), hitSell = rows.filter(r => r.sig === 'SELL' && isNum(r.chg));
+    const avg = a => (a.length ? a.reduce((s, r) => s + r.chg, 0) / a.length : null);
+    return head + `
+<section class="card"><div class="hd"><h2>當天的判斷</h2><span class="note">${esc(tpeTime(snap.generatedAt))}</span></div>
+  <p style="margin:0;font-size:17px;font-weight:600">${esc(v.headline)}</p><p style="margin:0" class="muted">${esc(v.detail)}</p>
+  <div class="env" style="margin-top:4px">${snap.env.map(e => { const n = now.env.find(x => x.key === e.key); return `<div class="tile"><div class="lb">${esc(e.label)}</div><div class="v"><b>${num(e.value, e.value >= 1000 ? 0 : 2)}</b></div><div class="m">現在 ${n ? num(n.value, n.value >= 1000 ? 0 : 2) : '—'}</div></div>`; }).join('')}</div>
+  ${(snap.health?.signals || []).length ? `<ul class="tcom">${snap.health.signals.map(x => `<li class="${x.tone}"><i></i>${esc(x.text)}</li>`).join('')}</ul>` : ''}
+</section>
+<section class="card"><div class="hd"><h2>當天的訊號，到現在的結果</h2></div>
+  <p style="margin:0">當天買進訊號 ${hitBuy.length} 檔，到現在平均 <b class="${cls(avg(hitBuy))}">${pct(avg(hitBuy), 1)}</b>；賣出訊號 ${hitSell.length} 檔，平均 <b class="${cls(avg(hitSell))}">${pct(avg(hitSell), 1)}</b>；全部平均 ${pct(avg(rows.filter(r => isNum(r.chg))), 1)}。</p>
+  <div class="tbl-box"><table class="tbl rtbl"><thead><tr><th>標的</th><th>當天</th><th class="num">分數</th><th class="num">當天價</th><th class="num">現價</th><th class="num">至今</th><th>現在</th></tr></thead><tbody>
+  ${rows.map(r => `<tr><td><a href="#/s/${encodeURIComponent(r.k)}">${esc(r.k)}</a> <span class="small muted">${esc(r.name)}</span></td><td>${sigTag(r.sig)}</td><td class="num">${r.score}</td><td class="num">${px(r.px)}</td><td class="num">${px(r.nowPx)}</td><td class="num ${cls(r.chg)}">${pct(r.chg, 1)}</td><td>${r.nowSig ? sigTag(r.nowSig) : '—'}</td></tr>`).join('')}</tbody></table></div>
+  <p class="small muted" style="margin:0">原始檔：<a href="${rawBase()}${day.slice(0, 4)}/${day}.json" target="_blank" rel="noopener">${day}.json</a></p>
+</section>${footer()}`;
   }
 
   // ── 策略回測（在瀏覽器計算，參數可調）────────────────────────
@@ -1345,6 +1457,7 @@ ${footer()}`;
     const STZ = { yahoo: 'Yahoo 報價', vix: 'VIX 恐慌指數', treasury: '美國公債殖利率', t86: '三大法人（TWSE）', finmind: 'FinMind 法人／營收', fundamentals: '美股基本面', breadth: '台股寬度（收盤歷史）', futures: '外資台指期', putcall: '選擇權 P/C 比', valuation: '台股估值', margin: '融資餘額', usValuation: '標普本益比', fred: 'FRED 信用／壓力', indices: '指數推論' };
     return `
 <section class="card" aria-labelledby="bt0"><div class="hd"><h2 id="bt0">策略回測</h2><span class="note">過去 2 年照技術面訊號操作的結果，可自行調整門檻、停損、停利；另附 AI 模型的樣本外表現</span><a class="act btn primary sm" href="#/backtest" style="color:#fff">開始回測</a></div></section>
+<section class="card" aria-labelledby="hs0"><div class="hd"><h2 id="hs0">歷史快照</h2><span class="note">查任何一天收盤後的判斷、訊號、指標，並看當天訊號到現在的結果</span><a class="act btn sm" href="#/history">查詢</a></div></section>
 <section class="card" aria-labelledby="sc1"><div class="hd"><h2 id="sc1">模型成績單</h2><span class="note">${esc(sc.note)}</span></div>
   <div class="grid2"><div style="display:flex;flex-direction:column;gap:12px"><b class="small">近 30 天</b>${scoreRows(sc.d30)}</div><div style="display:flex;flex-direction:column;gap:12px"><b class="small">近 90 天</b>${scoreRows(sc.d90)}</div></div>
   <p class="small muted" style="margin:0">黑線＝50%（擲硬幣）。灰色條＝樣本少於 30 筆。${sc.since ? `自 ${esc(sc.since)} 起共 ${sc.total} 筆。` : ''}</p></section>
@@ -1366,9 +1479,10 @@ ${footer()}`;
     <div class="field"><label for="st-host">本機服務位址</label><input id="st-host" value="${esc(cfg.localHost)}" placeholder="localhost"><span class="hint">通常是 localhost；在家中其他裝置使用時可填那台電腦的區網 IP（例如 192.168.1.100）。</span></div>
     <div class="actions"><button class="btn primary" type="submit">儲存</button><button type="button" class="btn" id="st-test">測試連線</button></div>
     <p id="st-msg" class="small" role="status"></p>
-  </form></section>`;
+  </form></section>${viewSyncSettings()}`;
   }
   function bindSettings() {
+    bindSyncSettings();
     const msg = $('#st-msg');
     const readForm = () => { cfg.colors = $('#st-colors').value; cfg.nasUrl = $('#st-nas').value.trim(); cfg.localEnabled = $('#st-local').checked; cfg.localHost = $('#st-host').value.trim() || 'localhost'; };
     $('#st-form').onsubmit = async e => { e.preventDefault(); readForm(); saveCfg(); applyColors(); msg.className = 'small ok-text'; msg.textContent = '已儲存。'; await probeLocal(); };
@@ -1381,6 +1495,140 @@ ${footer()}`;
       out.push('本機：' + (S.local.off ? '已關閉' : Object.keys(LOCAL).map(k => `${LOCAL[k].label} ${S.local[k] ? '✓' : '✕'}`).join('　')));
       msg.innerHTML = out.map(esc).join('<br>');
     };
+  }
+
+  // ── 個人資料：加密雲端備份與多裝置同步（GitHub 私密 Gist，AES-256-GCM）──
+  // 資料在瀏覽器裡用你的密語加密後才上傳；GitHub 和任何人沒有密語都讀不到內容。
+  const SYNC_KEYS = ['holdings', 'journal', 'stars', 'alerts'];
+  const B64 = { enc: u8 => btoa(String.fromCharCode(...u8)), dec: s => Uint8Array.from(atob(s), c => c.charCodeAt(0)) };
+  async function deriveKey(pass, salt, iter) {
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: iter, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+  async function encryptJSON(obj, pass) {
+    const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12)), iter = 210000;
+    const key = await deriveKey(pass, salt, iter);
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(obj))));
+    return { v: 1, kdf: 'PBKDF2-SHA256', iter, salt: B64.enc(salt), iv: B64.enc(iv), ct: B64.enc(ct) };
+  }
+  async function decryptJSON(env, pass) {
+    const key = await deriveKey(pass, B64.dec(env.salt), env.iter);
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: B64.dec(env.iv) }, key, B64.dec(env.ct));
+    return JSON.parse(new TextDecoder().decode(pt));
+  }
+  const SY = { get: () => LS.get('sync', { token: '', pass: '', gist: '', last: null, err: null }), set: o => LS.set('sync', Object.assign(SY.get(), o)) };
+  const stamp = k => { const t = LS.get('ts', {}); t[k] = Date.now(); LS.set('ts', t); };
+  function bundle() { return { v: 1, at: Date.now(), ts: LS.get('ts', {}), holdings: H.load(), journal: J.load(), stars: stars(), alerts: alerts(), limits: cfg.limits }; }
+  /** 合併：決策、市場感覺取聯集（刪除以墓碑記錄）；論點取較新；持股、自選、提醒依各自時間戳取較新 */
+  function mergeBundle(remote) {
+    const lt = LS.get('ts', {}), rt = remote.ts || {};
+    for (const k of ['holdings', 'stars', 'alerts']) if ((rt[k] || 0) > (lt[k] || 0) && remote[k] != null) { localStorage.setItem(k, JSON.stringify(remote[k])); lt[k] = rt[k]; }
+    if ((rt.limits || 0) > (lt.limits || 0) && remote.limits) { cfg.limits = Object.assign({}, cfg.limits, remote.limits); saveCfg(); lt.limits = rt.limits; }
+    const a = J.load(), b = remote.journal || {};
+    const dead = new Set([...(a.deleted || []), ...(b.deleted || [])]);
+    const byId = new Map(); for (const d of [...(a.decisions || []), ...(b.decisions || [])]) if (!dead.has(d.id)) byId.set(d.id, d);
+    const moodKey = m => m.market + m.at.slice(0, 10), moods = new Map();
+    for (const m of [...(a.moods || []), ...(b.moods || [])]) { const k = moodKey(m), o = moods.get(k); if (!o || o.at < m.at) moods.set(k, m); }
+    const theses = { ...(a.theses || {}) };
+    for (const [k, t] of Object.entries(b.theses || {})) if (!theses[k] || (t.updated || '') > (theses[k].updated || '')) theses[k] = t;
+    const arch = new Map(); for (const x of [...(a.archived || []), ...(b.archived || [])]) arch.set(x.key + x.closed, x);
+    for (const x of arch.values()) if (theses[x.key] && (theses[x.key].updated || '') <= x.closed) delete theses[x.key];
+    localStorage.setItem('journal', JSON.stringify({ ...a, theses, archived: [...arch.values()].sort((x, y) => x.closed.localeCompare(y.closed)), decisions: [...byId.values()].sort((x, y) => x.at.localeCompare(y.at)), moods: [...moods.values()].sort((x, y) => x.at.localeCompare(y.at)), deleted: [...dead] }));
+    lt.journal = Math.max(lt.journal || 0, rt.journal || 0); LS.set('ts', lt);
+  }
+  async function gh(path, opt = {}) {
+    const s = SY.get();
+    const r = await fetch('https://api.github.com' + path, { ...opt, headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${s.token}`, ...(opt.body ? { 'Content-Type': 'application/json' } : {}) } });
+    if (!r.ok) throw new Error(r.status === 401 ? 'GitHub 權杖無效或已過期' : r.status === 404 ? '找不到備份（權杖需要 Gist 權限）' : 'GitHub ' + r.status);
+    return r.json();
+  }
+  const GIST_FILE = 'signal-terminal-backup.json';
+  async function findGist() {
+    const s = SY.get(); if (s.gist) return s.gist;
+    for (let page = 1; page <= 5; page++) { const list = await gh(`/gists?per_page=100&page=${page}`); const g = list.find(x => x.files?.[GIST_FILE]); if (g) { SY.set({ gist: g.id }); return g.id; } if (list.length < 100) break; }
+    return null;
+  }
+  let syncing = false, syncTimer = null;
+  async function syncNow(manual) {
+    const s = SY.get(); if (!s.token || !s.pass || syncing) return;
+    syncing = true; updateSyncPill('同步中…');
+    try {
+      let id = await findGist();
+      if (id) { const g = await gh(`/gists/${id}`); const f = g.files?.[GIST_FILE]; if (f?.content) { const remote = await decryptJSON(JSON.parse(f.content), s.pass); mergeBundle(remote); } }
+      const env = await encryptJSON(bundle(), s.pass);
+      const body = JSON.stringify({ description: 'signal-terminal-backup（加密的個人投資紀錄）', public: false, files: { [GIST_FILE]: { content: JSON.stringify(env) } } });
+      if (id) await gh(`/gists/${id}`, { method: 'PATCH', body }); else { const g = await gh('/gists', { method: 'POST', body }); SY.set({ gist: g.id }); }
+      SY.set({ last: Date.now(), err: null }); updateSyncPill();
+      if (manual) toast('已同步到雲端（加密）');
+    } catch (e) {
+      const msg = /OperationError|decrypt/i.test(String(e.name || e.message)) ? '密語不正確，無法解開雲端備份' : e.message;
+      SY.set({ err: msg }); updateSyncPill(); if (manual) toast('同步失敗：' + msg);
+    } finally { syncing = false; }
+  }
+  function scheduleSync() { if (!SY.get().token) return; clearTimeout(syncTimer); syncTimer = setTimeout(() => syncNow(false), 4000); }
+  function updateSyncPill(txt) {
+    const el = $('#pill-sync'); if (!el) return;
+    const s = SY.get();
+    if (!s.token) { el.hidden = true; return; }
+    el.hidden = false; el.className = 'pill ' + (s.err ? 'bad' : 'ok');
+    el.querySelector('.t').textContent = txt || (s.err ? '同步失敗' : `已備份 ${s.last ? ago(new Date(s.last).toISOString()) : ''}`);
+    el.title = s.err || '個人資料已加密備份到 GitHub';
+  }
+  // 攔截個人資料的寫入：記錄時間戳並排程同步
+  const _set = LS.set;
+  LS.set = (k, v) => { _set(k, v); if (SYNC_KEYS.includes(k)) { stamp(k); scheduleSync(); } };
+
+  function viewSyncSettings() {
+    const s = SY.get();
+    return `<section class="card" aria-labelledby="sy-h"><div class="hd"><h2 id="sy-h">個人資料備份與同步</h2><span class="note">持股、論點（含修改紀錄）、決策紀錄、市場感覺、自選、提醒</span></div>
+      <p class="small" style="margin:0">在瀏覽器裡用你的<b>密語</b>加密後，存到你 GitHub 帳號的私密 Gist。手機、電腦設定同一組權杖和密語就會自動同步；沒有密語的人（包括 GitHub）都看不到內容。</p>
+      <form id="sy-form" class="form" style="max-width:520px">
+        <div class="field"><label for="sy-token">GitHub 權杖（只需 Gist 權限）</label><input id="sy-token" type="password" autocomplete="off" value="${esc(s.token)}" placeholder="github_pat_… 或 ghp_…"><span class="hint">建立方式見下方說明。權杖只存在這台裝置。</span></div>
+        <div class="field"><label for="sy-pass">加密密語</label><input id="sy-pass" type="password" autocomplete="new-password" value="${esc(s.pass)}" placeholder="自己設一組，至少 10 個字"><span class="hint">忘記就無法解開備份，請記在密碼管理器。每台裝置要輸入同一組。</span></div>
+        <div class="actions"><button class="btn primary" type="submit">儲存並同步</button>${s.token ? '<button type="button" class="btn" id="sy-now">立即同步</button><button type="button" class="btn danger" id="sy-off">停用</button>' : ''}</div>
+        ${s.gist ? `<div class="field"><label>備份編號（設定推播時用）</label><div style="display:flex;gap:8px"><input readonly value="${esc(s.gist)}" id="sy-gid"><button type="button" class="btn sm" id="sy-copy">複製</button></div></div>` : ''}
+        <p id="sy-msg" class="small ${s.err ? 'bad-text' : 'muted'}" role="status">${s.err ? esc(s.err) : s.last ? `上次同步：${esc(tpeTime(new Date(s.last).toISOString()))}` : ''}</p>
+      </form>
+      <details><summary>如何建立 GitHub 權杖</summary><ol class="small" style="margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:4px">
+        <li>手機或電腦登入 github.com → 右上角頭像 → <b>Settings</b> → 最下方 <b>Developer settings</b>。</li>
+        <li><b>Personal access tokens → Fine-grained tokens → Generate new token</b>。</li>
+        <li>Token name 填「訊號終端備份」，Expiration 選 1 年（或 No expiration）。</li>
+        <li>Repository access 選 <b>Public repositories (read-only)</b> 即可；往下 <b>Account permissions → Gists</b> 設為 <b>Read and write</b>。</li>
+        <li>按 <b>Generate token</b>，複製權杖貼到上面。</li></ol></details>
+    </section>
+    <section class="card" aria-labelledby="nt-h"><div class="hd"><h2 id="nt-h">手機推播通知</h2><span class="note">網站沒開也會通知：價格提醒、論點觸發、持股大漲大跌與財報、訊號轉變、市場急性警訊、重大事件前一天；每週一早上送週報</span></div>
+      <ol class="small" style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px">
+        <li>手機安裝 <b>ntfy</b> App（App Store／Google Play，免費、不用註冊）。</li>
+        <li>按下方「產生主題名稱」，在 App 裡按 <b>＋</b> → 訂閱這個主題（主題名稱就是你的通知密碼，不要外流）。</li>
+        <li>到 GitHub 專案 <b>Settings → Secrets and variables → Actions</b>，新增 <code>NTFY_TOPIC</code>＝主題名稱。</li>
+        <li>要讓推播檢查你的價格提醒、論點與持股：先開啟上面的「個人資料備份」，再新增 <code>BACKUP_GIST_ID</code>＝備份編號、<code>BACKUP_PASSPHRASE</code>＝加密密語。</li>
+      </ol>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><input id="nt-topic" value="${esc(LS.get('ntfyTopic', ''))}" placeholder="主題名稱" style="flex:1;min-width:180px;height:40px;border:1px solid var(--line);border-radius:8px;padding:0 10px"><button type="button" class="btn sm" id="nt-gen">產生主題名稱</button><button type="button" class="btn sm" id="nt-test">傳送測試通知</button></div>
+      <p id="nt-msg" class="small muted" role="status" style="margin:0"></p>
+    </section>`;
+  }
+  function bindSyncSettings() {
+    const f = $('#sy-form'); if (!f) return;
+    f.onsubmit = async e => {
+      e.preventDefault();
+      const token = $('#sy-token').value.trim(), pass = $('#sy-pass').value;
+      if (!token || pass.length < 10) { $('#sy-msg').className = 'small bad-text'; $('#sy-msg').textContent = '請輸入權杖，密語至少 10 個字。'; return; }
+      SY.set({ token, pass, gist: SY.get().token === token ? SY.get().gist : '', err: null });
+      $('#sy-msg').className = 'small'; $('#sy-msg').textContent = '同步中…';
+      await syncNow(true); render();
+    };
+    const n = $('#sy-now'); if (n) n.onclick = async () => { await syncNow(true); render(); };
+    const cp = $('#sy-copy'); if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText($('#sy-gid').value); toast('已複製'); } catch (_) { $('#sy-gid').select(); } };
+    const tp = $('#nt-topic');
+    $('#nt-gen').onclick = () => { const r = crypto.getRandomValues(new Uint8Array(9)); tp.value = 'st-' + [...r].map(b => b.toString(36).padStart(2, '0')).join('').slice(0, 16); LS.set('ntfyTopic', tp.value); };
+    tp.onchange = () => LS.set('ntfyTopic', tp.value.trim());
+    $('#nt-test').onclick = async () => {
+      const t = tp.value.trim(), m = $('#nt-msg'); if (!t) { m.textContent = '請先產生或輸入主題名稱。'; return; }
+      LS.set('ntfyTopic', t);
+      try { const r = await fetch('https://ntfy.sh/', { method: 'POST', body: JSON.stringify({ topic: t, title: '訊號終端', message: '測試通知：設定成功 🎉', tags: ['white_check_mark'] }) }); m.className = 'small ' + (r.ok ? 'ok-text' : 'bad-text'); m.textContent = r.ok ? '已送出，手機應該馬上收到。記得把同一個主題名稱加到 GitHub 的 NTFY_TOPIC。' : '送出失敗：' + r.status; }
+      catch (e) { m.className = 'small bad-text'; m.textContent = '送出失敗：' + e.message; }
+    };
+    const o = $('#sy-off'); if (o) o.onclick = () => { if (confirm('停用後這台裝置不再同步（雲端備份不會刪除）。')) { LS.set('sync', {}); updateSyncPill(); render(); } };
   }
 
   // ── 手機：可收合的區塊（記住每個區塊的展開狀態）──────────────
@@ -1407,7 +1655,7 @@ ${footer()}`;
   async function render() {
     const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
     S.route = h.startsWith('s/') ? h : (h.split('/')[0] || 'home');
-    const nav = h.startsWith('s/') ? 'home' : S.route === 'all' ? 'home' : S.route === 'backtest' ? 'scorecard' : S.route;
+    const nav = h.startsWith('s/') ? 'home' : S.route === 'all' ? 'home' : ['backtest', 'history'].includes(S.route) ? 'scorecard' : S.route;
     document.querySelectorAll('[data-nav]').forEach(a => { a.classList.toggle('act', a.dataset.nav === nav); if (a.dataset.nav === nav) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
     const main = $('#main');
     if (!S.snap) return;
@@ -1426,6 +1674,7 @@ ${footer()}`;
       const html = await viewQuick(key); if (!location.hash.includes('/q/')) return;
       main.innerHTML = html; document.title = `${key}・訊號終端`;
     } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); bindPortfolio(); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
+    else if (S.route === 'history') { main.innerHTML = '<p class="loading">載入歷史快照…</p>'; const html = await viewHistory(h.split('/')[1]); if (S.route !== 'history') return; main.innerHTML = html; const sel = $('#hs-day'); if (sel) sel.onchange = () => { location.hash = '#/history/' + sel.value; }; document.title = '歷史快照・訊號終端'; }
     else if (S.route === 'backtest') { const k = h.split('/')[1]; if (k) { BT.scope = decodeURIComponent(k).toUpperCase(); LS.set('bt', BT); } main.innerHTML = viewBacktest(); bindBacktest(); document.title = '策略回測・訊號終端'; }
     else if (S.route === 'journal') { main.innerHTML = viewJournal(); document.title = '我的成績單・訊號終端'; afterJournal(); }
     else if (S.route === 'scorecard') { main.innerHTML = viewScorecard(); document.title = '模型成績・訊號終端'; }
@@ -1512,6 +1761,8 @@ ${footer()}`;
     try { await loadSnapshot(); }
     catch (e) { $('#main').innerHTML = `<section class="card"><h2 style="margin:0">無法載入資料</h2><p>${esc(e.message)}</p><div class="actions"><button class="btn primary" onclick="location.reload()">重新整理</button><a class="btn" href="#/settings">設定</a></div></section>`; if (location.hash.startsWith('#/settings')) { $('#main').innerHTML = viewSettings(); bindSettings(); } return; }
     setupSearch();
+    updateSyncPill();
+    if (SY.get().token) syncNow(false).then(() => { if (!['settings', 'portfolio'].includes(S.route)) render(); });
     window.addEventListener('hashchange', render);
     document.addEventListener('click', e => {
       const f = e.target.closest('[data-of]');

@@ -1,0 +1,33 @@
+name: 每週投資週報
+
+on:
+  schedule:
+    - cron: '13 0 * * 1'      # 週一 08:13（台北）
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 取得最新資料
+        run: |
+          SITE="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          mkdir -p out/data/bars
+          curl -fsS "$SITE/data/snapshot.json" -o out/data/snapshot.json
+          for k in $(node -e "const s=require('./out/data/snapshot.json');console.log([...Object.keys(s.items),'^TWII','^GSPC','^SOX'].map(k=>k.replace(/[^A-Za-z0-9_.-]/g,'_')).join(' '))"); do
+            curl -fsS "$SITE/data/bars/$k.json" -o "out/data/bars/$k.json" || true
+          done
+      - name: 送出週報
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BACKUP_GIST_ID: ${{ secrets.BACKUP_GIST_ID }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: node pipeline/notify.js --weekly --snap=out/data/snapshot.json --bars=out/data/bars
