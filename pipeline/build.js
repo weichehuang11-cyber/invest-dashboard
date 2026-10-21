@@ -187,7 +187,7 @@ async function main() {
     // 市場寬度、期貨選擇權、估值、融資（失敗不影響其他資料）
     const lastDate = status.t86 && status.t86 !== 'fail' ? status.t86 : TWSE.lastTradingDate();
     try {
-      heavy.tw.hist = await Market.updateTwHistory(heavy.tw.hist, lastDate, { maxBackfill: heavy.tw.hist ? 10 : 25, log });
+      heavy.tw.hist = await Market.updateTwHistory(heavy.tw.hist, lastDate, { maxBackfill: heavy.tw.hist ? 12 : 25, keep: 130, log });
       status.breadth = `${heavy.tw.hist.dates.length} 日`;
     } catch (e) { status.breadth = 'fail: ' + e.message; }
     const push = (k, row, keep = 120) => { const a = (heavy.tw[k] || []).filter(x => x.date !== row.date); a.push(row); heavy.tw[k] = a.sort((x, y) => x.date.localeCompare(y.date)).slice(-keep); };

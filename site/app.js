@@ -485,7 +485,7 @@ ${footer()}`;
     const accum = n => `<span class="small muted">累積中（${b?.days || 0}／${n} 個交易日）</span>`;
     const p1 = b ? panel('台股市場寬度', `${adBar}
       ${hrow('站上 20 日線', isNum(b.above20) ? `<b>${b.above20.toFixed(0)}%</b>` : accum(20), '', spark(b.series.map(x => x.above20), { cap: '站上 20 日線的股票比例', fmt: x => x.toFixed(0) + '%' }))}
-      ${hrow('站上 60 日線', isNum(b.above60) ? `<b>${b.above60.toFixed(0)}%</b>` : accum(60))}
+      ${hrow('站上 60 日線', isNum(b.above60) ? `<b>${b.above60.toFixed(0)}%</b>` : accum(60), '', spark(b.series.map(x => x.above60), { col: '#6E8EEB', cap: '站上 60 日線的股票比例', fmt: x => x.toFixed(0) + '%' }) || (isNum(b.above60) ? `<span class="small muted">走勢線需要約 65 個交易日以上的收盤資料，系統每天往回補，約一週內出現。</span>` : ''))}
       ${hrow('20 日新高／新低', b.newHiLo ? `<b class="up">${b.newHiLo.hi}</b> ／ <b class="down">${b.newHiLo.lo}</b> 家` : accum(21))}
       ${hrow('近 5 日漲跌家數比', isNum(b.adRatio5) ? `<b>${b.adRatio5.toFixed(2)}</b>` : '—', isNum(b.adRatio5) ? (b.adRatio5 >= 1 ? '上漲家數較多（＞1）' : '下跌家數較多（＜1）') : '')}
       ${hrow('騰落線', '', '每天「上漲家數−下跌家數」累加；往上＝多數股票在漲，往下＝多數股票在跌', spark(b.adLine.map(x => x.v), { cap: '累計漲跌家數差', fmt: x => (x > 0 ? '+' : '') + Math.round(x).toLocaleString() }))}`,
