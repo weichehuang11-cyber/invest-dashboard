@@ -1243,14 +1243,38 @@ ${footer()}`;
   }
 
   function setupSearch() {
-    const dl = $('#search-list');
-    dl.innerHTML = Object.values(S.snap.items).map(it => `<option value="${esc(it.key)}">${esc(it.name)}</option>`).join('');
-    $('#search').onsubmit = e => {
+    const inp = $('#search-input'), box = $('#search-results'), form = $('#search');
+    const all = () => Object.values(S.snap.items);
+    const norm = v => String(v || '').trim().toUpperCase().replace(/\.TWO?$/, '');
+    const find = q => {
+      q = norm(q); if (!q) return [];
+      const exact = all().filter(it => it.key === q);
+      const starts = all().filter(it => it.key !== q && it.key.startsWith(q));
+      const name = all().filter(it => !it.key.startsWith(q) && String(it.name).toUpperCase().includes(q));
+      return [...exact, ...starts, ...name].slice(0, 8);
+    };
+    let hits = [], cur = -1;
+    const go = key => { box.hidden = true; inp.value = ''; inp.blur(); location.hash = '#/s/' + encodeURIComponent(key); };
+    const draw = () => {
+      if (!inp.value.trim()) { box.hidden = true; return; }
+      box.hidden = false;
+      box.innerHTML = hits.length ? hits.map((it, i) => `<li role="option" data-key="${esc(it.key)}" aria-selected="${i === cur}"><b>${esc(it.key)}</b><span>${esc(it.name)}</span><span class="${cls(it.changePct)}">${pct(it.changePct)}</span></li>`).join('')
+        : `<li class="none">觀察清單沒有「${esc(inp.value.trim())}」。要追蹤請加到 config/watchlist.json</li>`;
+    };
+    inp.addEventListener('input', () => { hits = find(inp.value); cur = hits.length ? 0 : -1; draw(); });
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown' && hits.length) { cur = (cur + 1) % hits.length; draw(); e.preventDefault(); }
+      else if (e.key === 'ArrowUp' && hits.length) { cur = (cur - 1 + hits.length) % hits.length; draw(); e.preventDefault(); }
+      else if (e.key === 'Escape') box.hidden = true;
+    });
+    box.addEventListener('pointerdown', e => { const li = e.target.closest('[data-key]'); if (li) { e.preventDefault(); go(li.dataset.key); } });
+    inp.addEventListener('blur', () => setTimeout(() => { box.hidden = true; }, 150));
+    inp.addEventListener('focus', () => { if (inp.value.trim()) { hits = find(inp.value); draw(); } });
+    form.onsubmit = e => {
       e.preventDefault();
-      const q = $('#search-input').value.trim().toUpperCase(); if (!q) return;
-      const hit = S.snap.items[q] ? q : Object.values(S.snap.items).find(it => it.name.toUpperCase().includes(q))?.key;
-      location.hash = '#/s/' + encodeURIComponent(hit || q);
-      $('#search-input').value = '';
+      const q = norm(inp.value); if (!q) return;
+      const h = find(q);
+      if (h.length) go(h[cur >= 0 && h[cur] ? cur : 0].key); else { hits = []; draw(); }
     };
   }
 

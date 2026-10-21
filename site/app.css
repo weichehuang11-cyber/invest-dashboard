@@ -314,3 +314,13 @@ table.corr { min-width: 0; }
 .qbars > div { height: 100%; display: flex; align-items: flex-end; }
 .qbars > div > div { width: 100%; border-radius: 2px 2px 0 0; }
 .qtbl td, .qtbl th { padding: 6px 5px; }
+
+/* 搜尋 */
+.search { position: relative; display: flex; gap: 6px; }
+.search-go { height: 36px; padding: 0 12px; border-radius: 6px; border: 1px solid #3A404B; background: var(--top2); color: var(--topink); cursor: pointer; flex: none; }
+.search-results { position: absolute; top: calc(100% + 4px); left: 0; right: 0; min-width: 260px; margin: 0; padding: 4px; list-style: none; background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); z-index: 30; }
+.search-results li { display: grid; grid-template-columns: 70px 1fr auto; gap: 8px; align-items: center; padding: 10px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+.search-results li span:last-child { font-family: var(--mono); font-size: 12px; }
+.search-results li[aria-selected="true"], .search-results li:hover { background: var(--acc-bg); }
+.search-results li.none { display: block; color: var(--mute); cursor: default; font-size: 13px; }
+@media (max-width: 760px) { .search { display: flex; } .search input { flex: 1; min-width: 0; font-size: 16px; } .search-go { height: 34px; } }
