@@ -22,14 +22,26 @@ async function post(url, model, messages, json, token, timeout) {
     return c;
   } finally { clearTimeout(t); }
 }
-/** 依序嘗試：GitHub Models 新端點 → 舊的 Azure 端點 */
+/** Anthropic Claude（設定 ANTHROPIC_API_KEY 時優先使用；每天約 2 次呼叫，費用極低） */
+async function claude(messages, timeout) {
+  const sys = messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), timeout);
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', signal: ctl.signal,
+      headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5', max_tokens: 2000, system: sys, messages: messages.filter(m => m.role !== 'system') }) });
+    const text = await r.text();
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${text.slice(0, 120)}`);
+    return JSON.parse(text).content?.map(c => c.text || '').join('') || '';
+  } finally { clearTimeout(t); }
+}
+/** 依序嘗試：Anthropic（有金鑰時）→ GitHub Models */
 async function chat(messages, { json = false, timeout = 90000 } = {}) {
-  const token = process.env.GH_MODELS_TOKEN;
-  if (!token) throw new Error('沒有 GH_MODELS_TOKEN');
-  const tries = [['https://models.github.ai/inference/chat/completions', MODEL], ['https://models.inference.ai.azure.com/chat/completions', MODEL.replace(/^[^/]+\//, '')]];
   const errs = [];
-  for (const [url, model] of tries) { try { return await post(url, model, messages, json, token, timeout); } catch (e) { errs.push(`${new URL(url).host}: ${e.message}${e.cause ? ' / ' + (e.cause.code || e.cause.message) : ''}`); } }
-  throw new Error(errs.join(' ｜ '));
+  if (process.env.ANTHROPIC_API_KEY) { try { return await claude(messages, timeout); } catch (e) { errs.push('anthropic: ' + e.message); } }
+  const token = process.env.GH_MODELS_TOKEN;
+  if (token) for (const [url, model] of [['https://models.github.ai/inference/chat/completions', MODEL]]) { try { return await post(url, model, messages, json, token, timeout); } catch (e) { errs.push(`${new URL(url).host}: ${e.message}`); } }
+  throw new Error(errs.join(' ｜ ') || '沒有可用的 AI（請設定 ANTHROPIC_API_KEY）');
 }
 
 const SIG = { BUY: '買進', SELL: '賣出', HOLD: '觀望' };
@@ -50,7 +62,7 @@ ${facts}
 請輸出 JSON：{"verdict": "3 句話以內的今日市場解讀：重點、原因、該怎麼做（不超過 120 字）", "stocks": {"代號": "一句話點評，30 字以內，說出最關鍵的一件事"}}，stocks 要涵蓋上面每一檔。`;
   const txt = await chat([{ role: 'system', content: sys }, { role: 'user', content: user }], { json: true });
   const j = JSON.parse((txt.match(/\{[\s\S]*\}/) || [txt])[0]);
-  return { model: MODEL, at: new Date().toISOString(), verdict: String(j.verdict || '').trim(), stocks: Object.fromEntries(Object.entries(j.stocks || {}).map(([k, v]) => [String(k).toUpperCase(), String(v).trim()])) };
+  return { model: process.env.ANTHROPIC_API_KEY ? (process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5') : MODEL, at: new Date().toISOString(), verdict: String(j.verdict || '').trim(), stocks: Object.fromEntries(Object.entries(j.stocks || {}).map(([k, v]) => [String(k).toUpperCase(), String(v).trim()])) };
 }
 
 module.exports = { chat, commentary, MODEL };

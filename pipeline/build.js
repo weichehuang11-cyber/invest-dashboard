@@ -511,7 +511,7 @@ async function main() {
     watchlist: { us: wl.us, tw: wl.tw },
   };
   // 雲端 AI 解讀：收盤後完整更新時產生，盤中沿用上一次的
-  if (FULL && process.env.GH_MODELS_TOKEN) {
+  if (FULL && (process.env.GH_MODELS_TOKEN || process.env.ANTHROPIC_API_KEY)) {
     try { heavy.ai = await AI.commentary(snapshot); status.ai = `ok（${heavy.ai.model}）`; } catch (e) { status.ai = 'fail: ' + e.message.slice(0, 300); }
   }
   snapshot.ai = heavy.ai || null;
