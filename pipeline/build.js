@@ -513,7 +513,8 @@ async function main() {
       U.push({ k: id, n: H.names?.[id] || id, m: 'tw', x: 'TWSE', c: last, p: r2(H.lastChg?.[id] ?? null), a20: m20 ? last > m20 : null, a60: m60 ? last > m60 : null, r20: r2(r20, 1), w: wset.has(id) ? 1 : 0 });
       series.c[id] = cl.map(v => (v > 0 ? r2(v, 2) : null));
     }
-    for (const [id, q] of Object.entries(heavy.tw.tpex?.rows || {})) if (!U.some(u => u.k === id)) U.push({ k: id, n: q.n, m: 'tw', x: 'TPEx', c: q.c, p: r2(q.p), w: wset.has(id) ? 1 : 0 });
+    const twIds = new Set(U.map(u => u.k));
+    for (const [id, q] of Object.entries(heavy.tw.tpex?.rows || {})) if (/^(\d{4}|0\d{3,5}[A-Z]?)$/.test(id) && !twIds.has(id)) U.push({ k: id, n: q.n, m: 'tw', x: 'TPEx', c: q.c, p: r2(q.p), w: wset.has(id) ? 1 : 0 });
     for (const k of wl.us) if (items[k]) U.push({ k, n: items[k].name, m: 'us', x: 'US', c: items[k].price, p: items[k].changePct, w: 1 });
     writeJSON(path.join(OUT, 'universe.json'), { date: H.dates?.[nD - 1] || null, tpexDate: heavy.tw.tpex?.date || null, list: U });
     writeJSON(path.join(OUT, 'universe_hist.json'), series);
