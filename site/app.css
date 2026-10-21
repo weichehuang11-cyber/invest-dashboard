@@ -190,3 +190,34 @@ footer.src { font-size: 12px; color: var(--mute); }
   .bottomnav a.act { color: var(--acc); font-weight: 600; }
   .bottomnav svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; }
 }
+
+/* 互動元件 */
+#pill-data { cursor: pointer; }
+#pill-data:hover { background: #363C47; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--card); }
+.seg button { border: 0; background: transparent; padding: 0 12px; min-height: 34px; font-size: 13px; color: var(--ink2); cursor: pointer; border-left: 1px solid var(--line); }
+.seg button:first-child { border-left: 0; }
+.seg button[aria-pressed="true"] { background: var(--acc); color: #fff; font-weight: 500; }
+.staron { color: #D99A00; }
+.btn.sm { min-height: 34px; padding: 0 12px; font-size: 13px; }
+.act-r { margin-left: auto; }
+.btn[data-star][aria-pressed="true"] { color: #8A5A00; border-color: #E9C46A; background: #FFF6DC; }
+.tag.t-提醒 { background: #FFF6DC; color: #8A5A00; }
+.chart-top { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+#xh-read { min-height: 20px; color: var(--ink2); }
+.chart-wrap svg { cursor: crosshair; }
+.whatif { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; border-top: 1px solid var(--line2); }
+.whatif input[type=range] { width: 100%; accent-color: var(--acc); }
+.ask { display: flex; gap: 8px; }
+.ask input { flex: 1; min-width: 0; height: 40px; border: 1px solid var(--line); border-radius: 8px; padding: 0 12px; }
+.alform { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.alform .field { flex: 1 1 160px; }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 13px; opacity: 0; pointer-events: none; transition: .2s; z-index: 20; max-width: calc(100vw - 32px); text-align: center; }
+.toast.on { opacity: 1; transform: translate(-50%, 0); }
+@media (max-width: 760px) {
+  .search { display: block; width: 100%; order: 4; padding-bottom: 8px; }
+  .search input { width: 100%; height: 34px; }
+  .toast { bottom: calc(72px + env(safe-area-inset-bottom)); }
+  .seg button { padding: 0 10px; }
+}

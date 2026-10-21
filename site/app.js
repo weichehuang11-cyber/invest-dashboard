@@ -49,7 +49,15 @@
   }
 
   // ── 狀態 ────────────────────────────────────────────────────
-  const S = { snap: null, source: null, base: 'data/', bars: {}, local: { checked: false }, localPreds: {}, llm: {}, route: '' };
+  const S = { snap: null, source: null, base: 'data/', bars: {}, local: { checked: false }, localPreds: {}, llm: {}, route: '', range: LS.get('range', 120), alertsHit: [] };
+  const UI = Object.assign({ mk: 'all', cat: 'all', sort: 'score' }, LS.get('oppF', {}));
+  const stars = () => LS.get('stars', []);
+  const isStar = k => stars().includes(k);
+  const alerts = () => LS.get('alerts', {});
+  function toast(msg) {
+    let t = $('#toast'); if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; t.setAttribute('role', 'status'); document.body.appendChild(t); }
+    t.textContent = msg; t.classList.add('on'); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('on'), 2600);
+  }
   const nasBase = () => (cfg.nasUrl || '').trim().replace(/\/+$/, '');
 
   /** 盤中超過 75 分鐘、或平常超過 3 天沒更新，就算過舊 */
@@ -71,6 +79,42 @@
     else throw new Error(nasBase() ? 'GitHub 與 NAS 都取不到資料' : 'GitHub 取不到資料（可在設定填入 NAS 備援網址）');
     S.bars = {};
     updateDataPill();
+    checkAlerts();
+  }
+
+  /** 價格提醒：只存在這台裝置；新資料進來時比對，命中就列在「今天有什麼變了」，允許通知時跳通知 */
+  function checkAlerts() {
+    const A = alerts(), hit = [], sent = LS.get('alertSent', {});
+    for (const [k, a] of Object.entries(A)) {
+      const it = S.snap.items[k]; if (!it || !isNum(it.price)) continue;
+      if (isNum(a.above) && it.price >= a.above) hit.push({ key: k, tag: '提醒', title: `${k} ${it.name} 漲到 ${px(it.price)}，已達提醒價 ${px(a.above)}`, detail: '到個股頁可修改或清除提醒' });
+      if (isNum(a.below) && it.price <= a.below) hit.push({ key: k, tag: '提醒', title: `${k} ${it.name} 跌到 ${px(it.price)}，已達提醒價 ${px(a.below)}`, detail: '到個股頁可修改或清除提醒' });
+    }
+    S.alertsHit = hit;
+    try {
+      if (hit.length && 'Notification' in window && Notification.permission === 'granted') {
+        for (const h of hit) { const id = h.title.split('，')[1] + h.key; if (sent[id] === S.snap.generatedAt.slice(0, 10)) continue; new Notification('訊號終端・價格提醒', { body: h.title }); sent[id] = S.snap.generatedAt.slice(0, 10); }
+        LS.set('alertSent', sent);
+      }
+    } catch (_) {}
+  }
+
+  /** 下次排程更新（大約）：GitHub 盤中每 10 分鐘檢查、超過 20 分鐘沒更新就跑 */
+  function nextUpdateText() {
+    const d = new Date(), wd = d.getUTCDay(), h = d.getUTCHours() + d.getUTCMinutes() / 60;
+    const wk = wd >= 1 && wd <= 5;
+    if (wk && h >= 1 && h < 6) return '台股盤中，約每 20–30 分鐘更新';
+    if (wk && h >= 13.5 && h < 21) return '美股盤中，約每 20–30 分鐘更新';
+    if (wk && h >= 8.6 && h < 11) return '台股收盤後完整更新進行中（約 16:40–19:00）';
+    if (wk && h >= 21) return '美股收盤後完整更新（約 05:15–08:00）';
+    return '非交易時段，下一次在開盤後更新';
+  }
+  async function refreshNow(manual) {
+    const old = S.snap?.generatedAt;
+    if (manual) toast('檢查新資料…');
+    try { await loadSnapshot(); } catch (_) { if (manual) toast('連不到資料來源，稍後再試'); return; }
+    if (S.snap.generatedAt !== old) { if (!['portfolio', 'settings'].includes(S.route)) render(); toast(`已更新到 ${tpeTime(S.snap.generatedAt)}`); }
+    else if (manual) toast(`已是最新（${tpeTime(S.snap.generatedAt)}）・${nextUpdateText()}`);
   }
 
   async function loadBars(key) {
@@ -89,8 +133,9 @@
     const stale = isStale(S.snap.generatedAt);
     el.className = 'pill ' + (stale ? 'warn' : S.source === 'nas' ? 'warn' : 'ok');
     el.querySelector('.t').textContent = `${S.source === 'nas' ? 'NAS 備援' : 'GitHub'}・${tpeTime(S.snap.generatedAt)} 更新`;
+    el.title = `點一下檢查新資料。${nextUpdateText()}`;
     const bn = $('#banner');
-    if (stale) { bn.hidden = false; bn.className = 'banner'; bn.textContent = `資料已 ${ago(S.snap.generatedAt)} 沒更新${nasBase() ? '' : '。可到「設定」填入 NAS 備援網址'}。`; }
+    if (stale) { bn.hidden = false; bn.className = 'banner'; bn.textContent = `資料已 ${ago(S.snap.generatedAt)}沒更新（GitHub 排程偶爾延遲）。點上方更新時間可重新檢查${nasBase() ? '' : '；也可到「設定」填入 NAS 備援網址'}。`; }
     else if (S.source === 'nas') { bn.hidden = false; bn.className = 'banner'; bn.textContent = 'GitHub 資料過舊或取不到，目前顯示 NAS 備援資料。'; }
     else bn.hidden = true;
   }
@@ -194,7 +239,7 @@
       const c = s.changes.find(x => x.key === r.key);
       if (c) holdChanges.push({ ...c, tag: c.tag, title: '（持有中）' + c.title });
     }
-    const changes = [...holdChanges, ...s.changes.filter(c => !P.rows.some(r => r.key === c.key))].slice(0, 8);
+    const changes = [...S.alertsHit, ...holdChanges, ...s.changes.filter(c => !P.rows.some(r => r.key === c.key))].slice(0, 10);
     return `
 <section class="verdict" aria-labelledby="v-h">
   <div class="l">
@@ -267,16 +312,43 @@ ${footer()}`;
         ${meter('最大單一持股', P.total ? P.maxPos : null, L.single, '%')}
         ${meter('現金比例', P.total ? w(P.cash) : null, L.cashMin, '%', false)}
       </div>
+      ${P.rows.length ? `<div class="whatif"><label for="wi" class="small" style="font-weight:500;color:var(--ink)">情境試算：如果大盤 <b id="wi-v">−5%</b></label>
+        <input id="wi" type="range" min="-15" max="15" step="1" value="-5" aria-describedby="wi-out">
+        <div id="wi-out" class="small">${whatIf(P, -5)}</div></div>` : ''}
       ${P.missing.length ? `<p class="small bad-text">${P.missing.map(r => esc(r.key)).join('、')} 不在觀察清單，沒有報價。請加到 config/watchlist.json。</p>` : ''}`;
   }
 
+  /** 依各持股 Beta 估算大盤漲跌 m% 時的部位變化 */
+  function whatIf(P, m) {
+    let d = 0, miss = 0;
+    for (const r of P.rows) { if (!r.mv) continue; const b = r.it?.ta?.beta; if (isNum(b)) d += r.mv * b * m / 100; else { d += r.mv * m / 100; miss++; } }
+    return `預估部位 <b class="${cls(d)}">${sign(d)}${int(Math.abs(d))}</b> 元（<span class="${cls(d)}">${pct(P.total ? d / P.total * 100 : null, 1)}</span>）・依各檔 Beta 估算${miss ? `，${miss} 檔無 Beta 以 1 計` : ''}`;
+  }
+
+  function oppKeys() {
+    const s = S.snap, P = holdings(), held = new Set(P.rows.map(r => r.key)), st = new Set(stars());
+    let ks = s.ranking.filter(k => {
+      const it = s.items[k];
+      if (UI.mk !== 'all' && it.market !== UI.mk) return false;
+      if (UI.cat === 'buy') return it.signal.sig === 'BUY';
+      if (UI.cat === 'sell') return it.signal.sig === 'SELL';
+      if (UI.cat === 'star') return st.has(k);
+      if (UI.cat === 'held') return held.has(k);
+      return true;
+    });
+    if (UI.sort === 'up') ks = ks.slice().sort((a, b) => (s.items[b].changePct ?? -1e9) - (s.items[a].changePct ?? -1e9));
+    if (UI.sort === 'down') ks = ks.slice().sort((a, b) => (s.items[a].changePct ?? 1e9) - (s.items[b].changePct ?? 1e9));
+    return ks;
+  }
+  const seg = (name, val, opts) => `<div class="seg" role="group">${opts.map(([v, l]) => `<button type="button" data-of="${name}" data-v="${v}" aria-pressed="${val === v}">${l}</button>`).join('')}</div>`;
+
   function viewOpps(n) {
-    const s = S.snap, keys = s.ranking.slice(0, n || s.ranking.length);
+    const s = S.snap, all = oppKeys(), keys = all.slice(0, n || all.length), st = new Set(stars());
     const lp = Object.keys(S.localPreds).length > 0;
     const row = (k, i) => {
       const it = s.items[k], g = it.signal, l = S.localPreds[k];
       return `<tr><td class="num muted">${i + 1}</td>
-        <td><a class="sym" href="#/s/${encodeURIComponent(k)}">${esc(k)}</a> <span class="small muted">${esc(it.name)}</span></td>
+        <td>${st.has(k) ? '<span class="staron" aria-label="自選">★</span> ' : ''}<a class="sym" href="#/s/${encodeURIComponent(k)}">${esc(k)}</a> <span class="small muted">${esc(it.name)}</span></td>
         <td class="num">${px(it.price)}</td><td class="num ${cls(it.changePct)}">${pct(it.changePct)}</td>
         <td>${sigTag(g.sig)}</td><td>${evDots(g.evidence)}</td><td class="num"><b>${g.score}</b></td>
         <td class="num">${px(g.stop)}</td>
@@ -284,16 +356,18 @@ ${footer()}`;
     };
     const card = k => {
       const it = s.items[k], g = it.signal, l = S.localPreds[k];
-      return `<a class="ocard" href="#/s/${encodeURIComponent(k)}"><div class="r1"><b>${esc(k)}</b><span class="small muted">${esc(it.name)}</span>${sigTag(g.sig)}</div>
+      return `<a class="ocard" href="#/s/${encodeURIComponent(k)}"><div class="r1">${st.has(k) ? '<span class="staron" aria-label="自選">★</span>' : ''}<b>${esc(k)}</b><span class="small muted">${esc(it.name)}</span>${sigTag(g.sig)}</div>
         <div class="r2"><span class="mono" style="font-size:17px;font-weight:600">${px(it.price)}</span><span class="mono small ${cls(it.changePct)}">${pct(it.changePct)}</span><span class="small muted" style="margin-left:auto">分數 ${g.score}・停損 ${px(g.stop)}</span></div>
         <div>${evDots(g.evidence)}${l ? `<span class="small muted" style="margin-left:10px">本機預測 5 日 <b class="${cls(l.d5)}">${pct(l.d5)}</b></span>` : ''}</div></a>`;
     };
     return `
-      <div class="hd"><h2 id="opp-h">機會清單</h2><span class="note">依綜合分數排序・證據：技術／籌碼／基本面／模型（${cfg.colors === 'us' ? '實心綠' : '實心紅'}＝支持、${cfg.colors === 'us' ? '實心紅' : '實心綠'}＝反對、空心＝中性、虛線＝無資料）</span>${n ? `<a class="act" href="#/all">看全部 ${s.ranking.length} 檔</a>` : ''}</div>
+      <div class="hd"><h2 id="opp-h">機會清單</h2><span class="note">依綜合分數排序・證據：技術／籌碼／基本面／模型（${cfg.colors === 'us' ? '實心綠' : '實心紅'}＝支持、${cfg.colors === 'us' ? '實心紅' : '實心綠'}＝反對、空心＝中性、虛線＝無資料）</span>${n && all.length > n ? `<a class="act" href="#/all">看全部 ${all.length} 檔</a>` : ''}</div>
+      <div class="filters">${seg('mk', UI.mk, [['all', '全部'], ['tw', '台股'], ['us', '美股']])}${seg('cat', UI.cat, [['all', '全部訊號'], ['buy', '買進'], ['sell', '賣出'], ['star', '★ 自選'], ['held', '持有中']])}${seg('sort', UI.sort, [['score', '依分數'], ['up', '漲最多'], ['down', '跌最多']])}</div>
+      ${keys.length ? '' : `<p class="empty">${UI.cat === 'star' ? '還沒有自選股。到個股頁按「☆ 加入自選」。' : UI.cat === 'held' ? '還沒有持股，或持股不在觀察清單。' : '沒有符合條件的標的。'}</p>`}
       <div class="tbl-box opp"><table class="tbl"><thead><tr><th>#</th><th>標的</th><th class="num">價格</th><th class="num">今日</th><th>判斷</th><th>證據</th><th class="num">分數</th><th class="num">停損價（2 倍 ATR）</th>${lp ? '<th class="num">本機 1 日</th><th class="num">本機 5 日</th>' : ''}</tr></thead>
       <tbody>${keys.map(row).join('')}</tbody></table></div>
       <div class="cards">${keys.map(card).join('')}</div>
-      <p class="small muted" style="margin:0">買進門檻 ${s.items[keys[0]]?.signal.buyThreshold ?? 63} 分（VIX 越高門檻越高）、賣出門檻 37 分。模型以「隔日漲跌」訓練，僅供參考。</p>`;
+      <p class="small muted" style="margin:0">買進門檻 ${s.items[s.ranking[0]]?.signal.buyThreshold ?? 63} 分（VIX 越高門檻越高）、賣出門檻 37 分。模型以「隔日漲跌」訓練，僅供參考。</p>`;
   }
 
   function viewSectors() {
@@ -381,20 +455,44 @@ ${footer()}`;
     return { pros, cons, pos };
   }
 
+  /** 互動走勢圖：可切換區間，滑鼠移動或手指按住拖曳看每天的價格 */
   function lineChart(b, it) {
-    const n = Math.min(120, b.close.length), c = b.close.slice(-n), d = b.dates.slice(-n);
+    const n = Math.min(S.range, b.close.length), off = b.close.length - n;
+    const c = b.close.slice(-n), d = b.dates.slice(-n);
     const maS = k => b.close.map((_, i) => i < k - 1 ? null : b.close.slice(i - k + 1, i + 1).reduce((s, v) => s + v, 0) / k).slice(-n);
     const m20 = maS(20), m60 = maS(60), stop = it.signal.stop;
     const vals = [...c, ...m20.filter(isNum), ...m60.filter(isNum), ...(isNum(stop) ? [stop] : [])];
     let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.06 || 1; lo -= pad; hi += pad;
     const W = 1200, Hh = 300, x = i => (i / (n - 1) * W).toFixed(1), y = v => (Hh - (v - lo) / (hi - lo) * Hh).toFixed(1);
+    S.chart = { n, d, c, m20, m60, prev: b.close.slice(-n - 1), off, x, y, W, Hh };
     const path = a => a.map((v, i) => (v == null ? '' : `${a[i - 1] == null ? 'M' : 'L'}${x(i)},${y(v)}`)).join('');
     const grid = [0.25, 0.5, 0.75].map(t => { const v = lo + (hi - lo) * t; return `<line x1="0" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#EEF0F3"/><text x="4" y="${(+y(v) - 5).toFixed(1)}" font-size="14" fill="#8A93A3">${px(v)}</text>`; }).join('');
-    return `<svg viewBox="0 0 ${W} ${Hh + 22}" role="img" aria-label="近 ${n} 個交易日收盤價，20 日線 ${px(m20[n - 1])}，60 日線 ${px(m60[n - 1])}">
+    const chg = (c[n - 1] / c[0] - 1) * 100;
+    return `<div class="chart-top"><div id="xh-read" class="small mono" aria-live="polite">${esc(d[0])} → ${esc(d[n - 1])}・區間 <b class="${cls(chg)}">${pct(chg, 1)}</b></div>
+      ${seg('range', String(S.range), [['22', '1 月'], ['66', '3 月'], ['120', '6 月'], ['250', '1 年']])}</div>
+      <svg id="pxchart" viewBox="0 0 ${W} ${Hh + 22}" role="img" aria-label="近 ${n} 個交易日收盤價，區間 ${pct(chg, 1)}，20 日線 ${px(m20[n - 1])}，60 日線 ${px(m60[n - 1])}" style="touch-action:pan-y">
       ${grid}<path d="${path(m60)}" fill="none" stroke="#B9C0CC" stroke-width="1.5" stroke-dasharray="4 3"/><path d="${path(m20)}" fill="none" stroke="#6E8EEB" stroke-width="1.5"/>
       <path d="${path(c)}" fill="none" stroke="#15181D" stroke-width="2"/>
       ${isNum(stop) && stop > lo ? `<line x1="0" x2="${W}" y1="${y(stop)}" y2="${y(stop)}" stroke="#B91C1C" stroke-dasharray="6 4"/><text x="${W - 4}" y="${(+y(stop) - 5).toFixed(1)}" text-anchor="end" font-size="14" fill="#B91C1C">停損 ${px(stop)}</text>` : ''}
+      <g id="xh" style="display:none"><line id="xh-l" y1="0" y2="${Hh}" stroke="#15181D" stroke-width="1" stroke-dasharray="3 3"/><circle id="xh-c" r="6" fill="#1F4FD8" stroke="#fff" stroke-width="2"/></g>
+      <rect x="0" y="0" width="${W}" height="${Hh}" fill="transparent" id="xh-hit"/>
       <text x="0" y="${Hh + 18}" font-size="14" fill="#8A93A3">${esc(d[0])}</text><text x="${W}" y="${Hh + 18}" font-size="14" fill="#8A93A3" text-anchor="end">${esc(d[n - 1])}</text></svg>`;
+  }
+  function bindChart() {
+    const svg = $('#pxchart'); if (!svg || !S.chart) return;
+    const C = S.chart, g = $('#xh'), rd = $('#xh-read'), base = rd.innerHTML;
+    const show = ev => {
+      const r = svg.getBoundingClientRect(), t = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+      const i = Math.round(t * (C.n - 1)), v = C.c[i], pv = i > 0 ? C.c[i - 1] : C.prev[0];
+      g.style.display = ''; $('#xh-l').setAttribute('x1', C.x(i)); $('#xh-l').setAttribute('x2', C.x(i));
+      $('#xh-c').setAttribute('cx', C.x(i)); $('#xh-c').setAttribute('cy', C.y(v));
+      const ch = pv ? (v / pv - 1) * 100 : null, fromEnd = (C.c[C.n - 1] / v - 1) * 100;
+      rd.innerHTML = `${esc(C.d[i])}・收盤 <b>${px(v)}</b> <span class="${cls(ch)}">${pct(ch)}</span>・20 日線 ${px(C.m20[i])}・至今 <span class="${cls(fromEnd)}">${pct(fromEnd, 1)}</span>`;
+    };
+    const hide = () => { g.style.display = 'none'; rd.innerHTML = base; };
+    svg.addEventListener('pointermove', show);
+    svg.addEventListener('pointerdown', show);
+    svg.addEventListener('pointerleave', hide);
   }
 
   function viewStock(key, b) {
@@ -410,7 +508,8 @@ ${footer()}`;
     return `
 <div><a href="#/" class="small">← 回總覽</a></div>
 <section class="card" aria-labelledby="s-h">
-  <div class="hd"><h1 id="s-h" style="margin:0;font-size:22px">${esc(key)} ${esc(it.name)}</h1><span class="note">${it.market === 'tw' ? '台股' : '美股'}・${esc(it.currency || '')}${pos ? `・持有 ${int(pos.shares)} 股` : ''}</span></div>
+  <div class="hd"><h1 id="s-h" style="margin:0;font-size:22px">${esc(key)} ${esc(it.name)}</h1><span class="note">${it.market === 'tw' ? '台股' : '美股'}・${esc(it.currency || '')}${pos ? `・持有 ${int(pos.shares)} 股` : ''}</span>
+    <button type="button" class="btn sm act-r" data-star="${esc(key)}" aria-pressed="${isStar(key)}">${isStar(key) ? '★ 已自選' : '☆ 加入自選'}</button></div>
   <div class="quote">
     <div><div style="display:flex;align-items:baseline;gap:12px"><span class="px">${px(it.price)}</span><span class="ch ${cls(it.changePct)}">${sign(it.price - it.prevClose)}${fix(Math.abs(it.price - it.prevClose), it.price >= 100 ? 1 : 2)}（${pct(it.changePct)}）</span></div>
       <div class="small muted">${esc(it.marketDate)}・成交量為 20 日均量 ${isNum(ta.relVolume) ? ta.relVolume.toFixed(1) : '—'} 倍</div></div>
@@ -423,6 +522,7 @@ ${footer()}`;
   <div class="hd"><h2 id="th-h">投資論點</h2><span class="note">依資料自動整理</span></div>
   <p style="margin:0;font-size:17px;font-weight:500">${SIG[g.sig]}（${g.score} 分）：${T.pros.length} 項支持、${T.cons.length} 項風險。${isNum(g.stop) ? `跌破 ${px(g.stop)}（2 倍日線 ATR）宜停損。` : ''}</p>
   <div id="ai-stock"></div>
+  ${S.local.llm ? `<form id="ask" class="ask"><label for="ask-q" class="sr">問本機 AI</label><input id="ask-q" placeholder="問本機 AI，例如：現在適合加碼嗎？停損要設多少？" autocomplete="off"><button class="btn primary" type="submit">問</button></form><div id="ask-a"></div>` : ''}
   <div class="thesis"><div><b class="small">支持</b><ul>${T.pros.map(x => `<li>${x}</li>`).join('') || '<li class="muted">無</li>'}</ul></div>
   <div><b class="small">風險</b><ul>${T.cons.map(x => `<li>${x}</li>`).join('') || '<li class="muted">無</li>'}</ul></div></div>
 </section>
@@ -441,8 +541,8 @@ ${footer()}`;
       <div><dt>近 1 個月報酬</dt><dd class="${cls(ta.ret21)}">${pct(ta.ret21, 1)}</dd></div><div><dt>近 3 個月報酬</dt><dd class="${cls(ta.ret63)}">${pct(ta.ret63, 1)}</dd></div>`}
     </dl>${it.market === 'us' && !it.fund ? '<p class="small muted" style="margin:0">基本面於美股收盤後更新。</p>' : ''}</section>
 
-  <section class="card chart" aria-labelledby="ta-h"><div class="hd"><h2 id="ta-h">技術面</h2><span class="note">日 K・近 ${Math.min(120, b?.close?.length || 0)} 個交易日</span></div>
-    ${b ? lineChart(b, it) : '<p class="empty">走勢資料載入失敗</p>'}
+  <section class="card chart" aria-labelledby="ta-h"><div class="hd"><h2 id="ta-h">技術面</h2><span class="note">日 K・滑過或按住圖表看每天價格</span></div>
+    <div class="chart-wrap">${b ? lineChart(b, it) : '<p class="empty">走勢資料載入失敗</p>'}</div>
     <div class="legend"><span><i style="background:#15181D;height:2px"></i>收盤</span><span><i style="background:#6E8EEB;height:2px"></i>20 日線 ${px(ta.ma20)}</span><span><i style="background:#B9C0CC;height:2px"></i>60 日線 ${px(ta.ma60)}</span>
       <span>相對強弱 RSI(14) ${isNum(ta.rsi) ? ta.rsi.toFixed(0) : '—'}</span><span>布林位置 ${isNum(ta.bbPct) ? ta.bbPct.toFixed(0) + '%' : '—'}</span></div></section>
 
@@ -462,6 +562,13 @@ ${footer()}`;
       ${lp ? `<div><dt>本機預測（${esc(lp.eng)}）1 日／5 日</dt><dd style="font-size:15px"><span class="${cls(lp.d1)}">${pct(lp.d1)}</span>／<span class="${cls(lp.d5)}">${pct(lp.d5)}</span></dd></div>` : ''}
     </dl></section>
 </div>
+
+<section class="card" aria-labelledby="al-h"><div class="hd"><h2 id="al-h">價格提醒</h2><span class="note">只存在這台裝置；有新資料時比對，達到就列在總覽「今天有什麼變了」${'Notification' in window ? '，並跳出通知' : ''}</span></div>
+  <form id="al-form" class="alform">
+    <div class="field"><label for="al-up">漲到（含）以上</label><input id="al-up" type="number" step="any" inputmode="decimal" value="${alerts()[key]?.above ?? ''}" placeholder="${px(it.price * 1.05)}"></div>
+    <div class="field"><label for="al-dn">跌到（含）以下</label><input id="al-dn" type="number" step="any" inputmode="decimal" value="${alerts()[key]?.below ?? (isNum(g.stop) ? '' : '')}" placeholder="${isNum(g.stop) ? px(g.stop) + '（停損價）' : px(it.price * 0.95)}"></div>
+    <div class="actions"><button class="btn primary" type="submit">儲存提醒</button>${alerts()[key] ? '<button type="button" class="btn" id="al-clr">清除</button>' : ''}</div>
+  </form><p id="al-msg" class="small" role="status"></p></section>
 
 <section class="card" aria-labelledby="ph-h"><div class="hd"><h2 id="ph-h">這檔股票的預測紀錄</h2><span class="note">收盤後的買進／賣出訊號，依之後的交易日收盤判定</span></div>
   ${preds.length ? `<div class="tbl-box"><table class="tbl" style="min-width:600px"><thead><tr><th>訊號日</th><th>訊號</th><th class="num">當時價</th><th class="num">1 日後</th><th>結果</th><th class="num">5 日後</th><th>結果</th></tr></thead><tbody>
@@ -490,6 +597,32 @@ ${footer()}`;
       const b2 = $('#ai-stock');
       if (b2 && S.route === 's/' + key) b2.innerHTML = S.llm[k] ? `<div class="ai" style="background:var(--bg);color:var(--ink2)"><b style="color:var(--ink)">本機 AI 解讀</b>${esc(S.llm[k])}</div>` : '';
     }
+  }
+
+  function bindStock(key) {
+    bindChart();
+    const f = $('#al-form');
+    if (f) {
+      f.onsubmit = async e => {
+        e.preventDefault();
+        const up = parseFloat($('#al-up').value), dn = parseFloat($('#al-dn').value), A = alerts();
+        if (!isNum(up) && !isNum(dn)) { delete A[key]; } else A[key] = { above: isNum(up) ? up : null, below: isNum(dn) ? dn : null };
+        LS.set('alerts', A); checkAlerts();
+        let note = '';
+        try { if ('Notification' in window && Notification.permission === 'default') { const p = await Notification.requestPermission(); note = p === 'granted' ? '，已開啟通知' : ''; } } catch (_) {}
+        $('#al-msg').className = 'small ok-text'; $('#al-msg').textContent = (A[key] ? '已儲存提醒' : '已清除提醒') + note + '。網站開著時，每次有新資料都會比對。';
+      };
+      const c = $('#al-clr'); if (c) c.onclick = () => { const A = alerts(); delete A[key]; LS.set('alerts', A); checkAlerts(); render(); };
+    }
+    const ask = $('#ask');
+    if (ask) ask.onsubmit = async e => {
+      e.preventDefault();
+      const q = $('#ask-q').value.trim(); if (!q) return;
+      const it = S.snap.items[key], T = thesis(it, holdings()), out = $('#ask-a');
+      out.innerHTML = '<div class="ai" style="background:var(--bg);color:var(--ink2)"><b style="color:var(--ink)">本機 AI</b>思考中…</div>';
+      const a = await askLLM(`用繁體中文簡短回答（不超過 150 字），最後提醒這不是投資建議。\n問題：${q}\n標的：${key} ${it.name}，現價 ${it.price}（${pct(it.changePct)}），判斷 ${SIG[it.signal.sig]}，分數 ${it.signal.score}，停損 ${it.signal.stop}\n支持：${T.pros.join('；') || '無'}\n風險：${T.cons.join('；') || '無'}`, key);
+      if ($('#ask-a')) $('#ask-a').innerHTML = `<div class="ai" style="background:var(--bg);color:var(--ink2)"><b style="color:var(--ink)">本機 AI</b>${esc(a || '沒有回應，確認語言模型服務是否開著。')}</div>`;
+    };
   }
 
   // ── 持股編輯 ────────────────────────────────────────────────
@@ -589,6 +722,7 @@ ${footer()}`;
       const b = await loadBars(key);
       if (S.route !== 's/' + key) return;
       main.innerHTML = viewStock(key, b); document.title = `${key} ${nameOf(key)}・訊號終端`;
+      bindStock(key);
       afterStock(key);
     } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); bindPortfolio(); document.title = '持股・訊號終端'; }
     else if (S.route === 'scorecard') { main.innerHTML = viewScorecard(); document.title = '模型成績・訊號終端'; }
@@ -615,15 +749,26 @@ ${footer()}`;
     catch (e) { $('#main').innerHTML = `<section class="card"><h2 style="margin:0">無法載入資料</h2><p>${esc(e.message)}</p><div class="actions"><button class="btn primary" onclick="location.reload()">重新整理</button><a class="btn" href="#/settings">設定</a></div></section>`; if (location.hash.startsWith('#/settings')) { $('#main').innerHTML = viewSettings(); bindSettings(); } return; }
     setupSearch();
     window.addEventListener('hashchange', render);
+    document.addEventListener('click', e => {
+      const f = e.target.closest('[data-of]');
+      if (f) {
+        const k = f.dataset.of, v = f.dataset.v;
+        if (k === 'range') { S.range = +v; LS.set('range', S.range); const b = S.bars[S.route.slice(2).toUpperCase()]; const box = $('#pxchart')?.closest('.card'); if (b && box) { const it = S.snap.items[b.key]; box.querySelector('.chart-wrap').innerHTML = lineChart(b, it); bindChart(); } return; }
+        UI[k] = v; LS.set('oppF', UI);
+        const box = $('#opps'); if (box) box.innerHTML = viewOpps(S.route === 'all' ? 0 : 10);
+        return;
+      }
+      const st = e.target.closest('[data-star]');
+      if (st) { const k = st.dataset.star, a = stars(), on = !a.includes(k); LS.set('stars', on ? [...a, k] : a.filter(x => x !== k)); st.setAttribute('aria-pressed', on); st.textContent = on ? '★ 已自選' : '☆ 加入自選'; toast(on ? `已把 ${k} 加入自選` : `已移除 ${k}`); return; }
+      if (e.target.closest('#pill-data')) refreshNow(true);
+    });
+    document.addEventListener('input', e => { if (e.target.id === 'wi') { const m = +e.target.value; $('#wi-v').textContent = (m > 0 ? '+' : m < 0 ? '−' : '') + Math.abs(m) + '%'; $('#wi-out').innerHTML = whatIf(holdings(), m); } });
+    // 回到這個分頁或 App 時立刻檢查新資料（手機切回來不用等）
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && S.snap && Date.now() - Date.parse(S.snap.generatedAt) > 10 * 60000) refreshNow(false); });
     await render();
     probeLocal().then(() => { if (localAny() && (S.route === 'home' || S.route.startsWith('s/'))) render(); });
     // 每 5 分鐘檢查一次新資料（分頁在前景時）
-    setInterval(async () => {
-      if (document.hidden) return;
-      const old = S.snap.generatedAt;
-      try { await loadSnapshot(); } catch (_) { return; }
-      if (S.snap.generatedAt !== old && !['portfolio', 'settings'].includes(S.route)) render();
-    }, 5 * 60000);
+    setInterval(() => { if (!document.hidden) refreshNow(false); }, 3 * 60000);
   }
   boot();
 })();

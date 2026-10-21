@@ -306,7 +306,11 @@ async function main() {
   // 狀態只在收盤後完整更新時寫入（盤中更新只讀取）
   if (FULL) {
     const signals = Object.fromEntries(Object.values(items).map(x => [x.key, x.signal.sig]));
-    writeJSON(path.join(STATE, 'last.json'), { verdict: { level: verdict.level, at: nowIso }, signals: { ...(last.signals || {}), ...signals }, at: nowIso, status });
+    const tpeDay = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+    const fullAt = { ...(last.fullAt || {}) };
+    if (fullTW) fullAt.tw = tpeDay;
+    if (fullUS) fullAt.us = tpeDay;
+    writeJSON(path.join(STATE, 'last.json'), { verdict: { level: verdict.level, at: nowIso }, signals: { ...(last.signals || {}), ...signals }, at: nowIso, status, fullAt });
     writeJSON(path.join(STATE, 'heavy.json'), heavy);
     writeJSON(path.join(STATE, 'predictions.json'), predictions);
     log('狀態已更新', STATE);
