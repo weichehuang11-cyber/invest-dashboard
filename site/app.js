@@ -369,7 +369,7 @@ ${footer()}`;
     const lp = Object.keys(S.localPreds).length > 0;
     const row = (k, i) => {
       const it = s.items[k], g = it.signal, l = S.localPreds[k];
-      return `<tr><td class="num muted">${i + 1}</td>
+      return `<tr class="clk" data-href="#/s/${encodeURIComponent(k)}"><td class="num muted">${i + 1}</td>
         <td>${st.has(k) ? '<span class="staron" aria-label="自選">★</span> ' : ''}<a class="sym" href="#/s/${encodeURIComponent(k)}">${esc(k)}</a> <span class="small muted">${esc(it.name)}</span></td>
         <td class="num">${px(it.price)}</td><td class="num ${cls(it.changePct)}">${pct(it.changePct)}</td>
         <td>${sigTag(g.sig)}</td><td>${evDots(g.evidence)}</td><td class="num"><b>${g.score}</b></td>
@@ -413,14 +413,17 @@ ${footer()}`;
       ${scoreRows(sc.d30)}<p class="small muted" style="margin:0">黑線＝50%（擲硬幣）；灰色＝樣本少於 30 筆。${sc.since ? `自 ${esc(sc.since)} 起累積 ${sc.total} 筆。` : '收盤後開始累積紀錄。'}</p>`;
   }
 
+  const stockHref = id => (S.snap.items[id] ? '#/s/' : '#/q/') + encodeURIComponent(id);
   function viewChipMarket() {
     const c = S.snap.chipMarket;
     const d = c.date ? `${c.date.slice(0, 4)}/${c.date.slice(4, 6)}/${c.date.slice(6, 8)}` : '';
-    const list = (title, rows, key) => `<div style="flex:1 1 280px;min-width:0"><div class="small" style="font-weight:600;margin-bottom:6px">${title}</div>
-      <table class="tbl" style="min-width:0"><tbody>${rows.slice(0, 6).map(r => `<tr><td style="padding:7px 6px">${esc(r.id)} <span class="small muted">${esc(r.name)}</span></td><td class="num small" style="padding:7px 6px">${int(r[key])} 張</td><td class="num small ${cls(r.chgPct)}" style="padding:7px 6px">${pct(r.chgPct)}</td></tr>`).join('')}</tbody></table></div>`;
+    const list = (title, rows, key) => `<div style="flex:1 1 300px;min-width:0"><div class="small" style="font-weight:600;margin-bottom:6px">${title}</div>
+      <table class="tbl cm" style="min-width:0"><thead><tr><th>個股</th><th class="num">金額</th><th class="num">張數</th><th class="num">當日漲跌</th></tr></thead><tbody>${rows.slice(0, 6).map(r => `<tr class="clk" data-href="${stockHref(r.id)}"><td><a href="${stockHref(r.id)}">${esc(r.id)}</a> <span class="small muted">${esc(r.name)}</span>${S.snap.items[r.id] ? ' <span class="tag buy" style="font-size:10px">觀察中</span>' : ''}</td><td class="num"><b>${fix(Math.abs(r.value) / 100, 1)}</b> 億</td><td class="num small">${int(r[key])}</td><td class="num small ${cls(r.chgPct)}">${pct(r.chgPct)}</td></tr>`).join('')}</tbody></table></div>`;
     return `<div class="hd"><h2 id="cm-h">台股三大法人</h2><span class="note">${d} 收盤・外資合計約 ${int(c.foreignValueEst / 1e8)} 億（以收盤價估算）</span></div>
+      <p class="small muted" style="margin:0">依買賣<b>金額</b>（張數 × 收盤價）排序，所以高價股張數少也可能排前面；「當日漲跌」是那檔股票當天的股價漲跌，和排序無關。點任一列看個股。</p>
       <div class="row" style="gap:16px">${list('外資買超', c.topForeignBuy, 'foreign')}${list('外資賣超', c.topForeignSell, 'foreign')}${list('投信買超', c.topTrustBuy, 'trust')}</div>`;
   }
+
 
   function footer() {
     return `<footer class="src">資料來源：Yahoo 財經（報價、日 K、美股財報）、臺灣證券交易所（三大法人、收盤行情、本益比、除權息、融資）、櫃買中心（上櫃行情）、臺灣期貨交易所（期貨與選擇權部位）、集保結算所（股權分散）、FinMind（法人歷史、月營收、台股財報）、Nasdaq（美股清單）、芝加哥選擇權交易所（VIX）、美國財政部（公債殖利率）、聖路易聯準會 FRED（信用利差、金融壓力）。
@@ -1289,7 +1292,7 @@ ${(h.log || []).length ? `<section class="card" aria-labelledby="hl2-h"><div cla
 <section class="card"><div class="hd"><h2>當天的訊號，到現在的結果</h2></div>
   <p style="margin:0">當天買進訊號 ${hitBuy.length} 檔，到現在平均 <b class="${cls(avg(hitBuy))}">${pct(avg(hitBuy), 1)}</b>；賣出訊號 ${hitSell.length} 檔，平均 <b class="${cls(avg(hitSell))}">${pct(avg(hitSell), 1)}</b>；全部平均 ${pct(avg(rows.filter(r => isNum(r.chg))), 1)}。</p>
   <div class="tbl-box"><table class="tbl rtbl"><thead><tr><th>標的</th><th>當天</th><th class="num">分數</th><th class="num">當天價</th><th class="num">現價</th><th class="num">至今</th><th>現在</th></tr></thead><tbody>
-  ${rows.map(r => `<tr><td><a href="#/s/${encodeURIComponent(r.k)}">${esc(r.k)}</a> <span class="small muted">${esc(r.name)}</span></td><td>${sigTag(r.sig)}</td><td class="num">${r.score}</td><td class="num">${px(r.px)}</td><td class="num">${px(r.nowPx)}</td><td class="num ${cls(r.chg)}">${pct(r.chg, 1)}</td><td>${r.nowSig ? sigTag(r.nowSig) : '—'}</td></tr>`).join('')}</tbody></table></div>
+  ${rows.map(r => `<tr class="clk" data-href="${stockHref(r.k)}"><td><a href="${stockHref(r.k)}">${esc(r.k)}</a> <span class="small muted">${esc(r.name)}</span></td><td>${sigTag(r.sig)}</td><td class="num">${r.score}</td><td class="num">${px(r.px)}</td><td class="num">${px(r.nowPx)}</td><td class="num ${cls(r.chg)}">${pct(r.chg, 1)}</td><td>${r.nowSig ? sigTag(r.nowSig) : '—'}</td></tr>`).join('')}</tbody></table></div>
   <p class="small muted" style="margin:0">原始檔：<a href="${rawBase()}${day.slice(0, 4)}/${day}.json" target="_blank" rel="noopener">${day}.json</a></p>
 </section>${footer()}`;
   }
@@ -1787,6 +1790,8 @@ ${footer()}`;
       if (hm) { const mk = hm.dataset.hmTw != null ? 'tw' : 'us', v = +(hm.dataset.hmTw ?? hm.dataset.hmUs), cur = moodOf(mk); saveMood(mk, cur === v ? null : v); toast(cur === v ? '已取消今天的感覺' : `已記錄：${mk === 'tw' ? '台股' : '美股'}${moodZh(v)}`); render(); return; }
       const st = e.target.closest('[data-star]');
       if (st) { const k = st.dataset.star, a = stars(), on = !a.includes(k); LS.set('stars', on ? [...a, k] : a.filter(x => x !== k)); st.setAttribute('aria-pressed', on); st.textContent = on ? '★ 已自選' : '☆ 加入自選'; toast(on ? `已把 ${k} 加入自選` : `已移除 ${k}`); return; }
+      const tr = e.target.closest('tr.clk[data-href]');
+      if (tr && !e.target.closest('a,button')) { location.hash = tr.dataset.href; return; }
       if (e.target.closest('#pill-data')) refreshNow(true);
     });
     document.addEventListener('input', e => { if (e.target.id === 'wi') { const m = +e.target.value; $('#wi-v').textContent = (m > 0 ? '+' : m < 0 ? '−' : '') + Math.abs(m) + '%'; $('#wi-out').innerHTML = whatIf(holdings(), m); } });

@@ -402,3 +402,8 @@ table.corr { min-width: 0; }
 #idx .seg, .filters .seg { display: flex; width: 100%; }
 #idx .seg button, .filters .seg button { flex: 1 1 auto; padding: 0 8px; }
 @media (min-width: 761px) { .filters .seg { width: auto; } .filters .seg button { flex: 0 0 auto; padding: 0 12px; } }
+
+tr.clk { cursor: pointer; }
+tr.clk:hover td, tr.clk:active td { background: var(--acc-bg); }
+.tbl.cm td, .tbl.cm th { padding: 8px 6px; }
+.tbl.cm a { color: var(--ink); font-weight: 600; text-decoration: none; }
