@@ -246,3 +246,26 @@ details summary { cursor: pointer; color: var(--acc); font-size: 13px; font-weig
 .habits li { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: baseline; padding: 9px 0; border-top: 1px solid var(--line2); }
 .habits li:first-child { border-top: 0; }
 @media (max-width: 760px) { .habits li { grid-template-columns: 1fr auto; } .habits li .small { grid-column: 1; grid-row: 2; } }
+
+/* 指數走勢與推論 */
+.ixgrid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.ixgrid .chart { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.ixgrid .chart svg { width: 100%; height: auto; display: block; }
+.ixq { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.opanel { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.ostate { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-weight: 500; }
+.tcom { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.tcom li { display: flex; gap: 8px; align-items: baseline; font-size: 13px; }
+.tcom li i { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; transform: translateY(-1px); }
+.tcom li.pos i { background: var(--up); } .tcom li.neg i { background: var(--down); }
+dl.facts.mini dd { font-size: 15px; }
+.srbox { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.srow { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--line2); }
+table.rtbl { min-width: 0; }
+.rtbl td, .rtbl th { padding: 7px 6px; font-size: 13px; }
+.rtbl tr.sub td { border-top: 0; padding-top: 0; white-space: normal; }
+.rel { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 4px; margin-right: 6px; }
+.rel.ok { background: var(--ok-bg); color: var(--ok); } .rel.warn { background: var(--warn-bg); color: var(--warn); } .rel.bad { background: var(--bad-bg); color: var(--bad); }
+#idx .seg { flex-wrap: wrap; }
+@media (max-width: 960px) { .ixgrid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .srbox { grid-template-columns: 1fr; } .rtbl td, .rtbl th { font-size: 12px; padding: 6px 4px; } }

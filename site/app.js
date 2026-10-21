@@ -49,7 +49,7 @@
   }
 
   // ── 狀態 ────────────────────────────────────────────────────
-  const S = { snap: null, source: null, base: 'data/', bars: {}, local: { checked: false }, localPreds: {}, llm: {}, route: '', range: LS.get('range', 120), alertsHit: [] };
+  const S = { snap: null, source: null, base: 'data/', bars: {}, local: { checked: false }, localPreds: {}, llm: {}, route: '', range: LS.get('range', 120), alertsHit: [], idx: LS.get('idx', '^TWII') };
   const UI = Object.assign({ mk: 'all', cat: 'all', sort: 'score' }, LS.get('oppF', {}));
   const stars = () => LS.get('stars', []);
   const isStar = k => stars().includes(k);
@@ -263,6 +263,8 @@
       <div class="m">${esc(e.meaning)}</div></div>`).join('')}</div>
 </section>
 
+<section class="card" id="idx" aria-labelledby="ix-h"><p class="loading">載入指數走勢…</p></section>
+
 <div class="row">
   <section class="card wide" aria-labelledby="pf-h">${viewHoldingsCard(P)}</section>
   <section class="card side" aria-labelledby="chg-h">
@@ -405,6 +407,7 @@ ${footer()}`;
   }
 
   async function afterHome() {
+    fillIndexSection();
     const P = holdings();
     if (P.rows.length) {
       const v = await portfolioVaR(P);
@@ -433,6 +436,84 @@ ${footer()}`;
       const b2 = $('#ai-verdict');
       if (b2 && S.route === 'home') b2.innerHTML = S.llm[key] ? `<div class="ai"><b>本機 AI 解讀</b>${esc(S.llm[key])}</div>` : '';
     }
+  }
+
+  // ── 指數走勢、技術解讀與推論 ─────────────────────────────────
+  /** 走勢圖＋未來 20 個交易日的推論區間（深色 50%、淺色 80%、虛線中位數） */
+  function coneChart(b, o, label) {
+    const N = Math.min(120, b.close.length), c = b.close.slice(-N), d = b.dates.slice(-N), F = o?.cone?.length || 0, T = N + F;
+    const ma = k => b.close.map((_, i) => i < k - 1 ? null : b.close.slice(i - k + 1, i + 1).reduce((s, v) => s + v, 0) / k).slice(-N);
+    const m20 = ma(20), m60 = ma(60);
+    const sup = o?.sr?.support?.[0], res = o?.sr?.resistance?.[0];
+    const vals = [...c, ...m20.filter(isNum), ...m60.filter(isNum), ...(o?.cone || []).flatMap(q => [q[0], q[4]]), ...(sup ? [sup.p] : []), ...(res ? [res.p] : [])];
+    let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.05 || 1; lo -= pad; hi += pad;
+    const MOB = window.innerWidth < 760, W = MOB ? 640 : 1200, Hh = MOB ? 400 : 320, FS = MOB ? 20 : 13, x = i => (i / (T - 1) * W).toFixed(1), y = v => (Hh - (v - lo) / (hi - lo) * Hh).toFixed(1);
+    const path = a => a.map((v, i) => (v == null ? '' : `${a[i - 1] == null ? 'M' : 'L'}${x(i)},${y(v)}`)).join('');
+    const band = (a, b2) => { const top = [`${x(N - 1)},${y(c[N - 1])}`, ...o.cone.map((q, j) => `${x(N + j)},${y(q[a])}`)]; const bot = [...o.cone.map((q, j) => `${x(N + j)},${y(q[b2])}`).reverse(), `${x(N - 1)},${y(c[N - 1])}`]; return `M${top.join('L')}L${bot.join('L')}Z`; };
+    const hline = (v, txt, col, below) => `<line x1="0" x2="${x(N - 1)}" y1="${y(v)}" y2="${y(v)}" stroke="${col}" stroke-dasharray="5 4" stroke-width="1.2"/><text x="6" y="${(below ? +y(v) + FS + 2 : +y(v) - 5).toFixed(1)}" font-size="${FS}" fill="${col}">${esc(txt)}</text>`;
+    const grid = [0.25, 0.5, 0.75].map(t => { const v = lo + (hi - lo) * t; return `<line x1="0" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#EEF0F3"/><text x="${W - 4}" y="${(+y(v) - 5).toFixed(1)}" font-size="${FS}" fill="#8A93A3" text-anchor="end">${px(v)}</text>`; }).join('');
+    const f20 = o?.forecast?.h20;
+    return `<svg class="cone" viewBox="0 0 ${W} ${Hh + FS + 12}" role="img" aria-label="${esc(label)}近 ${N} 個交易日走勢${f20 ? `，未來 20 個交易日 80% 推論區間 ${px(f20.q[0])} 到 ${px(f20.q[4])}` : ''}">
+      ${grid}
+      ${F ? `<rect x="${x(N - 1)}" y="0" width="${(W - +x(N - 1)).toFixed(1)}" height="${Hh}" fill="#F6F8FC"/>
+        <path d="${band(4, 0)}" fill="#1F4FD8" fill-opacity=".10"/><path d="${band(3, 1)}" fill="#1F4FD8" fill-opacity=".20"/>
+        <path d="M${x(N - 1)},${y(c[N - 1])}${o.cone.map((q, j) => `L${x(N + j)},${y(q[2])}`).join('')}" fill="none" stroke="#1F4FD8" stroke-width="1.5" stroke-dasharray="5 4"/>
+        <text x="${(+x(N - 1) + 8).toFixed(1)}" y="${FS + 4}" font-size="${FS}" fill="#5B6270">${MOB ? '推論' : '推論區間（未來 20 日）'}</text>` : ''}
+      ${sup ? hline(sup.p, `支撐 ${px(sup.p)}・${sup.label}`, '#0E7C4A', true) : ''}${res ? hline(res.p, `壓力 ${px(res.p)}・${res.label}`, '#B45309') : ''}
+      <path d="${path(m60)}" fill="none" stroke="#B9C0CC" stroke-width="1.5" stroke-dasharray="4 3"/><path d="${path(m20)}" fill="none" stroke="#6E8EEB" stroke-width="1.5"/>
+      <path d="${path(c)}" fill="none" stroke="#15181D" stroke-width="2"/>
+      <circle cx="${x(N - 1)}" cy="${y(c[N - 1])}" r="4" fill="#15181D"/>
+      <text x="0" y="${Hh + FS + 6}" font-size="${FS}" fill="#8A93A3">${esc(d[0])}</text><text x="${x(N - 1)}" y="${Hh + FS + 6}" font-size="${FS}" fill="#8A93A3" text-anchor="middle">${esc(d[N - 1])}</text>${F && !MOB ? `<text x="${W}" y="${Hh + FS + 6}" font-size="${FS}" fill="#8A93A3" text-anchor="end">＋20 交易日</text>` : ''}</svg>
+      <div class="legend"><span><i style="background:#15181D;height:2px"></i>收盤</span><span><i style="background:#6E8EEB;height:2px"></i>20 日線</span><span><i style="background:#B9C0CC;height:2px"></i>60 日線</span>${F ? '<span><i style="background:rgba(31,79,216,.3)"></i>50% 區間</span><span><i style="background:rgba(31,79,216,.12)"></i>80% 區間</span>' : ''}</div>`;
+  }
+
+  /** 可靠度：用回測數字說話，並翻成白話 */
+  function relBlock(rel) {
+    const r5 = rel?.h5, r20 = rel?.h20;
+    if (!r5) return '<p class="small muted" style="margin:0">歷史資料不足，無法回測可靠度。</p>';
+    const grade = r => {
+      const band = Math.abs(r.cov80 - 80) <= 5 ? ['ok', '區間校準良好'] : r.cov80 < 75 ? ['warn', '區間偏窄，實際波動常超出'] : ['warn', '區間偏寬'];
+      const best = Math.max(r.base, 100 - r.base), edge = r.dir == null ? null : r.dir - best;
+      const dir = edge == null ? ['warn', '方向無資料'] : edge >= 5 ? ['ok', `方向比單純猜測好 ${edge.toFixed(0)} 個百分點`] : edge >= 2 ? ['warn', '方向僅略優於單純猜測'] : ['bad', '方向沒有比單純猜測好，只當參考'];
+      return { band, dir };
+    };
+    const row = (l, r) => { if (!r) return ''; const g = grade(r); return `<tr><td>${l}</td><td class="num">${r.cov80}%</td><td class="num">${r.cov50}%</td><td class="num">${r.dir ?? '—'}%</td><td class="num muted">${Math.max(r.base, 100 - r.base)}%</td><td class="num muted">${r.n}</td></tr>
+      <tr class="sub"><td colspan="6"><span class="rel ${g.band[0]}">${g.band[1]}</span><span class="rel ${g.dir[0]}">${g.dir[1]}</span></td></tr>`; };
+    return `<div class="tbl-box"><table class="tbl rtbl"><thead><tr><th>回測</th><th class="num">80% 區間<br>實際涵蓋</th><th class="num">50% 區間<br>實際涵蓋</th><th class="num">方向<br>命中率</th><th class="num">單純猜測<br>基準</th><th class="num">次數</th></tr></thead>
+      <tbody>${row('5 日', r5)}${row('20 日', r20)}</tbody></table></div>`;
+  }
+
+  function outlookLeft(o) {
+    if (!o) return '';
+    return `<div class="ostate"><span class="tag ${o.state === 'up' ? 'buy' : o.state === 'down' ? 'sell' : ''}" style="font-size:13px;padding:4px 10px">${esc(o.stateZh)}</span><span>${esc(o.trendText)}</span><span class="small muted">偏多訊號 ${o.posN}・偏空訊號 ${o.negN}</span></div>
+      <div><b class="small">技術面解讀</b><ul class="tcom">${o.comments.map(c => `<li class="${c.tone}"><i aria-hidden="true"></i>${esc(c.text)}</li>`).join('')}</ul></div>
+      <dl class="facts mini"><div><dt>RSI(14)</dt><dd>${num(o.ind.rsi, 0)}</dd></div><div><dt>KD(9)</dt><dd>${num(o.ind.k, 0)}／${num(o.ind.d, 0)}</dd></div><div><dt>MACD 柱</dt><dd class="${cls(o.ind.hist)}">${num(o.ind.hist, 2)}</dd></div><div><dt>年線（240 日）</dt><dd>${px(o.levels.ma240)}</dd></div></dl>`;
+  }
+  function outlookPanel(o, price) {
+    if (!o) return '<p class="empty">資料不足（需要至少半年的日 K）。</p>';
+    const f = o.forecast, rng = (q, a, b2) => `${px(q[a])}–${px(q[b2])}`;
+    const fr = (l, x) => !x ? '' : `<tr><td>${l}</td><td class="num"><b>${px(x.q[2])}</b><div class="small ${cls(x.qPct[2])}">${pct(x.qPct[2], 1)}</div></td><td class="num">${rng(x.q, 1, 3)}<div class="small muted">${pct(x.qPct[1], 1)}～${pct(x.qPct[3], 1)}</div></td><td class="num">${rng(x.q, 0, 4)}<div class="small muted">${pct(x.qPct[0], 1)}～${pct(x.qPct[4], 1)}</div></td><td class="num"><b>${x.upProb}%</b><div class="small muted">${x.nState >= 30 ? `同狀態 ${x.nState} 次` : '全部歷史'}</div></td></tr>`;
+    return `
+      <div class="srbox"><div><b class="small">壓力</b>${o.sr.resistance.map(s => `<div class="srow"><span>${esc(s.label)}</span><span class="mono">${px(s.p)} <small class="muted">+${fix(s.dist, 1)}%</small></span></div>`).join('') || '<div class="small muted">上方無明顯壓力</div>'}</div>
+        <div><b class="small">支撐</b>${o.sr.support.map(s => `<div class="srow"><span>${esc(s.label)}</span><span class="mono">${px(s.p)} <small class="muted">${pct(s.dist, 1)}</small></span></div>`).join('') || '<div class="small muted">下方無明顯支撐</div>'}</div></div>
+      <div><b class="small">走勢推論</b><div class="tbl-box"><table class="tbl rtbl"><thead><tr><th>期間</th><th class="num">中位數</th><th class="num">50% 機率落在</th><th class="num">80% 機率落在</th><th class="num">上漲機率</th></tr></thead><tbody>${fr('5 個交易日後', f.h5)}${fr('20 個交易日後', f.h20)}</tbody></table></div></div>
+      <div><b class="small">這個推論有多可靠？</b>${relBlock(o.reliability)}<p class="small muted" style="margin:6px 0 0">${esc(o.method)}</p></div>`;
+  }
+
+  async function viewIndexSection() {
+    const ix = S.snap.indices || {}, ks = Object.keys(ix);
+    if (!ks.length) return '';
+    if (!ix[S.idx]) S.idx = ks[0];
+    const it = ix[S.idx], b = await loadBars(S.idx);
+    return `<div class="hd"><h2 id="ix-h">指數走勢與推論</h2><span class="note">${it.years ? `以 ${it.years} 年日 K 回測` : ''}・${esc(it.marketDate || '')}</span></div>
+      ${seg('idx', S.idx, ks.map(k => [k, ix[k].name]))}
+      <div class="ixgrid"><div class="chart"><div class="ixq"><b class="mono" style="font-size:22px">${px(it.price)}</b><span class="mono ${cls(it.changePct)}">${pct(it.changePct)}</span></div>${b ? coneChart(b, it.outlook, it.name) : '<p class="empty">走勢資料載入失敗</p>'}${outlookLeft(it.outlook)}</div>
+      <div class="opanel">${outlookPanel(it.outlook, it.price)}</div></div>`;
+  }
+  async function fillIndexSection() {
+    const box = $('#idx'); if (!box) return;
+    const html = await viewIndexSection();
+    if ($('#idx') && S.route === 'home') { box.innerHTML = html; box.hidden = !html; }
   }
 
   // ── 個股頁 ──────────────────────────────────────────────────
@@ -528,6 +609,10 @@ ${viewDecideCard(key)}
   ${S.local.llm ? `<form id="ask" class="ask"><label for="ask-q" class="sr">問本機 AI</label><input id="ask-q" placeholder="問本機 AI，例如：現在適合加碼嗎？停損要設多少？" autocomplete="off"><button class="btn primary" type="submit">問</button></form><div id="ask-a"></div>` : ''}
   <div class="thesis"><div><b class="small">支持</b><ul>${T.pros.map(x => `<li>${x}</li>`).join('') || '<li class="muted">無</li>'}</ul></div>
   <div><b class="small">風險</b><ul>${T.cons.map(x => `<li>${x}</li>`).join('') || '<li class="muted">無</li>'}</ul></div></div>
+</section>
+
+<section class="card" aria-labelledby="ol-h"><div class="hd"><h2 id="ol-h">技術解讀與走勢推論</h2><span class="note">日 K・規則化解讀＋歷史模擬推論，附回測可靠度</span></div>
+  <div class="ixgrid"><div class="chart">${b ? coneChart(b, it.outlook, it.name) : ''}${outlookLeft(it.outlook)}</div><div class="opanel">${outlookPanel(it.outlook, it.price)}</div></div>
 </section>
 
 <div class="grid2">
@@ -941,6 +1026,7 @@ ${footer()}`;
       const f = e.target.closest('[data-of]');
       if (f) {
         const k = f.dataset.of, v = f.dataset.v;
+        if (k === 'idx') { S.idx = v; LS.set('idx', v); fillIndexSection(); return; }
         if (k === 'range') { S.range = +v; LS.set('range', S.range); const b = S.bars[S.route.slice(2).toUpperCase()]; const box = $('#pxchart')?.closest('.card'); if (b && box) { const it = S.snap.items[b.key]; box.querySelector('.chart-wrap').innerHTML = lineChart(b, it); bindChart(); } return; }
         UI[k] = v; LS.set('oppF', UI);
         const box = $('#opps'); if (box) box.innerHTML = viewOpps(S.route === 'all' ? 0 : 10);

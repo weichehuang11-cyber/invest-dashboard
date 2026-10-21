@@ -74,7 +74,7 @@ function toRaw(r) {
 }
 
 async function fetchOne(s, range) {
-  const days = { '1mo': 31, '1y': 366, '2y': 731 }[range] || 731;
+  const days = { '1mo': 31, '1y': 366, '2y': 731, '5y': 1827, '10y': 3653 }[range] || 731;
   try {
     const r = await yf().chart(s, { period1: new Date(Date.now() - days * 86400000), interval: '1d' }, { validateResult: false });
     const d = parseDaily(toRaw(r));

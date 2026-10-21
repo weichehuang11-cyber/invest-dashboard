@@ -25,6 +25,7 @@ const Macro = require('./lib/macro');
 const Signal = require('./lib/signal');
 const Verdict = require('./lib/verdict');
 const Outcomes = require('./lib/outcomes');
+const Outlook = require('./lib/outlook');
 
 const ROOT = path.join(__dirname, '..');
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const [k, v] = a.replace(/^--/, '').split('='); return [k, v ?? true]; }));
@@ -42,7 +43,7 @@ const r2 = (v, d = 2) => (v == null || !Number.isFinite(v) ? null : +v.toFixed(d
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
 const SECTORS = { XLK: '科技', XLC: '通訊服務', XLY: '非必需消費', XLF: '金融', XLI: '工業', XLV: '醫療', XLP: '必需消費', XLE: '能源', XLB: '原材料', XLU: '公用事業', XLRE: '房地產' };
-const INDEX = { '^GSPC': '標普 500', '^IXIC': '那斯達克', '^TWII': '加權指數', 'USDTWD=X': '美元兌台幣', 'DX-Y.NYB': '美元指數' };
+const INDEX = { '^GSPC': '標普 500', '^IXIC': '那斯達克', '^TWII': '加權指數', '^SOX': '費城半導體', 'USDTWD=X': '美元兌台幣', 'DX-Y.NYB': '美元指數' };
 
 function betaOf(a, b, n) {
   const mb = new Map(b.dates.map((x, i) => [x, b.close[i]]));
@@ -70,6 +71,10 @@ async function main() {
   const keys = [...wl.us, ...wl.tw, ...Object.keys(INDEX), ...Object.keys(SECTORS)];
   const daily = {};
   await mapSeries(keys, async k => { const d = await Yahoo.daily(k); if (d) daily[k] = d; }, 300);
+  // 指數另抓 10 年日 K：走勢推論與回測需要較長歷史
+  const IDX = ['^TWII', '^GSPC', '^IXIC', '^SOX'];
+  const longDaily = {};
+  await mapSeries(IDX, async k => { const d = await Yahoo.daily(k, '10y').catch(() => null); if (d && d.bars.close.length > 300) longDaily[k] = d; }, 300);
   status.yahoo = `${Object.keys(daily).length}/${keys.length}`;
   log('Yahoo 日 K', status.yahoo);
 
@@ -197,6 +202,7 @@ async function main() {
       price: r2(d.price, 4), prevClose: r2(d.prevClose, 4), changePct: r2(d.changePct), marketDate: d.marketDate, marketTime: d.marketTime,
       ta: ta && Object.fromEntries(Object.entries(ta).map(([k, v]) => [k, typeof v === 'number' ? r2(v, 4) : v])),
       chip, fund, ml, signal: { ...sig, stop: ta?.stopLong ? r2(ta.stopLong, 2) : null },
+      outlook: (() => { try { return Outlook.analyze(d.bars, { window: 500, backtestDays: 400 }); } catch (e) { log('outlook 失敗', key, e.message); return null; } })(),
     };
   }
   log('個股完成', Object.keys(items).length);
@@ -283,10 +289,19 @@ async function main() {
   };
 
   // ── 8. 輸出 ────────────────────────────────────────────────────
+  const IDX_NAME = { '^TWII': '加權指數', '^GSPC': '標普 500', '^IXIC': '那斯達克', '^SOX': '費城半導體' };
+  const indices = {};
+  for (const k of IDX) {
+    const d = longDaily[k] || daily[k]; if (!d) continue;
+    let o = null; try { o = Outlook.analyze(d.bars, { window: 750, backtestDays: 1250 }); } catch (e) { log('指數 outlook 失敗', k, e.message); }
+    const dd = d;   // 價格、走勢圖與推論用同一份資料
+    indices[k] = { key: k, name: IDX_NAME[k], price: r2(dd.price, 2), changePct: r2(dd.changePct), marketDate: dd.marketDate, years: r2(d.bars.close.length / 250, 1), outlook: o };
+  }
+  status.indices = `${Object.values(indices).filter(x => x.outlook).length}/${IDX.length}`;
   const ranking = Object.values(items).sort((a, b) => b.signal.score - a.signal.score).map(x => x.key);
   const snapshot = {
     version: 1, generatedAt: nowIso, mode: FULL ? `full:${FULL}` : 'intraday', buildSeconds: Math.round((Date.now() - t0) / 1000),
-    status, verdict, env, items, ranking, changes, sectors, scorecard,
+    status, verdict, env, items, ranking, changes, sectors, scorecard, indices,
     chipMarket: heavy.tw.chipMarket || null,
     watchlist: { us: wl.us, tw: wl.tw },
   };
@@ -302,10 +317,12 @@ async function main() {
     });
   }
   // 大盤日 K（個人決策紀錄用來比較「同期大盤」）
-  for (const key of ['^TWII', '^GSPC']) {
-    const d = daily[key]; if (!d) continue;
+  for (const key of IDX) {
+    const d = longDaily[key] || daily[key]; if (!d) continue;
+    const sl = a => a.slice(-260);
     writeJSON(path.join(OUT, 'bars', `${key.replace(/[^A-Za-z0-9_.-]/g, '_')}.json`), {
-      key, dates: d.bars.dates.slice(-260), close: d.bars.close.slice(-260).map(v => r2(v, 4)),
+      key, dates: sl(d.bars.dates), open: sl(d.bars.open).map(v => r2(v, 4)), high: sl(d.bars.high).map(v => r2(v, 4)),
+      low: sl(d.bars.low).map(v => r2(v, 4)), close: sl(d.bars.close).map(v => r2(v, 4)), volume: sl(d.bars.volume),
     });
   }
   log('輸出完成', OUT);
