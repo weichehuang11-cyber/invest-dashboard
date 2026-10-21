@@ -10,6 +10,7 @@
 }
 body.us-colors { --up: #0E7C4A; --down: #C8232C; }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 'Noto Sans TC', system-ui, -apple-system, sans-serif; }
 a { color: var(--acc); }
@@ -329,3 +330,62 @@ table.corr { min-width: 0; }
 .btform { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 16px; align-items: end; }
 .btform .actions, .btform .field:has(#bt-trend) { grid-column: 1 / -1; }
 .btform .field:first-child { grid-column: 1 / -1; max-width: 420px; }
+
+/* ── 手機閱讀版面 ───────────────────────────────────────────── */
+.fold-btn { display: none; }
+@media (max-width: 760px) {
+  body { font-size: 15px; }
+  .topbar { position: static; }
+  .topbar-in { padding-top: 8px; }
+  .pills { padding-bottom: 2px; }
+  .pill { font-size: 12px; }
+  /* 首頁閱讀順序：判斷 → 我的部位 → 今天變化 → 機會 → 市場 → 細節 */
+  .main > .row { display: contents; }
+  .main > .row > * { flex: 0 0 auto; width: 100%; }
+  .main > * { order: 50; }
+  .main > .verdict { order: 1; }
+  .main section[aria-labelledby="pf-h"] { order: 2; }
+  .main section[aria-labelledby="chg-h"] { order: 3; }
+  .main #opps { order: 4; }
+  .main section[aria-labelledby="env-h"] { order: 5; }
+  .main #idx { order: 6; }
+  .main section[aria-labelledby="hl-h"] { order: 7; }
+  .main section[aria-labelledby="cal-h"] { order: 8; }
+  .main section[aria-labelledby="sec-h"] { order: 9; }
+  .main section[aria-labelledby="sc-h"] { order: 10; }
+  .main section[aria-labelledby="cm-h"] { order: 11; }
+  .main > footer { order: 99; }
+  /* 可收合區塊 */
+  .fold-hd { cursor: pointer; position: relative; padding-right: 34px; }
+  .fold-btn { display: block; position: absolute; right: -4px; top: -4px; width: 32px; height: 32px; border: 0; background: transparent; cursor: pointer; }
+  .fold-btn::after { content: ''; position: absolute; left: 11px; top: 9px; width: 9px; height: 9px; border-right: 2px solid var(--mute); border-bottom: 2px solid var(--mute); transform: rotate(45deg); transition: transform .15s; }
+  .card.fold.open .fold-btn::after { transform: translateY(5px) rotate(-135deg); }
+  .card.fold:not(.open) .fh { display: none !important; }
+  .card.fold.all:not(.open) > :not(.hd) { display: none !important; }
+  .card.fold:not(.open) { gap: 10px; }
+  .hd .note { flex-basis: 100%; }
+  .hd .act { margin-left: 0; }
+  /* 市場環境：橫向滑動 */
+  .env { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 8px; margin: 0 -14px; padding: 0 14px 4px; scrollbar-width: none; }
+  .env::-webkit-scrollbar { display: none; }
+  .env .tile { flex: 0 0 150px; scroll-snap-align: start; }
+  /* 機會清單卡片更緊湊 */
+  .ocard { padding: 10px 12px; gap: 4px; }
+  .ocard .r2 .small.muted { font-size: 11px; }
+  /* 健康度：標題一行、數值一行 */
+  .hrow2 { grid-template-columns: 1fr; }
+  .hrow2 .hv { text-align: left; }
+  .hgrid { grid-template-columns: 1fr; }
+  .verdict .r { flex-basis: 100%; }
+  .mymood .seg.mood button { padding: 0 7px; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .kpi .v { font-size: 19px; }
+  dl.facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .crow { grid-template-columns: 1fr 90px 44px; }
+  .ar { grid-template-columns: 1fr 1fr 70px; }
+  .cal li { grid-template-columns: 70px 1fr; }
+  .btform { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .quote { gap: 12px 24px; }
+}
+
+.tbl.wrap td { white-space: normal; word-break: break-word; }

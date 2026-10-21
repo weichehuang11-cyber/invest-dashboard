@@ -18,6 +18,7 @@
   const saveCfg = () => LS.set('cfg', cfg);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const isNum = v => typeof v === 'number' && Number.isFinite(v);
+  const isMob = () => window.innerWidth < 760;
   const sign = v => (v > 0 ? '+' : v < 0 ? '−' : '');
   const fix = (v, d = 2) => (isNum(v) ? Math.abs(v).toLocaleString('zh-TW', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—');
   const pct = (v, d = 2) => (isNum(v) ? sign(v) + fix(v, d) + '%' : '—');
@@ -265,11 +266,11 @@
       <div class="m">${esc(e.meaning)}</div></div>`).join('')}</div>
 </section>
 
-<section class="card" id="idx" aria-labelledby="ix-h"><p class="loading">載入指數走勢…</p></section>
+<section class="card fold" data-fold="idx" id="idx" aria-labelledby="ix-h"><p class="loading">載入指數走勢…</p></section>
 
 <div class="row">
-  ${s.health ? `<section class="card wide" aria-labelledby="hl-h">${viewHealth()}</section>` : ''}
-  ${s.calendar?.length ? `<section class="card side" aria-labelledby="cal-h">${viewCalendar()}</section>` : ''}
+  ${s.health ? `<section class="card wide fold" data-fold="health" aria-labelledby="hl-h">${viewHealth()}</section>` : ''}
+  ${s.calendar?.length ? `<section class="card side fold" data-fold="cal" aria-labelledby="cal-h">${viewCalendar()}</section>` : ''}
 </div>
 
 <div class="row">
@@ -280,13 +281,13 @@
   </section>
 </div>
 
-<section class="card" id="opps" aria-labelledby="opp-h">${viewOpps(10)}</section>
+<section class="card" id="opps" aria-labelledby="opp-h">${viewOpps(isMob() ? 6 : 10)}</section>
 
 <div class="row">
-  <section class="card wide" aria-labelledby="sec-h">${viewSectors()}</section>
-  <section class="card side" aria-labelledby="sc-h">${viewScoreMini()}</section>
+  <section class="card wide fold all" data-fold="sec" aria-labelledby="sec-h">${viewSectors()}</section>
+  <section class="card side fold all" data-fold="scm" aria-labelledby="sc-h">${viewScoreMini()}</section>
 </div>
-${s.chipMarket ? `<section class="card" aria-labelledby="cm-h">${viewChipMarket()}</section>` : ''}
+${s.chipMarket ? `<section class="card fold all" data-fold="cm" aria-labelledby="cm-h">${viewChipMarket()}</section>` : ''}
 ${footer()}`;
   }
 
@@ -380,7 +381,7 @@ ${footer()}`;
         <div>${evDots(g.evidence)}${l ? `<span class="small muted" style="margin-left:10px">本機預測 5 日 <b class="${cls(l.d5)}">${pct(l.d5)}</b></span>` : ''}</div></a>`;
     };
     return `
-      <div class="hd"><h2 id="opp-h">機會清單</h2><span class="note">依綜合分數排序・證據：技術／籌碼／基本面／模型（${cfg.colors === 'us' ? '實心綠' : '實心紅'}＝支持、${cfg.colors === 'us' ? '實心紅' : '實心綠'}＝反對、空心＝中性、虛線＝無資料）</span>${n && all.length > n ? `<a class="act" href="#/all">看全部 ${all.length} 檔</a>` : ''}</div>
+      <div class="hd"><h2 id="opp-h">機會清單</h2><span class="note">${isMob() ? '證據燈：' : `依綜合分數排序・證據：技術／籌碼／基本面／模型（`}${cfg.colors === 'us' ? '實心綠' : '實心紅'}＝支持、${cfg.colors === 'us' ? '實心紅' : '實心綠'}＝反對${isMob() ? '' : '、空心＝中性、虛線＝無資料）'}</span>${n && all.length > n ? `<a class="act" href="#/all">看全部 ${all.length} 檔</a>` : ''}</div>
       <div class="filters">${seg('mk', UI.mk, [['all', '全部'], ['tw', '台股'], ['us', '美股']])}${seg('cat', UI.cat, [['all', '全部訊號'], ['buy', '買進'], ['sell', '賣出'], ['star', '★ 自選'], ['held', '持有中']])}${seg('sort', UI.sort, [['score', '依分數'], ['up', '漲最多'], ['down', '跌最多']])}</div>
       ${keys.length ? '' : `<p class="empty">${UI.cat === 'star' ? '還沒有自選股。到個股頁按「☆ 加入自選」。' : UI.cat === 'held' ? '還沒有持股，或持股不在觀察清單。' : '沒有符合條件的標的。'}</p>`}
       <div class="tbl-box opp"><table class="tbl"><thead><tr><th>#</th><th>標的</th><th class="num">價格</th><th class="num">今日</th><th>判斷</th><th>證據</th><th class="num">分數</th><th class="num">停損價（2 倍 ATR）</th>${lp ? '<th class="num">本機 1 日</th><th class="num">本機 5 日</th>' : ''}</tr></thead>
@@ -439,7 +440,7 @@ ${footer()}`;
     }
     if (S.local.npu || S.local.cpu) {
       const ok = await localPredict(S.snap.ranking.slice(0, 10));
-      if (ok && S.route === 'home') { const box = $('#opps'); if (box) box.innerHTML = viewOpps(10); }
+      if (ok && S.route === 'home') { const box = $('#opps'); if (box) box.innerHTML = viewOpps(isMob() ? 6 : 10); }
     }
     if (S.local.llm && S.route === 'home') {
       const key = 'verdict:' + S.snap.generatedAt;
@@ -511,7 +512,7 @@ ${footer()}`;
     const sigs = H.signals || [];
     return `<div class="hd"><h2 id="hl-h">市場健康度</h2><span class="note">寬度、部位、資金、估值、信用・收盤後更新</span></div>
       ${sigs.length ? `<ul class="tcom">${sigs.map(x => `<li class="${x.tone}"><i aria-hidden="true"></i>${esc(x.text)}</li>`).join('')}</ul>` : '<p class="small muted" style="margin:0">目前沒有明顯的警訊。</p>'}
-      <div class="hgrid">${p1}${p2}${p3}${p4}${p5}${p6}</div>`;
+      <div class="hgrid fh">${p1}${p2}${p3}${p4}${p5}${p6}</div>`;
   }
 
   function viewCalendar() {
@@ -521,7 +522,7 @@ ${footer()}`;
     const wk = d => '日一二三四五六'[new Date(d + 'T00:00:00Z').getUTCDay()];
     const held = new Set(holdings().rows.map(r => r.key));
     return `<div class="hd"><h2 id="cal-h">事件行事曆</h2><span class="note">未來 3 週</span></div>
-      <ol class="cal">${ev.slice(0, 14).map(e => { const n = dd(e.date); return `<li class="imp${e.importance}${e.key && held.has(e.key) ? ' held' : ''}"><div class="cd"><b>${e.date.slice(5).replace('-', '/')}</b><span class="small muted">週${wk(e.date)}・${n === 0 ? '今天' : n === 1 ? '明天' : `${n} 天後`}</span></div>
+      <ol class="cal">${ev.slice(0, 14).map((e, i) => { const n = dd(e.date); return `<li class="${i >= 4 ? 'fh ' : ''}imp${e.importance}${e.key && held.has(e.key) ? ' held' : ''}"><div class="cd"><b>${e.date.slice(5).replace('-', '/')}</b><span class="small muted">週${wk(e.date)}・${n === 0 ? '今天' : n === 1 ? '明天' : `${n} 天後`}</span></div>
         <div><span class="tag">${e.region === 'tw' ? '台' : '美'}</span> ${e.key ? `<a href="#/s/${encodeURIComponent(e.key)}">${esc(e.title)}</a>` : esc(e.title)}${e.key && held.has(e.key) ? ' <span class="small bad-text">持有中</span>' : ''}</div></li>`; }).join('')}</ol>
       <p class="small muted" style="margin:0">紅點＝重大（利率決議、CPI）。央行日期為推估，可在 config/events.json 修改。</p>`;
   }
@@ -595,13 +596,13 @@ ${footer()}`;
     const it = ix[S.idx], b = await loadBars(S.idx);
     return `<div class="hd"><h2 id="ix-h">指數走勢與推論</h2><span class="note">${it.years ? `以 ${it.years} 年日 K 回測` : ''}・${esc(it.marketDate || '')}</span></div>
       ${seg('idx', S.idx, ks.map(k => [k, ix[k].name]))}
-      <div class="ixgrid"><div class="chart"><div class="ixq"><b class="mono" style="font-size:22px">${px(it.price)}</b><span class="mono ${cls(it.changePct)}">${pct(it.changePct)}</span></div>${b ? coneChart(b, it.outlook, it.name) : '<p class="empty">走勢資料載入失敗</p>'}${outlookLeft(it.outlook)}</div>
-      <div class="opanel">${outlookPanel(it.outlook, it.price)}</div></div>`;
+      <div class="ixgrid"><div class="chart"><div class="ixq"><b class="mono" style="font-size:22px">${px(it.price)}</b><span class="mono ${cls(it.changePct)}">${pct(it.changePct)}</span></div>${b ? coneChart(b, it.outlook, it.name) : '<p class="empty">走勢資料載入失敗</p>'}<div class="fh">${outlookLeft(it.outlook)}</div></div>
+      <div class="opanel fh">${outlookPanel(it.outlook, it.price)}</div></div>`;
   }
   async function fillIndexSection() {
     const box = $('#idx'); if (!box) return;
     const html = await viewIndexSection();
-    if ($('#idx') && S.route === 'home') { box.innerHTML = html; box.hidden = !html; }
+    if ($('#idx') && S.route === 'home') { box.innerHTML = html; box.hidden = !html; setupFolds(); }
   }
 
   // ── 財報重點 ──────────────────────────────────────────────────
@@ -613,9 +614,9 @@ ${footer()}`;
     const Q = f.quarters, R = f.ratios || {};
     const bars = (k, col) => { const v = Q.map(q => q[k]).filter(isNum); if (!v.length) return ''; const mx = Math.max(...v.map(Math.abs)); return `<div class="qbars" aria-hidden="true">${Q.map(q => `<div title="${qlab(q.date)}"><div style="height:${isNum(q[k]) ? Math.abs(q[k]) / mx * 100 : 0}%;background:${q[k] < 0 ? 'var(--down)' : col}"></div></div>`).join('')}</div>`; };
     const sp = f.surprises || [], rv = f.revisions?.y0;
-    return `<section class="card" aria-labelledby="fn-h"><div class="hd"><h2 id="fn-h">財報重點</h2><span class="note">最新季度 ${esc(qlab(f.asOf))}（${esc(f.asOf)}）・來源 ${esc(f.source)}</span><span class="tag ${f.score >= 1 ? 'buy' : f.score <= -2 ? 'sell' : ''}" style="margin-left:auto;font-size:13px;padding:4px 10px">${esc(f.grade)}</span></div>
+    return `<section class="card fold" data-fold="s-fin" aria-labelledby="fn-h"><div class="hd"><h2 id="fn-h">財報重點</h2><span class="note">最新季度 ${esc(qlab(f.asOf))}（${esc(f.asOf)}）・來源 ${esc(f.source)}</span><span class="tag ${f.score >= 1 ? 'buy' : f.score <= -2 ? 'sell' : ''}" style="margin-left:auto;font-size:13px;padding:4px 10px">${esc(f.grade)}</span></div>
       <ul class="tcom">${f.checks.map(c => `<li class="${c.tone}"><i aria-hidden="true"></i>${esc(c.text)}</li>`).join('') || '<li class="neu"><i></i>沒有特別值得注意的變化</li>'}</ul>
-      <div class="grid2">
+      <div class="grid2 fh">
         <div><b class="small">近 ${Q.length} 季</b>
           <div class="qgrid"><div><div class="small muted">營收（${unit}）</div>${bars('rev', 'var(--acc2)')}</div><div><div class="small muted">EPS</div>${bars('eps', 'var(--acc)')}</div></div>
           <div class="tbl-box"><table class="tbl rtbl qtbl"><thead><tr><th>季度</th><th class="num">營收</th><th class="num">年增</th><th class="num">毛利率</th><th class="num">營益率</th><th class="num">EPS</th><th class="num">年增</th></tr></thead><tbody>
@@ -668,20 +669,20 @@ ${footer()}`;
     const m20 = maS(20), m60 = maS(60), stop = it.signal.stop;
     const vals = [...c, ...m20.filter(isNum), ...m60.filter(isNum), ...(isNum(stop) ? [stop] : [])];
     let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.06 || 1; lo -= pad; hi += pad;
-    const W = 1200, Hh = 300, x = i => (i / (n - 1) * W).toFixed(1), y = v => (Hh - (v - lo) / (hi - lo) * Hh).toFixed(1);
+    const MOB = isMob(), W = MOB ? 640 : 1200, Hh = MOB ? 380 : 300, FS = MOB ? 20 : 14, x = i => (i / (n - 1) * W).toFixed(1), y = v => (Hh - (v - lo) / (hi - lo) * Hh).toFixed(1);
     S.chart = { n, d, c, m20, m60, prev: b.close.slice(-n - 1), off, x, y, W, Hh };
     const path = a => a.map((v, i) => (v == null ? '' : `${a[i - 1] == null ? 'M' : 'L'}${x(i)},${y(v)}`)).join('');
-    const grid = [0.25, 0.5, 0.75].map(t => { const v = lo + (hi - lo) * t; return `<line x1="0" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#EEF0F3"/><text x="4" y="${(+y(v) - 5).toFixed(1)}" font-size="14" fill="#8A93A3">${px(v)}</text>`; }).join('');
+    const grid = [0.25, 0.5, 0.75].map(t => { const v = lo + (hi - lo) * t; return `<line x1="0" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#EEF0F3"/><text x="4" y="${(+y(v) - 5).toFixed(1)}" font-size="${FS}" fill="#8A93A3">${px(v)}</text>`; }).join('');
     const chg = (c[n - 1] / c[0] - 1) * 100;
     return `<div class="chart-top"><div id="xh-read" class="small mono" aria-live="polite">${esc(d[0])} → ${esc(d[n - 1])}・區間 <b class="${cls(chg)}">${pct(chg, 1)}</b></div>
       ${seg('range', String(S.range), [['22', '1 月'], ['66', '3 月'], ['120', '6 月'], ['250', '1 年']])}</div>
-      <svg id="pxchart" viewBox="0 0 ${W} ${Hh + 22}" role="img" aria-label="近 ${n} 個交易日收盤價，區間 ${pct(chg, 1)}，20 日線 ${px(m20[n - 1])}，60 日線 ${px(m60[n - 1])}" style="touch-action:pan-y">
+      <svg id="pxchart" viewBox="0 0 ${W} ${Hh + FS + 8}" role="img" aria-label="近 ${n} 個交易日收盤價，區間 ${pct(chg, 1)}，20 日線 ${px(m20[n - 1])}，60 日線 ${px(m60[n - 1])}" style="touch-action:pan-y">
       ${grid}<path d="${path(m60)}" fill="none" stroke="#B9C0CC" stroke-width="1.5" stroke-dasharray="4 3"/><path d="${path(m20)}" fill="none" stroke="#6E8EEB" stroke-width="1.5"/>
       <path d="${path(c)}" fill="none" stroke="#15181D" stroke-width="2"/>
-      ${isNum(stop) && stop > lo ? `<line x1="0" x2="${W}" y1="${y(stop)}" y2="${y(stop)}" stroke="#B91C1C" stroke-dasharray="6 4"/><text x="${W - 4}" y="${(+y(stop) - 5).toFixed(1)}" text-anchor="end" font-size="14" fill="#B91C1C">停損 ${px(stop)}</text>` : ''}
+      ${isNum(stop) && stop > lo ? `<line x1="0" x2="${W}" y1="${y(stop)}" y2="${y(stop)}" stroke="#B91C1C" stroke-dasharray="6 4"/><text x="${W - 4}" y="${(+y(stop) - 5).toFixed(1)}" text-anchor="end" font-size="${FS}" fill="#B91C1C">停損 ${px(stop)}</text>` : ''}
       <g id="xh" style="display:none"><line id="xh-l" y1="0" y2="${Hh}" stroke="#15181D" stroke-width="1" stroke-dasharray="3 3"/><circle id="xh-c" r="6" fill="#1F4FD8" stroke="#fff" stroke-width="2"/></g>
       <rect x="0" y="0" width="${W}" height="${Hh}" fill="transparent" id="xh-hit"/>
-      <text x="0" y="${Hh + 18}" font-size="14" fill="#8A93A3">${esc(d[0])}</text><text x="${W}" y="${Hh + 18}" font-size="14" fill="#8A93A3" text-anchor="end">${esc(d[n - 1])}</text></svg>`;
+      <text x="0" y="${Hh + FS + 4}" font-size="${FS}" fill="#8A93A3">${esc(d[0])}</text><text x="${W}" y="${Hh + FS + 4}" font-size="${FS}" fill="#8A93A3" text-anchor="end">${esc(d[n - 1])}</text></svg>`;
   }
   function bindChart() {
     const svg = $('#pxchart'); if (!svg || !S.chart) return;
@@ -738,12 +739,12 @@ ${viewDecideCard(key)}
 
 ${viewFin(it)}
 
-<section class="card" aria-labelledby="ol-h"><div class="hd"><h2 id="ol-h">技術解讀與走勢推論</h2><span class="note">日 K・規則化解讀＋歷史模擬推論，附回測可靠度</span></div>
-  <div class="ixgrid"><div class="chart">${b ? coneChart(b, it.outlook, it.name) : ''}${outlookLeft(it.outlook)}</div><div class="opanel">${outlookPanel(it.outlook, it.price)}</div></div>
+<section class="card fold" data-fold="s-ol" aria-labelledby="ol-h"><div class="hd"><h2 id="ol-h">技術解讀與走勢推論</h2><span class="note">日 K・規則化解讀＋歷史模擬推論，附回測可靠度</span></div>
+  <div class="ixgrid"><div class="chart">${b ? coneChart(b, it.outlook, it.name) : ''}<div class="fh">${outlookLeft(it.outlook)}</div></div><div class="opanel fh">${outlookPanel(it.outlook, it.price)}</div></div>
 </section>
 
 <div class="grid2">
-  <section class="card" aria-labelledby="val-h"><div class="hd"><h2 id="val-h">估值與基本面</h2></div>
+  <section class="card fold all" data-fold="s-val" aria-labelledby="val-h"><div class="hd"><h2 id="val-h">估值與基本面</h2></div>
     ${range52 != null ? `<div style="display:flex;flex-direction:column;gap:6px"><div style="display:flex;justify-content:space-between;font-size:13px"><span>52 週區間位置</span><span class="mono">${range52.toFixed(0)}%</span></div>
       <div class="meter" role="img" aria-label="現價位於 52 週區間 ${range52.toFixed(0)}% 位置"><i style="left:${range52}%;width:4px;background:var(--acc)"></i></div>
       <div style="display:flex;justify-content:space-between" class="small muted"><span>低 ${px(ta.low52)}</span><span>高 ${px(ta.high52)}</span></div></div>` : ''}
@@ -761,12 +762,12 @@ ${viewFin(it)}
     <div class="legend"><span><i style="background:#15181D;height:2px"></i>收盤</span><span><i style="background:#6E8EEB;height:2px"></i>20 日線 ${px(ta.ma20)}</span><span><i style="background:#B9C0CC;height:2px"></i>60 日線 ${px(ta.ma60)}</span>
       <span>相對強弱 RSI(14) ${isNum(ta.rsi) ? ta.rsi.toFixed(0) : '—'}</span><span>布林位置 ${isNum(ta.bbPct) ? ta.bbPct.toFixed(0) + '%' : '—'}</span></div></section>
 
-  ${it.market === 'tw' ? `<section class="card" aria-labelledby="ch-h"><div class="hd"><h2 id="ch-h">籌碼</h2><span class="note">${hist.length ? `外資每日買賣超・近 ${hist.length} 個交易日（張）` : esc(c?.source === 'TWSE' ? '只有最新一日（需設定 FinMind 權杖才有歷史）' : '尚無資料')}</span></div>
+  ${it.market === 'tw' ? `<section class="card fold all" data-fold="s-chip" aria-labelledby="ch-h"><div class="hd"><h2 id="ch-h">籌碼</h2><span class="note">${hist.length ? `外資每日買賣超・近 ${hist.length} 個交易日（張）` : esc(c?.source === 'TWSE' ? '只有最新一日（需設定 FinMind 權杖才有歷史）' : '尚無資料')}</span></div>
     ${hist.length ? `<div class="flows" style="grid-template-columns:repeat(${hist.length},minmax(0,1fr))" role="img" aria-label="外資近 ${hist.length} 日買賣超">${hist.map(h => `<div><div class="p"><div style="height:${h.foreign > 0 ? h.foreign / fmx * 100 : 0}%"></div></div><div class="n"><div style="height:${h.foreign < 0 ? -h.foreign / fmx * 100 : 0}%"></div></div></div>`).join('')}</div>` : ''}
     ${c ? `<dl class="facts"><div><dt>外資連續</dt><dd class="${cls(c.foreignStreak)}" style="font-size:16px">${c.foreignStreak ? `${c.foreignStreak > 0 ? '買' : '賣'} ${Math.abs(c.foreignStreak)} 日` : '—'}</dd></div>
       <div><dt>外資 20 日</dt><dd class="${cls(c.foreign20)}">${c.foreign20 == null ? int(c.foreign1) : int(c.foreign20)}</dd></div><div><dt>投信 20 日</dt><dd class="${cls(c.trust20)}">${c.trust20 == null ? int(c.trust1) : int(c.trust20)}</dd></div><div><dt>自營商 20 日</dt><dd class="${cls(c.dealer20)}">${int(c.dealer20)}</dd></div></dl>` : ''}</section>` : ''}
 
-  <section class="card" aria-labelledby="rk-h"><div class="hd"><h2 id="rk-h">風險</h2></div>
+  <section class="card fold all" data-fold="s-risk" aria-labelledby="rk-h"><div class="hd"><h2 id="rk-h">風險</h2></div>
     <dl class="facts">
       <div><dt>停損價（收盤 − 2 倍日線 ATR）</dt><dd>${px(g.stop)}${isNum(g.stop) ? ` <small class="muted">（${pct((g.stop / it.price - 1) * 100, 1)}）</small>` : ''}</dd></div>
       <div><dt>1 日風險值（VaR 95%）</dt><dd>${isNum(ta.var95) ? ta.var95.toFixed(1) + '%' : '—'}</dd></div>
@@ -778,14 +779,14 @@ ${viewFin(it)}
     </dl></section>
 </div>
 
-<section class="card" aria-labelledby="al-h"><div class="hd"><h2 id="al-h">價格提醒</h2><span class="note">只存在這台裝置；有新資料時比對，達到就列在總覽「今天有什麼變了」${'Notification' in window ? '，並跳出通知' : ''}</span></div>
+<section class="card fold all" data-fold="s-alert" aria-labelledby="al-h"><div class="hd"><h2 id="al-h">價格提醒</h2><span class="note">只存在這台裝置；有新資料時比對，達到就列在總覽「今天有什麼變了」${'Notification' in window ? '，並跳出通知' : ''}</span></div>
   <form id="al-form" class="alform">
     <div class="field"><label for="al-up">漲到（含）以上</label><input id="al-up" type="number" step="any" inputmode="decimal" value="${alerts()[key]?.above ?? ''}" placeholder="${px(it.price * 1.05)}"></div>
     <div class="field"><label for="al-dn">跌到（含）以下</label><input id="al-dn" type="number" step="any" inputmode="decimal" value="${alerts()[key]?.below ?? (isNum(g.stop) ? '' : '')}" placeholder="${isNum(g.stop) ? px(g.stop) + '（停損價）' : px(it.price * 0.95)}"></div>
     <div class="actions"><button class="btn primary" type="submit">儲存提醒</button>${alerts()[key] ? '<button type="button" class="btn" id="al-clr">清除</button>' : ''}</div>
   </form><p id="al-msg" class="small" role="status"></p></section>
 
-<section class="card" aria-labelledby="ph-h"><div class="hd"><h2 id="ph-h">這檔股票的預測紀錄</h2><span class="note">收盤後的買進／賣出訊號，依之後的交易日收盤判定</span></div>
+<section class="card fold all" data-fold="s-pred" aria-labelledby="ph-h"><div class="hd"><h2 id="ph-h">這檔股票的預測紀錄</h2><span class="note">收盤後的買進／賣出訊號，依之後的交易日收盤判定</span></div>
   ${preds.length ? `<div class="tbl-box"><table class="tbl" style="min-width:600px"><thead><tr><th>訊號日</th><th>訊號</th><th class="num">當時價</th><th class="num">1 日後</th><th>結果</th><th class="num">5 日後</th><th>結果</th></tr></thead><tbody>
     ${preds.map(p => `<tr><td class="mono">${esc(p.date)}</td><td>${sigTag(p.signal)}</td><td class="num">${px(p.price)}</td><td class="num">${px(p.p1)}</td><td>${resZh(p.r1)}</td><td class="num">${px(p.p5)}</td><td>${resZh(p.r5)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">還沒有紀錄（收盤後出現買進或賣出訊號才會記錄）。</p>'}
 </section>
@@ -941,7 +942,7 @@ ${footer()}`;
   <div class="hd"><h2 id="my-h">我的論點</h2><span class="note">你自己的理由與出場條件，系統每次更新都幫你檢查・只存在這台裝置</span>${r ? `<span class="tag ${r.hits.length ? 't-論點' : 't-訊號'}" style="margin-left:auto">${r.hits.length ? `${r.hits.length} 項觸發` : '論點仍成立'}</span>` : ''}</div>
   ${r ? `<ul class="checks">${r.rows.map(x => `<li class="${x.hit ? 'hit' : x.hit === false ? 'ok' : 'na'}"><span class="ic" aria-hidden="true">${x.hit ? '!' : x.hit === false ? '✓' : '–'}</span><b>${esc(x.label)}</b><span class="small muted">${x.hit ? '已觸發' : x.hit === false ? '未觸發' : '無法判斷'}・${esc(x.now)}</span></li>`).join('') || '<li class="na small muted">還沒有設定條件</li>'}</ul>
     ${t.why ? `<blockquote class="why">${esc(t.why)}<div class="small muted">寫於 ${esc((t.created || '').slice(0, 10))}${t.updated && t.updated !== t.created ? `，更新 ${esc(t.updated.slice(0, 10))}` : ''}${isNum(t.target) ? `・目標價 ${px(t.target)}（距現價 ${pct((t.target / it.price - 1) * 100, 1)}）` : ''}</div></blockquote>` : ''}` : '<p class="empty" style="margin:0">寫下你為什麼看好（或看壞）這檔，以及什麼情況代表你錯了。之後條件一觸發，總覽會提醒你。</p>'}
-  <details${r ? '' : ' open'}><summary>${r ? '編輯論點' : '寫下論點'}</summary>
+  <details${r || isMob() ? '' : ' open'}><summary>${r ? '編輯論點' : '寫下論點'}</summary>
   <form id="th-form" class="form" style="margin-top:10px">
     <div class="field"><label for="th-why">我的理由</label><textarea id="th-why" rows="3" placeholder="例：AI 伺服器訂單能見度到明年，回檔到季線是加碼機會">${esc(t.why || '')}</textarea></div>
     <div class="field" style="max-width:240px"><label for="th-tg">我的目標價</label><input id="th-tg" type="number" step="any" value="${t.target ?? ''}"></div>
@@ -1348,7 +1349,7 @@ ${footer()}`;
   <div class="grid2"><div style="display:flex;flex-direction:column;gap:12px"><b class="small">近 30 天</b>${scoreRows(sc.d30)}</div><div style="display:flex;flex-direction:column;gap:12px"><b class="small">近 90 天</b>${scoreRows(sc.d90)}</div></div>
   <p class="small muted" style="margin:0">黑線＝50%（擲硬幣）。灰色條＝樣本少於 30 筆，數字不穩定。${sc.since ? `自 ${esc(sc.since)} 起共 ${sc.total} 筆。` : ''}</p></section>
 <section class="card" aria-labelledby="sc2"><div class="hd"><h2 id="sc2">資料狀態</h2><span class="note">本次更新：${esc(tpeTime(S.snap.generatedAt))}・${S.snap.mode.startsWith('full') ? '收盤後完整更新' : '盤中快速更新'}・用時 ${S.snap.buildSeconds} 秒</span></div>
-  <table class="tbl" style="min-width:0"><tbody>${Object.entries(st).map(([k, v]) => `<tr><td>${esc(STZ[k] || k)}</td><td class="${/fail|no-token/.test(String(v)) ? 'bad-text' : ''}">${esc(String(v).replace('no-token', '未設定權杖').replace(/^fail.*/, '失敗'))}</td></tr>`).join('')}
+  <table class="tbl wrap" style="min-width:0"><tbody>${Object.entries(st).map(([k, v]) => `<tr><td>${esc(STZ[k] || k)}</td><td class="${/fail|no-token/.test(String(v)) ? 'bad-text' : ''}">${esc(String(v).replace('no-token', '未設定權杖').replace(/^fail.*/, '失敗'))}</td></tr>`).join('')}
   <tr><td>資料來源</td><td>${S.source === 'nas' ? 'NAS 備援' : 'GitHub'}</td></tr>
   <tr><td>本機加速</td><td>${S.local.off ? '已關閉' : Object.keys(LOCAL).map(k => `${LOCAL[k].label} ${S.local[k] ? '✓' : '✕'}`).join('　')}</td></tr></tbody></table></section>
 ${footer()}`;
@@ -1382,6 +1383,25 @@ ${footer()}`;
     };
   }
 
+  // ── 手機：可收合的區塊（記住每個區塊的展開狀態）──────────────
+  function setupFolds() {
+    const st = LS.get('folds', {});
+    document.querySelectorAll('.card.fold').forEach(c => {
+      const id = c.dataset.fold, hd = c.querySelector(':scope > .hd'); if (!hd || !id) return;
+      if (st[id]) c.classList.add('open'); else c.classList.remove('open');
+      if (!hd.querySelector('.fold-btn')) {
+        hd.insertAdjacentHTML('beforeend', `<button type="button" class="fold-btn" aria-expanded="${!!st[id]}"><span class="sr">展開或收合</span></button>`);
+        hd.classList.add('fold-hd');
+        hd.addEventListener('click', e => {
+          if (e.target.closest('a,button:not(.fold-btn),select,input')) return;
+          const open = !c.classList.contains('open'); c.classList.toggle('open', open);
+          hd.querySelector('.fold-btn').setAttribute('aria-expanded', open);
+          const s2 = LS.get('folds', {}); s2[id] = open; LS.set('folds', s2);
+        });
+      }
+    });
+  }
+
   // ── 路由 ────────────────────────────────────────────────────
   function applyColors() { document.body.className = cfg.colors === 'us' ? 'us-colors' : 'tw-colors'; }
   async function render() {
@@ -1397,7 +1417,7 @@ ${footer()}`;
       const b = await loadBars(key);
       if (S.route !== 's/' + key) return;
       main.innerHTML = viewStock(key, b); document.title = `${key} ${nameOf(key)}・訊號終端`;
-      bindStock(key); bindMine(key);
+      bindStock(key); bindMine(key); setupFolds();
       afterStock(key);
     } else if (S.route.startsWith('q')) {
       const key = decodeURIComponent(h.split('/')[1] || '').toUpperCase();
@@ -1412,6 +1432,7 @@ ${footer()}`;
     else if (S.route === 'settings') { main.innerHTML = viewSettings(); bindSettings(); document.title = '設定・訊號終端'; }
     else if (S.route === 'all') { main.innerHTML = `<div><a href="#/" class="small">← 回總覽</a></div><section class="card" id="opps">${viewOpps(0)}</section>${footer()}`; document.title = '全部標的・訊號終端'; }
     else { main.innerHTML = viewHome(); document.title = '訊號終端'; afterHome(); }
+    setupFolds();
   }
 
   // ── 全市場清單：搜尋任何台股、快速檢視、一鍵加入觀察清单 ─────────
@@ -1499,7 +1520,7 @@ ${footer()}`;
         if (k === 'idx') { S.idx = v; LS.set('idx', v); fillIndexSection(); return; }
         if (k === 'range') { S.range = +v; LS.set('range', S.range); const b = S.bars[S.route.slice(2).toUpperCase()]; const box = $('#pxchart')?.closest('.card'); if (b && box) { const it = S.snap.items[b.key]; box.querySelector('.chart-wrap').innerHTML = lineChart(b, it); bindChart(); } return; }
         UI[k] = v; LS.set('oppF', UI);
-        const box = $('#opps'); if (box) box.innerHTML = viewOpps(S.route === 'all' ? 0 : 10);
+        const box = $('#opps'); if (box) box.innerHTML = viewOpps(S.route === 'all' ? 0 : isMob() ? 6 : 10);
         return;
       }
       const hm = e.target.closest('[data-hm-tw],[data-hm-us]');
