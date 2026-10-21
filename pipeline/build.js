@@ -210,9 +210,10 @@ async function main() {
     // 財報（季報變動慢：每 5 天更新一次；有 FINMIND_TOKEN 用權杖，沒有用免權杖額度）
     heavy.tw.fin = heavy.tw.fin || {};
     { let ok = 0, err = null;
-      const due = wl.tw.filter(id => !heavy.tw.fin[id] || Date.now() - (heavy.tw.fin[id].ts || 0) > 5 * 86400000);
+      const FIN_V = 2;   // 分析規則改版時加 1，強制重新計算
+      const due = wl.tw.filter(id => !heavy.tw.fin[id] || heavy.tw.fin[id].v !== FIN_V || Date.now() - (heavy.tw.fin[id].ts || 0) > 5 * 86400000);
       await mapSeries(due, async id => {
-        try { const a = Fin.analyze(await Fin.tw(id, TOKEN), { market: 'tw' }); if (a) { heavy.tw.fin[id] = { ...a, ts: Date.now() }; ok++; } else err = err || `${id} 無季報`; } catch (e) { err = err || e.message; }
+        try { const a = Fin.analyze(await Fin.tw(id, TOKEN), { market: 'tw' }); if (a) { heavy.tw.fin[id] = { ...a, ts: Date.now(), v: FIN_V }; ok++; } else err = err || `${id} 無季報`; } catch (e) { err = err || e.message; }
       }, TOKEN ? 500 : 1500);
       status.twFinancials = `${Object.keys(heavy.tw.fin).length}/${wl.tw.length}（本次更新 ${ok}）` + (err ? ` ${err.slice(0, 60)}` : '');
     }
