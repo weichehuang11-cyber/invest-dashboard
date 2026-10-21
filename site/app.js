@@ -188,7 +188,8 @@
   function holdings() {
     const h = H.load(), rate = fx();
     const rows = h.items.map(x => {
-      const it = S.snap.items[x.key];
+      let it = S.snap.items[x.key];
+      if (!it && UNI) { const u = UNI.list.find(z => z.k === x.key); if (u && isNum(u.c)) it = { key: u.k, name: u.n, market: u.m, price: u.c, prevClose: isNum(u.p) ? u.c / (1 + u.p / 100) : u.c, changePct: u.p, quick: true, ta: {}, signal: { evidence: {} } }; }
       const k = it?.market === 'us' ? rate : 1;
       const mv = it && isNum(it.price) ? it.price * x.shares * k : null;
       const cost = isNum(x.cost) ? x.cost * x.shares * k : null;
@@ -206,7 +207,7 @@
   }
   /** 組合 1 日風險值（歷史法 95%）：依共同交易日對齊各持股日報酬 */
   async function portfolioVaR(P) {
-    const rows = P.rows.filter(r => r.mv > 0 && r.it);
+    const rows = P.rows.filter(r => r.mv > 0 && r.it && !r.it.quick);
     if (!rows.length || !P.total) return null;
     const bars = await Promise.all(rows.map(r => loadBars(r.key)));
     if (bars.some(b => !b)) return null;
@@ -335,7 +336,8 @@ ${footer()}`;
       ${P.rows.length ? `<div class="whatif"><label for="wi" class="small" style="font-weight:500;color:var(--ink)">情境試算：如果大盤 <b id="wi-v">−5%</b></label>
         <input id="wi" type="range" min="-15" max="15" step="1" value="-5" aria-describedby="wi-out">
         <div id="wi-out" class="small">${whatIf(P, -5)}</div></div>` : ''}
-      ${P.missing.length ? `<p class="small bad-text">${P.missing.map(r => esc(r.key)).join('、')} 不在觀察清單，沒有報價。請加到 config/watchlist.json。</p>` : ''}`;
+      ${P.missing.length ? `<p class="small bad-text">${P.missing.map(r => esc(r.key)).join('、')} 找不到報價，請確認代號。</p>` : ''}
+      ${P.rows.some(r => r.it?.quick) ? `<p class="small muted" style="margin:0">${P.rows.filter(r => r.it?.quick).map(r => `<a href="#/q/${encodeURIComponent(r.key)}">${esc(r.key)}</a>`).join('、')} 不在觀察清單，以收盤價估值；加入觀察清單才有完整分析。</p>` : ''}`;
   }
 
   /** 依各持股 Beta 估算大盤漲跌 m% 時的部位變化 */
@@ -420,7 +422,7 @@ ${footer()}`;
   }
 
   function footer() {
-    return `<footer class="src">資料來源：Yahoo 財經（報價、日 K）、臺灣證券交易所（三大法人、收盤行情）、FinMind（法人歷史、月營收）、芝加哥選擇權交易所（VIX 恐慌指數）、美國財政部（公債殖利率）。
+    return `<footer class="src">資料來源：Yahoo 財經（報價、日 K、美股財報）、臺灣證券交易所（三大法人、收盤行情、本益比、除權息、融資）、櫃買中心（上櫃行情）、臺灣期貨交易所（期貨與選擇權部位）、集保結算所（股權分散）、FinMind（法人歷史、月營收、台股財報）、Nasdaq（美股清單）、芝加哥選擇權交易所（VIX）、美國財政部（公債殖利率）、聖路易聯準會 FRED（信用利差、金融壓力）。
       資料${S.source === 'nas' ? '來自 NAS 備援' : '由 GitHub 排程產生'}，${esc(tpeTime(S.snap.generatedAt))}（${ago(S.snap.generatedAt)}）。</footer>`;
   }
 
@@ -1097,7 +1099,7 @@ ${footer()}`;
 
   // ── 組合分析（歸因、回撤、相關性、曝險）──────────────────────
   async function portfolioAnalytics(P) {
-    const rows = P.rows.filter(r => r.mv > 0 && r.it);
+    const rows = P.rows.filter(r => r.mv > 0 && r.it && !r.it.quick);
     if (!rows.length || !P.total) return null;
     const keys = rows.map(r => r.key), bars = {};
     await Promise.all([...keys, '^TWII', '^GSPC', 'USDTWD=X'].map(async k => { bars[k] = await loadBars(k); }));
@@ -1763,6 +1765,7 @@ ${footer()}`;
     catch (e) { $('#main').innerHTML = `<section class="card"><h2 style="margin:0">無法載入資料</h2><p>${esc(e.message)}</p><div class="actions"><button class="btn primary" onclick="location.reload()">重新整理</button><a class="btn" href="#/settings">設定</a></div></section>`; if (location.hash.startsWith('#/settings')) { $('#main').innerHTML = viewSettings(); bindSettings(); } return; }
     setupSearch();
     updateSyncPill();
+    if (H.load().items.some(x => !S.snap.items[x.key])) loadUniverse().then(() => { if (['home', 'portfolio'].includes(S.route)) render(); });
     if (SY.get().token) syncNow(false).then(() => { if (!['settings', 'portfolio'].includes(S.route)) render(); });
     window.addEventListener('hashchange', render);
     document.addEventListener('click', e => {

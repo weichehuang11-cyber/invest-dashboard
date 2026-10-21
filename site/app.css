@@ -389,3 +389,5 @@ table.corr { min-width: 0; }
 }
 
 .tbl.wrap td { white-space: normal; word-break: break-word; }
+
+.topbar { padding-top: env(safe-area-inset-top); }

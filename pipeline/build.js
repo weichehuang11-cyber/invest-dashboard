@@ -293,7 +293,7 @@ async function main() {
     for (const [k, id] of [['hy', 'BAMLH0A0HYM2'], ['stress', 'STLFSI4'], ['nfci', 'NFCI']]) {
       try { const s2 = await Market.fred(id); if (s2.length) heavy.macro[k] = s2.slice(-300); else fredErr = fredErr || `${id} 無資料`; } catch (e) { fredErr = fredErr || `${id} ${e.message}`; log('FRED 失敗', id, e.message); }
     }
-    status.fred = ['hy', 'stress', 'nfci'].filter(k => heavy.macro[k]?.length).length + '/3' + (fredErr ? `（${fredErr}）` : '');
+    status.fred = ['hy', 'stress', 'nfci'].filter(k => heavy.macro[k]?.length).length + '/3' + (fredErr ? `（${fredErr}${process.env.FRED_API_KEY ? '' : '；請設定 FRED_API_KEY'}）` : '');
   }
 
   // ── 4. 每檔：指標、籌碼、基本面、模型、訊號 ─────────────────────
