@@ -38,7 +38,7 @@ async function miIndex(date) {
     const f = ct.fields || [], iC = col(f, /^收盤價$/), iS = col(f, /^漲跌\(\+\/-\)$/), iD = col(f, /^漲跌價差$/);
     if (iC >= 0) for (const row of ct.data) {
       const id = String(row[0] || '').trim(), c = num(row[iC]);
-      if (!/^\d{4,6}[A-Z]?$/.test(id) || !(c > 0)) continue;
+      if (!/^(\d{4}|0\d{3,5}[A-Z]?)$/.test(id) || !(c > 0)) continue;
       closes[id] = c; names[id] = String(row[1] || '').trim();
       if (iS >= 0 && iD >= 0) { const sg = String(row[iS] || ''), d = (sg.includes('-') ? -1 : sg.includes('+') ? 1 : 0) * num(row[iD]); chg[id] = c - d > 0 ? d / (c - d) * 100 : 0; }
     }
@@ -218,7 +218,7 @@ async function tpexQuotes() {
   if (!kId || !kC) return { error: `欄位無法辨識：${Object.keys(s).slice(0, 8).join('|')}` };
   const out = {};
   for (const r of rows) {
-    const id = String(r[kId] || '').trim(), c = num(r[kC]); if (!/^\d{4,6}[A-Z]?$/.test(id) || !(c > 0)) continue;
+    const id = String(r[kId] || '').trim(), c = num(r[kC]); if (!/^(\d{4}|0\d{3,5}[A-Z]?)$/.test(id) || !(c > 0)) continue;
     const ch = kCh ? num(r[kCh]) : 0;
     out[id] = { n: String(r[kN] || '').trim(), c, p: c - ch > 0 ? ch / (c - ch) * 100 : 0 };
   }
