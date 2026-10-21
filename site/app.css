@@ -417,3 +417,13 @@ tr.clk:hover td, tr.clk:active td { background: var(--acc-bg); }
 .pc-svg svg { width: 100%; height: auto; display: block; cursor: crosshair; }
 .pc-nav { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .pc-nav .pc-pos { flex: 1; text-align: center; }
+
+/* 高信心 */
+.tag.hc { background: #E4F4EC; color: #0B5E38; border: 1px solid #9FD8B9; }
+td.hc-cell { background: #E4F4EC; }
+.cvbar { position: relative; height: 10px; border-radius: 5px; background: linear-gradient(90deg, var(--down), #D5D9E0 50%, var(--up)); margin: 4px 0 18px; }
+.cvbar > div { position: absolute; top: -4px; width: 4px; height: 18px; background: var(--ink); border-radius: 2px; transform: translateX(-2px); }
+.cvbar > span { position: absolute; top: 14px; font-size: 11px; color: var(--mute); }
+.cvbar > span:nth-child(2) { left: 0; } .cvbar > span:nth-child(3) { left: 50%; transform: translateX(-50%); } .cvbar > span:nth-child(4) { right: 0; }
+.expbox { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.exprow { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; }

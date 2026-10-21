@@ -352,6 +352,7 @@ ${footer()}`;
     let ks = s.ranking.filter(k => {
       const it = s.items[k];
       if (UI.mk !== 'all' && it.market !== UI.mk) return false;
+      if (UI.cat === 'hc') return !!it.conv?.high?.length;
       if (UI.cat === 'buy') return it.signal.sig === 'BUY';
       if (UI.cat === 'sell') return it.signal.sig === 'SELL';
       if (UI.cat === 'star') return st.has(k);
@@ -372,21 +373,21 @@ ${footer()}`;
       return `<tr class="clk" data-href="#/s/${encodeURIComponent(k)}"><td class="num muted">${i + 1}</td>
         <td>${st.has(k) ? '<span class="staron" aria-label="自選">★</span> ' : ''}<a class="sym" href="#/s/${encodeURIComponent(k)}">${esc(k)}</a> <span class="small muted">${esc(it.name)}</span></td>
         <td class="num">${px(it.price)}</td><td class="num ${cls(it.changePct)}">${pct(it.changePct)}</td>
-        <td>${sigTag(g.sig)}</td><td>${evDots(g.evidence)}</td><td class="num"><b>${g.score}</b></td>
+        <td>${sigTag(g.sig)} ${convBadge(it)}</td><td>${evDots(g.evidence)}</td><td class="num"><b>${g.score}</b></td>
         <td class="num">${px(g.stop)}</td>
         ${lp ? `<td class="num ${l ? cls(l.d1) : ''}">${l ? pct(l.d1) : '—'}</td><td class="num ${l ? cls(l.d5) : ''}">${l ? pct(l.d5) : '—'}</td>` : ''}</tr>`;
     };
     const card = k => {
       const it = s.items[k], g = it.signal, l = S.localPreds[k];
-      return `<a class="ocard" href="#/s/${encodeURIComponent(k)}"><div class="r1">${st.has(k) ? '<span class="staron" aria-label="自選">★</span>' : ''}<b>${esc(k)}</b><span class="small muted">${esc(it.name)}</span>${sigTag(g.sig)}</div>
+      return `<a class="ocard" href="#/s/${encodeURIComponent(k)}"><div class="r1">${st.has(k) ? '<span class="staron" aria-label="自選">★</span>' : ''}<b>${esc(k)}</b><span class="small muted">${esc(it.name)}</span>${convBadge(it)}${sigTag(g.sig)}</div>
         <div class="r2"><span class="mono" style="font-size:17px;font-weight:600">${px(it.price)}</span><span class="mono small ${cls(it.changePct)}">${pct(it.changePct)}</span><span class="small muted" style="margin-left:auto">分數 ${g.score}・停損 ${px(g.stop)}</span></div>
         <div>${evDots(g.evidence)}${l ? `<span class="small muted" style="margin-left:10px">本機預測 5 日 <b class="${cls(l.d5)}">${pct(l.d5)}</b></span>` : ''}</div>${s.ai?.stocks?.[k] ? `<div class="small muted">💬 ${esc(s.ai.stocks[k])}</div>` : ''}</a>`;
     };
     return `
       <div class="hd"><h2 id="opp-h">機會清單</h2><span class="note">${isMob() ? '證據燈：' : `依綜合分數排序・證據：技術／籌碼／基本面／模型（`}${cfg.colors === 'us' ? '實心綠' : '實心紅'}＝支持、${cfg.colors === 'us' ? '實心紅' : '實心綠'}＝反對${isMob() ? '' : '、空心＝中性、虛線＝無資料）'}</span>${n && all.length > n ? `<a class="act" href="#/all">看全部 ${all.length} 檔</a>` : ''}</div>
-      <div class="filters">${seg('mk', UI.mk, [['all', '全部'], ['tw', '台股'], ['us', '美股']])}${seg('cat', UI.cat, [['all', '全部訊號'], ['buy', '買進'], ['sell', '賣出'], ['star', '★ 自選'], ['held', '持有中']])}${seg('sort', UI.sort, [['score', '依分數'], ['up', '漲最多'], ['down', '跌最多']])}</div>
-      ${keys.length ? '' : `<div class="nudge" style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>${UI.cat === 'star' ? '目前篩選「★ 自選」，但還沒有自選股（到個股頁按「☆ 加入自選」）。' : UI.cat === 'held' ? '目前篩選「持有中」，但持股不在觀察清單。' : '目前的篩選條件沒有符合的標的。'}</span><button type="button" class="btn sm" data-of="reset" data-v="1">顯示全部</button></div>`}
-      ${(UI.mk !== 'all' || UI.cat !== 'all') && keys.length ? `<p class="small muted" style="margin:0">已篩選：${[UI.mk === 'tw' ? '台股' : UI.mk === 'us' ? '美股' : '', { buy: '買進', sell: '賣出', star: '自選', held: '持有中' }[UI.cat] || ''].filter(Boolean).join('、')}・<a href="#" data-of="reset" data-v="1">清除</a></p>` : ''}
+      <div class="filters">${seg('mk', UI.mk, [['all', '全部'], ['tw', '台股'], ['us', '美股']])}${seg('cat', UI.cat, [['all', '全部訊號'], ['hc', '高信心'], ['buy', '買進'], ['sell', '賣出'], ['star', '★ 自選'], ['held', '持有中']])}${seg('sort', UI.sort, [['score', '依分數'], ['up', '漲最多'], ['down', '跌最多']])}</div>
+      ${keys.length ? '' : `<div class="nudge" style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>${UI.cat === 'star' ? '目前篩選「★ 自選」，但還沒有自選股（到個股頁按「☆ 加入自選」）。' : UI.cat === 'hc' ? '今天沒有達到高信心標準（過去 5 年驗證期命中率 ≥ 65%）的標的。高信心訊號本來就少，這是正常的。' : UI.cat === 'held' ? '目前篩選「持有中」，但持股不在觀察清單。' : '目前的篩選條件沒有符合的標的。'}</span><button type="button" class="btn sm" data-of="reset" data-v="1">顯示全部</button></div>`}
+      ${(UI.mk !== 'all' || UI.cat !== 'all') && keys.length ? `<p class="small muted" style="margin:0">已篩選：${[UI.mk === 'tw' ? '台股' : UI.mk === 'us' ? '美股' : '', { hc: '高信心', buy: '買進', sell: '賣出', star: '自選', held: '持有中' }[UI.cat] || ''].filter(Boolean).join('、')}・<a href="#" data-of="reset" data-v="1">清除</a></p>` : ''}
       <div class="tbl-box opp"><table class="tbl"><thead><tr><th>#</th><th>標的</th><th class="num">價格</th><th class="num">今日</th><th>判斷</th><th>證據</th><th class="num">分數</th><th class="num">停損價（2 倍 ATR）</th>${lp ? '<th class="num">本機 1 日</th><th class="num">本機 5 日</th>' : ''}</tr></thead>
       <tbody>${keys.map(row).join('')}</tbody></table></div>
       <div class="cards">${keys.map(card).join('')}</div>
@@ -587,6 +588,28 @@ ${footer()}`;
     if ($('#idx') && S.route === 'home') { box.innerHTML = html; box.hidden = !html; setupFolds(); bindCharts(); }
   }
 
+  // ── 高信心訊號 ───────────────────────────────────────────────
+  const CT = { ex20: '20 日贏大盤', ex5: '5 日贏大盤', up20: '20 日上漲' };
+  const convBadge = it => (it.conv?.high?.length ? `<span class="tag hc" title="過去 5 年驗證期命中率">${it.conv.dir < 0 ? '高信心偏空' : '高信心'} ${it.conv.high[0].hit.toFixed(0)}%</span>` : '');
+  function convTable(ev, only) {
+    if (!ev) return '<p class="empty" style="margin:0">尚無資料</p>';
+    const cell = x => { if (!x?.test) return '<td class="num muted">—</td>'; const t = x.test; return `<td class="num${x.high ? ' hc-cell' : ''}"><b>${t.hit.toFixed(0)}%</b><div class="small muted">${t.n} 次・均 ${t.avg > 0 ? '+' : ''}${t.avg.toFixed(1)}%</div></td>`; };
+    const rows = Object.entries(ev.table).filter(([k]) => !only || k === only);
+    return `<div class="tbl-box"><table class="tbl rtbl"><thead><tr><th>信心分組</th><th class="num">出現比例</th><th class="num">${CT.ex5}</th><th class="num">${CT.ex20}</th><th class="num">${CT.up20}</th></tr></thead><tbody>
+      ${rows.map(([k, v]) => `<tr><td>${k}${v.dir < 0 ? '<div class="small muted">命中＝之後輸大盤／下跌</div>' : ''}</td><td class="num">${v.share}%</td>${cell(v.ex5)}${cell(v.ex20)}${cell(v.up20)}</tr>`).join('')}</tbody></table></div>`;
+  }
+  function viewConvStock(it) {
+    const c = it.conv; if (!c) return '';
+    const ev = S.snap.conviction?.[it.market], row = ev?.table?.[c.bucket];
+    const pct6 = (c.score + 6) / 12 * 100;
+    return `<section class="card fold" data-fold="s-conv" aria-labelledby="cv-h"><div class="hd"><h2 id="cv-h">高信心訊號檢查</h2><span class="note">六項條件 × 過去 5 年同類情況的實際結果</span>${convBadge(it)}</div>
+      <div class="cvbar" role="img" aria-label="信心分數 ${c.score}（−6 到 +6）"><div style="left:${pct6}%"></div><span>−6 偏空</span><span>0</span><span>+6 偏多</span></div>
+      <p style="margin:0;font-weight:600">信心分數 ${c.score > 0 ? '+' : ''}${c.score}：${c.bucket}</p>
+      <ul class="checks">${c.items.map(x => `<li class="${x.pt > 0 ? 'ok' : x.pt < 0 ? 'hit' : 'na'}"><span class="ic">${x.pt > 0 ? '＋' : x.pt < 0 ? '－' : '·'}</span><b>${esc(x.name)}</b><span class="small muted">${esc(x.txt)}</span></li>`).join('')}</ul>
+      <div class="fh"><b class="small">過去 5 年，${it.market === 'tw' ? '台股' : '美股'}觀察清單出現「${c.bucket}」之後（驗證期）</b>${convTable(ev, c.bucket)}
+      <p class="small muted" style="margin:0">${c.high.length ? `✅ ${c.high.map(h => `${CT[h.target]} ${h.hit}%`).join('、')}：驗證期命中率達 65% 以上，建立期也穩定。` : '這個分組在驗證期沒有任何一項達到 65%，只當參考。'} 驗證期：${esc(ev?.cut || '')} 之後；每 5 個交易日取樣一次。</p></div></section>`;
+  }
+
   // ── 財報重點 ──────────────────────────────────────────────────
   function viewFin(it) {
     const f = it.fin;
@@ -765,6 +788,7 @@ ${footer()}`;
   </div>
 </section>
 
+${viewConvStock(it)}
 ${viewThesisCard(key)}
 ${viewDecideCard(key)}
 
@@ -1394,7 +1418,8 @@ ${(h.log || []).length ? `<section class="card" aria-labelledby="hl2-h"><div cla
     const rets = v.slice(1).map((x, i) => x / v[i] - 1), m = rets.reduce((s, x) => s + x, 0) / rets.length, sd = Math.sqrt(rets.reduce((s, x) => s + (x - m) ** 2, 0) / (rets.length - 1));
     const t = trades || [];
     return { tot, cagr: (Math.pow(v[v.length - 1] / v[0], 1 / Math.max(yrs, 0.1)) - 1) * 100, mdd: mdd * 100, sharpe: sd > 0 ? m / sd * Math.sqrt(250) : null,
-      n: t.length, win: t.length ? t.filter(x => x.r > 0).length / t.length * 100 : null, avg: t.length ? t.reduce((s, x) => s + x.r, 0) / t.length : null, hold: t.length ? t.reduce((s, x) => s + x.days, 0) / t.length : null };
+      n: t.length, win: t.length ? t.filter(x => x.r > 0).length / t.length * 100 : null, avg: t.length ? t.reduce((s, x) => s + x.r, 0) / t.length : null, hold: t.length ? t.reduce((s, x) => s + x.days, 0) / t.length : null,
+      avgWin: (w => (w.length ? w.reduce((s, x) => s + x.r, 0) / w.length : null))(t.filter(x => x.r > 0)), avgLoss: (w => (w.length ? -w.reduce((s, x) => s + x.r, 0) / w.length : null))(t.filter(x => x.r <= 0)) };
   }
   /** 多檔平均：每檔分配相同資金、各自進出，依日期對齊（休市日沿用前值） */
   function combine(curves) {
@@ -1466,6 +1491,7 @@ ${footer()}`;
         <div class="kpi"><div class="lb">交易次數／勝率</div><div class="v">${S1.n}／${S1.win == null ? '—' : S1.win.toFixed(0) + '%'}</div><div class="small muted">每筆平均 ${pct(S1.avg, 2)}，持有 ${S1.hold == null ? '—' : S1.hold.toFixed(0)} 天</div></div>
         <div class="kpi"><div class="lb">夏普值／持股時間</div><div class="v">${num(S1.sharpe)}</div><div class="small muted">一直持有 ${num(S2.sharpe)}・有部位 ${exp.toFixed(0)}% 的時間</div></div>
       </div>
+      ${S1.n ? `<div class="expbox"><b class="small">期望值（比勝率更重要）</b><div class="exprow"><span>平均獲利 <b class="up">+${fix(S1.avgWin ?? 0, 2)}%</b></span><span>平均虧損 <b class="down">−${fix(S1.avgLoss ?? 0, 2)}%</b></span><span>盈虧比 <b>${S1.avgLoss ? fix((S1.avgWin || 0) / S1.avgLoss, 2) : '—'}</b></span><span>每筆期望值 <b class="${cls(S1.avg)}">${pct(S1.avg, 2)}</b></span></div><p class="small muted" style="margin:0">期望值 ＝ 勝率 × 平均獲利 − 敗率 × 平均虧損。勝率低但盈虧比高（大賺小賠），期望值仍可為正。</p></div>` : ''}
       <div class="legend"><span><i style="background:#1F4FD8;height:2px"></i>策略</span><span><i style="background:#8A93A3;height:2px"></i>一直持有</span><span class="muted">${esc(curve[0].date)} → ${esc(curve[curve.length - 1].date)}（${curve.length} 個交易日）</span></div>
       <svg viewBox="0 0 ${W} ${Hh}" style="width:100%;height:auto" role="img" aria-label="策略與一直持有的資產曲線"><line x1="0" x2="${W}" y1="${y(1)}" y2="${y(1)}" stroke="#E2E5EA" stroke-dasharray="4 4"/><path d="${pth(bh)}" fill="none" stroke="#8A93A3" stroke-width="1.5"/><path d="${pth(curve)}" fill="none" stroke="#1F4FD8" stroke-width="2"/></svg>
       <table class="tbl rtbl"><thead><tr><th>穩定度檢查</th><th class="num">策略</th><th class="num">一直持有</th><th class="num">差異</th></tr></thead><tbody>
@@ -1494,6 +1520,9 @@ ${footer()}`;
     return `
 <section class="card" aria-labelledby="bt0"><div class="hd"><h2 id="bt0">策略回測</h2><span class="note">過去 2 年照技術面訊號操作的結果，可自行調整門檻、停損、停利；另附 AI 模型的樣本外表現</span><a class="act btn primary sm" href="#/backtest" style="color:#fff">開始回測</a></div></section>
 <section class="card" aria-labelledby="hs0"><div class="hd"><h2 id="hs0">歷史快照</h2><span class="note">查任何一天收盤後的判斷、訊號、指標，並看當天訊號到現在的結果</span><a class="act btn sm" href="#/history">查詢</a></div></section>
+<section class="card" aria-labelledby="hc0"><div class="hd"><h2 id="hc0">高信心訊號：過去 5 年的實際命中率</h2><span class="note">依六項條件的信心分數分組；只看「驗證期」（後 40% 時間）的結果，綠底＝命中率 ≥ 65% 且穩定</span></div>
+  ${['tw', 'us'].map(m => S.snap.conviction?.[m] ? `<div><b class="small">${m === 'tw' ? '台股' : '美股'}觀察清單（${esc(S.snap.conviction[m].from)} → ${esc(S.snap.conviction[m].to)}，驗證期自 ${esc(S.snap.conviction[m].cut)}）</b>${convTable(S.snap.conviction[m])}</div>` : '').join('')}
+  <p class="small muted" style="margin:0">「均」是每次的平均超額報酬（偏空分組以「之後輸大盤」為正）。命中率高但平均報酬低，代表贏的時候贏得少；請同時看兩者。條件固定不做最佳化，以避免用過去資料「調出」好看的數字。</p></section>
 <section class="card" aria-labelledby="sc1"><div class="hd"><h2 id="sc1">模型成績單</h2><span class="note">${esc(sc.note)}</span></div>
   <div class="grid2"><div style="display:flex;flex-direction:column;gap:12px"><b class="small">近 30 天</b>${scoreRows(sc.d30)}</div><div style="display:flex;flex-direction:column;gap:12px"><b class="small">近 90 天</b>${scoreRows(sc.d90)}</div></div>
   <p class="small muted" style="margin:0">黑線＝50%（擲硬幣）。灰色條＝樣本少於 30 筆。${sc.since ? `自 ${esc(sc.since)} 起共 ${sc.total} 筆。` : ''}</p></section>

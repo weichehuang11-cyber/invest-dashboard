@@ -111,6 +111,13 @@ async function events(snap, P, notified) {
     const e = it.fund?.earningsDate; if (e) { const d = Math.round((Date.parse(e) - Date.parse(day)) / 86400000); if (d === 1 || d === 0) add(`earn:${k}:${e}`, 3, `🗓 持股 ${k} ${it.name} 財報${d === 0 ? '今天' : '明天'}（${e}）`); }
     const x = it.fund?.exDividendDate; if (x) { const d = Math.round((Date.parse(x) - Date.parse(day)) / 86400000); if (d === 1) add(`exdiv:${k}:${x}`, 2, `💰 持股 ${k} ${it.name} 明天除權息${it.fund.exDividendCash ? `（現金 ${it.fund.exDividendCash} 元）` : ''}`); }
   }
+  // 高信心訊號（同一檔同一分組只通知一次，分組改變才再通知）
+  const CT = { ex20: '20 日贏大盤', ex5: '5 日贏大盤', up20: '20 日上漲' };
+  for (const it of Object.values(items)) {
+    const c = it.conv; if (!c?.high?.length) continue;
+    const h = c.high[0];
+    add(`conv:${it.key}:${c.bucket}`, held.has(it.key) ? 4 : 3, `🎯 ${held.has(it.key) ? '持股 ' : ''}${it.key} ${it.name} 高信心${c.dir < 0 ? '偏空' : '偏多'}（信心 ${c.score > 0 ? '+' : ''}${c.score}）：過去 5 年同樣情況 ${CT[h.target]}${c.dir < 0 ? '（反向）' : ''}命中 ${h.hit}%`);
+  }
   // 觀察清單訊號轉變（持股優先標示）
   for (const c of snap.changes || []) if (c.tag === '訊號') add(`sig:${c.key}:${c.title}:${day}`, held.has(c.key) ? 4 : 3, `${held.has(c.key) ? '⚠️ 持股 ' : '🔄 '}${c.title}（${c.detail}）`);
   // 市場
@@ -136,6 +143,8 @@ function weekly(snap, P, barsDir) {
   if (r5.length) { L.push('', '【觀察清單本週】'); L.push('漲最多：' + r5.slice(0, 3).map(i => `${i.key} ${pct(i.ta.ret5)}`).join('、')); L.push('跌最多：' + r5.slice(-3).reverse().map(i => `${i.key} ${pct(i.ta.ret5)}`).join('、')); }
   const buys = items.filter(i => i.signal.sig === 'BUY').map(i => i.key), sells = items.filter(i => i.signal.sig === 'SELL').map(i => i.key);
   L.push(`目前買進訊號：${buys.join('、') || '無'}；賣出訊號：${sells.join('、') || '無'}`);
+  const hcs = items.filter(i => i.conv?.high?.length).map(i => `${i.key}（${i.conv.dir < 0 ? '偏空' : '偏多'} ${i.conv.high[0].hit}%）`);
+  L.push(`高信心訊號：${hcs.join('、') || '無（本來就少見，正常）'}`);
   if (P) {
     const H = P.holdings?.items || [], fx = snap.env?.find(e => e.key === 'twd')?.value || 32;
     if (H.length) {

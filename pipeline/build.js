@@ -30,6 +30,7 @@ const Market = require('./lib/market');
 const Calendar = require('./lib/calendar');
 const Fin = require('./lib/financials');
 const AI = require('./lib/ai');
+const Conviction = require('./lib/conviction');
 
 const ROOT = path.join(__dirname, '..');
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const [k, v] = a.replace(/^--/, '').split('='); return [k, v ?? true]; }));
@@ -372,6 +373,29 @@ async function main() {
   }
   log('個股完成', Object.keys(items).length);
 
+  // ── 4a. 高信心訊號：信心分數＋5 年回測（依市場分開驗證）──────────
+  const conviction = {};
+  {
+    const groups = { tw: [], us: [] };
+    for (const it of Object.values(items)) {
+      const d = daily[it.key], bench = longDaily[it.market === 'tw' ? '^TWII' : '^GSPC'] || daily[it.market === 'tw' ? '^TWII' : '^GSPC'];
+      if (!d || !bench || d.bars.close.length < 200) continue;
+      try { const sc = Conviction.score(d.bars, bench.bars); groups[it.market].push({ it, b: d.bars, sc }); } catch (e) { log('信心分數失敗', it.key, e.message); }
+    }
+    for (const m of ['tw', 'us']) {
+      if (!groups[m].length) continue;
+      const ev = Conviction.evaluate(groups[m]);
+      conviction[m] = ev;
+      for (const { it, sc } of groups[m]) {
+        const last = sc.scores[sc.scores.length - 1]; if (!last) continue;
+        const bucket = Conviction.bucketOf(last.score), row = ev.table[bucket] || {};
+        const highs = ['ex20', 'ex5', 'up20'].filter(k => row[k]?.high).map(k => ({ target: k, hit: row[k].test.hit, n: row[k].test.n, avg: row[k].test.avg }));
+        it.conv = { score: last.score, bucket, dir: row.dir, items: last.items.map(([name, pt, txt]) => ({ name, pt, txt })), high: highs };
+      }
+    }
+    status.conviction = Object.entries(conviction).map(([m, e]) => `${m} ${e.n} 筆`).join('、') || '無';
+  }
+
   // ── 4b. 模型樣本外紀錄：訓練日之後每天的模型判斷（回測頁用，避免用訓練過的資料自我評分）──
   const mlHist = {};
   const trainedAt = m => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'ml', 'models', m === 'tw' ? 'scaler_tw.json' : 'scaler.json'), 'utf8')).trained_at?.slice(0, 10) || null; } catch (_) { return null; } };
@@ -461,6 +485,9 @@ async function main() {
     if (e.kind === 'macro' && e.importance >= 3 && dd <= 2) changes.push({ tag: '事件', sev: 2, title: `${e.title}${dd === 0 ? '今天' : dd === 1 ? '明天' : '後天'}（${e.date}）`, detail: '公布前後市場波動通常放大' });
   }
   for (const sg of health.signals.filter(x => x.sev >= 2)) changes.push({ tag: '市場', sev: sg.sev, title: sg.text, detail: sg.detail || '' });
+  for (const it of Object.values(items)) {
+    if (it.conv?.high?.length) { const h = it.conv.high[0], T = { ex20: '20 日贏大盤', ex5: '5 日贏大盤', up20: '20 日上漲' }; changes.push({ tag: '訊號', sev: 3, key: it.key, title: `${it.key} ${it.name} 高信心${it.conv.dir < 0 ? '偏空' : '偏多'}（${it.conv.bucket}，信心 ${it.conv.score > 0 ? '+' : ''}${it.conv.score}）`, detail: `過去 5 年同樣情況，${T[h.target]}${it.conv.dir < 0 ? '的相反方向' : ''}命中率 ${h.hit}%（驗證期 ${h.n} 次）` }); }
+  }
   changes.sort((a, b) => b.sev - a.sev);
 
   // ── 7. 預測紀錄（收盤後記錄當日訊號）與成績單 ───────────────────
@@ -506,7 +533,7 @@ async function main() {
   const ranking = Object.values(items).sort((a, b) => b.signal.score - a.signal.score).map(x => x.key);
   const snapshot = {
     version: 1, generatedAt: nowIso, mode: FULL ? `full:${FULL}` : 'intraday', buildSeconds: Math.round((Date.now() - t0) / 1000),
-    status, verdict, env, items, ranking, changes, sectors, scorecard, indices, health, calendar,
+    status, verdict, env, items, ranking, changes, sectors, scorecard, indices, health, calendar, conviction,
     chipMarket: heavy.tw.chipMarket || null,
     watchlist: { us: wl.us, tw: wl.tw },
   };
