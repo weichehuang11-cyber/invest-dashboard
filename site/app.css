@@ -307,3 +307,10 @@ table.corr { min-width: 0; }
 .verdict .seg.mood button { color: var(--topmute); border-left-color: #3A404B; min-height: 30px; padding: 0 9px; font-size: 12px; }
 .verdict .seg.mood button[aria-pressed="true"] { background: #fff; color: var(--ink); }
 .seg.mood button { padding: 0 10px; }
+
+/* 財報 */
+.qgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 6px 0; }
+.qbars { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; height: 54px; align-items: end; }
+.qbars > div { height: 100%; display: flex; align-items: flex-end; }
+.qbars > div > div { width: 100%; border-radius: 2px 2px 0 0; }
+.qtbl td, .qtbl th { padding: 6px 5px; }

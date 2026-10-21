@@ -604,6 +604,41 @@ ${footer()}`;
     if ($('#idx') && S.route === 'home') { box.innerHTML = html; box.hidden = !html; }
   }
 
+  // ── 財報重點 ──────────────────────────────────────────────────
+  function viewFin(it) {
+    const f = it.fin;
+    if (!f) return `<section class="card" aria-labelledby="fn-h"><div class="hd"><h2 id="fn-h">財報重點</h2></div><p class="empty" style="margin:0">${it.market === 'tw' ? '台股財報於收盤後完整更新時抓取（FinMind），下次更新後出現。' : '美股財報於美股收盤後完整更新時抓取，下次更新後出現。'}</p></section>`;
+    const unit = it.market === 'tw' ? '億元' : '億美元', bn = v => (isNum(v) ? fix(v / 1e8, v / 1e8 >= 100 ? 0 : 1) : '—');
+    const qlab = d => { const m = +d.slice(5, 7); return `${d.slice(2, 4)}Q${Math.ceil(m / 3)}`; };
+    const Q = f.quarters, R = f.ratios || {};
+    const bars = (k, col) => { const v = Q.map(q => q[k]).filter(isNum); if (!v.length) return ''; const mx = Math.max(...v.map(Math.abs)); return `<div class="qbars" aria-hidden="true">${Q.map(q => `<div title="${qlab(q.date)}"><div style="height:${isNum(q[k]) ? Math.abs(q[k]) / mx * 100 : 0}%;background:${q[k] < 0 ? 'var(--down)' : col}"></div></div>`).join('')}</div>`; };
+    const sp = f.surprises || [], rv = f.revisions?.y0;
+    return `<section class="card" aria-labelledby="fn-h"><div class="hd"><h2 id="fn-h">財報重點</h2><span class="note">最新季度 ${esc(qlab(f.asOf))}（${esc(f.asOf)}）・來源 ${esc(f.source)}</span><span class="tag ${f.score >= 1 ? 'buy' : f.score <= -2 ? 'sell' : ''}" style="margin-left:auto;font-size:13px;padding:4px 10px">${esc(f.grade)}</span></div>
+      <ul class="tcom">${f.checks.map(c => `<li class="${c.tone}"><i aria-hidden="true"></i>${esc(c.text)}</li>`).join('') || '<li class="neu"><i></i>沒有特別值得注意的變化</li>'}</ul>
+      <div class="grid2">
+        <div><b class="small">近 ${Q.length} 季</b>
+          <div class="qgrid"><div><div class="small muted">營收（${unit}）</div>${bars('rev', 'var(--acc2)')}</div><div><div class="small muted">EPS</div>${bars('eps', 'var(--acc)')}</div></div>
+          <div class="tbl-box"><table class="tbl rtbl qtbl"><thead><tr><th>季度</th><th class="num">營收</th><th class="num">年增</th><th class="num">毛利率</th><th class="num">營益率</th><th class="num">EPS</th><th class="num">年增</th></tr></thead><tbody>
+          ${Q.slice().reverse().map(q => `<tr><td class="mono">${qlab(q.date)}</td><td class="num">${bn(q.rev)}</td><td class="num ${cls(q.revYoY)}">${pct(q.revYoY, 0)}</td><td class="num">${isNum(q.gm) ? q.gm.toFixed(1) + '%' : '—'}</td><td class="num">${isNum(q.om) ? q.om.toFixed(1) + '%' : '—'}</td><td class="num">${num(q.eps)}</td><td class="num ${cls(q.epsYoY)}">${pct(q.epsYoY, 0)}</td></tr>`).join('')}</tbody></table></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <dl class="facts mini">
+            <div><dt>近 4 季 EPS</dt><dd>${num(f.ttm?.eps)}</dd></div>
+            <div><dt>股東權益報酬率</dt><dd>${isNum(R.roe) ? R.roe.toFixed(1) + '%' : '—'}</dd></div>
+            <div><dt>自由現金流（近 4 季）</dt><dd class="${cls(f.ttm?.fcf)}">${bn(f.ttm?.fcf)} <small class="muted">${unit}</small></dd></div>
+            <div><dt>自由現金流率</dt><dd>${isNum(R.fcfMargin) ? R.fcfMargin.toFixed(1) + '%' : '—'}</dd></div>
+            <div><dt>${it.market === 'tw' ? '負債／權益' : '負債／權益'}</dt><dd>${isNum(R.debtToEquity) ? (R.debtToEquity / 100).toFixed(2) + ' 倍' : '—'}</dd></div>
+            <div><dt>流動比率</dt><dd>${num(R.currentRatio)}</dd></div>
+            ${it.market === 'us' ? `<div><dt>本益成長比 PEG</dt><dd>${num(R.peg)}</dd></div><div><dt>EV／EBITDA</dt><dd>${num(R.evEbitda, 1)}</dd></div>` : ''}
+          </dl>
+          ${sp.length ? `<div><b class="small">EPS 實際 vs 分析師預期</b><table class="tbl rtbl"><thead><tr><th>季度</th><th class="num">預期</th><th class="num">實際</th><th class="num">驚喜</th></tr></thead><tbody>${sp.slice().reverse().map(s2 => `<tr><td class="mono">${s2.quarter ? qlab(s2.quarter) : '—'}</td><td class="num">${num(s2.estimate)}</td><td class="num">${num(s2.actual)}</td><td class="num ${cls(s2.surprisePct)}">${pct(s2.surprisePct, 1)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+          ${rv ? `<div><b class="small">分析師預估修正（今年 EPS）</b><dl class="facts mini" style="margin-top:6px"><div><dt>目前預估</dt><dd>${num(rv.current)}</dd></div><div><dt>近 30 日修正</dt><dd class="${cls(rv.d30)}">${pct(rv.d30, 1)}</dd></div><div><dt>近 90 日修正</dt><dd class="${cls(rv.d90)}">${pct(rv.d90, 1)}</dd></div><div><dt>近 30 日上修／下修</dt><dd>${rv.up30 ?? '—'}／${rv.down30 ?? '—'} 位</dd></div></dl></div>` : ''}
+        </div>
+      </div>
+      <p class="small muted" style="margin:0">${f.isFinancial ? '金融股沒有毛利率，現金流與負債比的意義不同，相關檢查已略過。' : ''}財報反映的是過去一季，對隔日漲跌幾乎沒有預測力；對未來 1～6 個月的方向、以及避開財務惡化的公司較有幫助。</p>
+    </section>`;
+  }
+
   // ── 個股頁 ──────────────────────────────────────────────────
   function thesis(it, P) {
     const pros = [], cons = [], ta = it.ta || {}, c = it.chip, f = it.fund, m = it.ml;
@@ -618,6 +653,7 @@ ${footer()}`;
     if (isNum(f?.revenueGrowth) && f.revenueGrowth < 0) cons.push(`營收年減 ${Math.abs(f.revenueGrowth).toFixed(0)}%`);
     if (m && isNum(m.buyProb)) { if (it.signal.evidence.model === 'pos') pros.push(`模型隔日上漲機率 ${(m.buyProb * 100).toFixed(0)}%`); else if (it.signal.evidence.model === 'neg') cons.push(`模型隔日下跌機率 ${(m.sellProb * 100).toFixed(0)}%`); }
     if (f?.earningsDate) { const d = Math.round((Date.parse(f.earningsDate) - Date.now()) / 86400000); if (d >= 0 && d <= 14) cons.push(`財報 ${esc(f.earningsDate)}（${d} 天後），前後波動放大`); }
+    for (const c of (it.fin?.checks || []).slice(0, 4)) { if (c.tone === 'pos') pros.push('財報：' + esc(c.text)); else if (c.tone === 'neg') cons.push('財報：' + esc(c.text)); }
     if (isNum(ta.var95) && ta.var95 > 3.5) cons.push(`1 日風險值 ${ta.var95.toFixed(1)}%，波動偏大`);
     const pos = P.rows.find(r => r.key === it.key);
     if (pos && P.total && pos.mv / P.total * 100 > cfg.limits.single) cons.push(`占持股 ${(pos.mv / P.total * 100).toFixed(0)}%，超過單一持股上限 ${cfg.limits.single}%`);
@@ -698,6 +734,8 @@ ${viewDecideCard(key)}
   <div class="thesis"><div><b class="small">支持</b><ul>${T.pros.map(x => `<li>${x}</li>`).join('') || '<li class="muted">無</li>'}</ul></div>
   <div><b class="small">風險</b><ul>${T.cons.map(x => `<li>${x}</li>`).join('') || '<li class="muted">無</li>'}</ul></div></div>
 </section>
+
+${viewFin(it)}
 
 <section class="card" aria-labelledby="ol-h"><div class="hd"><h2 id="ol-h">技術解讀與走勢推論</h2><span class="note">日 K・規則化解讀＋歷史模擬推論，附回測可靠度</span></div>
   <div class="ixgrid"><div class="chart">${b ? coneChart(b, it.outlook, it.name) : ''}${outlookLeft(it.outlook)}</div><div class="opanel">${outlookPanel(it.outlook, it.price)}</div></div>
@@ -817,6 +855,9 @@ ${footer()}`;
     revenueNeg: { label: '月營收轉為年減', check: it => isNum(it.fund?.revenueYoY) ? [it.fund.revenueYoY < 0, `月營收年增 ${pct(it.fund.revenueYoY, 1)}`] : [null, '無營收資料'] },
     rsiAbove: { label: 'RSI 過熱（高於）', unit: '', need: true, check: (it, v) => isNum(it.ta?.rsi) ? [it.ta.rsi >= v, `RSI ${it.ta.rsi.toFixed(0)}`] : [null, '無資料'] },
     scoreBelow: { label: '綜合分數低於', unit: '分', need: true, check: (it, v) => [it.signal.score < v, `目前 ${it.signal.score} 分`] },
+    revQNeg: { label: '季營收轉為年減', check: it => { const q = it.fin?.quarters?.slice(-1)[0]; return isNum(q?.revYoY) ? [q.revYoY < 0, `最新季營收年增 ${pct(q.revYoY, 1)}`] : [null, '無財報資料']; } },
+    gmDown: { label: '毛利率比去年同期下降超過（百分點）', unit: '', need: true, check: (it, v) => { const Q = it.fin?.quarters || [], a = Q[Q.length - 1], b = Q[Q.length - 5]; return isNum(a?.gm) && isNum(b?.gm) ? [b.gm - a.gm >= v, `毛利率 ${a.gm}%（去年同期 ${b.gm}%）`] : [null, '無財報資料']; } },
+    finWeak: { label: '財報體質轉弱', check: it => it.fin ? [it.fin.score <= -2, `目前「${it.fin.grade}」`] : [null, '無財報資料'] },
     sellSignal: { label: '出現賣出訊號', check: it => [it.signal.sig === 'SELL', `目前 ${SIG[it.signal.sig]}`] },
     earnings: { label: '財報前（天內）', unit: '天', need: true, check: (it, v) => { const e = it.fund?.earningsDate; if (!e) return [null, '無財報日']; const d = Math.round((Date.parse(e) - Date.now()) / 86400000); return [d >= 0 && d <= v, `財報 ${e}（${d} 天後）`]; } },
   };

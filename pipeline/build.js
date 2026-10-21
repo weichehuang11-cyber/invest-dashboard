@@ -28,6 +28,7 @@ const Outcomes = require('./lib/outcomes');
 const Outlook = require('./lib/outlook');
 const Market = require('./lib/market');
 const Calendar = require('./lib/calendar');
+const Fin = require('./lib/financials');
 
 const ROOT = path.join(__dirname, '..');
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const [k, v] = a.replace(/^--/, '').split('='); return [k, v ?? true]; }));
@@ -206,6 +207,15 @@ async function main() {
       const m = await Market.twMargin(lastDate);
       if (m) { push('marginHist', { date: lastDate, balance: r2(m.balance, 1) }); if (m.prev != null && !(heavy.tw.marginHist.length > 1)) heavy.tw.marginHist.unshift({ date: TWSE.prevTradingDate(lastDate), balance: r2(m.prev, 1) }); status.margin = 'ok'; } else status.margin = 'fail';
     } catch (e) { status.margin = 'fail: ' + e.message; }
+    // 財報（季報變動慢：每 5 天更新一次；有 FINMIND_TOKEN 用權杖，沒有用免權杖額度）
+    heavy.tw.fin = heavy.tw.fin || {};
+    { let ok = 0, err = null;
+      const due = wl.tw.filter(id => !heavy.tw.fin[id] || Date.now() - (heavy.tw.fin[id].ts || 0) > 5 * 86400000);
+      await mapSeries(due, async id => {
+        try { const a = Fin.analyze(await Fin.tw(id, TOKEN), { market: 'tw' }); if (a) { heavy.tw.fin[id] = { ...a, ts: Date.now() }; ok++; } else err = err || `${id} 無季報`; } catch (e) { err = err || e.message; }
+      }, TOKEN ? 500 : 1500);
+      status.twFinancials = `${Object.keys(heavy.tw.fin).length}/${wl.tw.length}（本次更新 ${ok}）` + (err ? ` ${err.slice(0, 60)}` : '');
+    }
     heavy.tw.ts = Date.now();
   }
 
@@ -241,6 +251,16 @@ async function main() {
         status.usValuation = 'ok';
       } else status.usValuation = 'fail';
     } catch (e) { status.usValuation = 'fail: ' + e.message; }
+    try {
+      const YF = require('yahoo-finance2').default;
+      const yf = typeof YF === 'function' ? new YF({ suppressNotices: ['yahooSurvey'] }) : YF;
+      heavy.us.fin = heavy.us.fin || {};
+      let ok = 0, err = null;
+      await mapSeries(wl.us, async s => {
+        try { const a = Fin.analyze(await Fin.us(yf, s), { market: 'us' }); if (a) { heavy.us.fin[s] = a; ok++; } } catch (e) { err = err || e.message; }
+      }, 400);
+      status.usFinancials = `${ok}/${wl.us.length}` + (err ? `（${err.slice(0, 60)}）` : '');
+    } catch (e) { status.usFinancials = 'fail: ' + e.message; }
     heavy.us.ts = Date.now();
   }
 
@@ -310,11 +330,15 @@ async function main() {
     const bench = daily[market === 'tw' ? '^TWII' : '^GSPC'];
     if (ta && bench) ta.beta = betaOf(d.bars, bench.bars, 120);
     const sig = Signal.score({ ta, changePct: d.changePct, ml, chip, fund, market, vix: vix?.price });
+    // 財報體質明確時，基本面證據以財報為準（月營收／分析師評等為輔）
+    const finA = market === 'tw' ? heavy.tw.fin?.[key] : heavy.us.fin?.[key];
+    if (finA && Math.abs(finA.score) >= 2) sig.evidence.fund = finA.score > 0 ? 'pos' : 'neg';
     items[key] = {
       key, market, name: names[key] || d.name || key, currency: d.currency,
       price: r2(d.price, 4), prevClose: r2(d.prevClose, 4), changePct: r2(d.changePct), marketDate: d.marketDate, marketTime: d.marketTime,
       ta: ta && Object.fromEntries(Object.entries(ta).map(([k, v]) => [k, typeof v === 'number' ? r2(v, 4) : v])),
       chip, fund, ml, signal: { ...sig, stop: ta?.stopLong ? r2(ta.stopLong, 2) : null },
+      fin: (market === 'tw' ? heavy.tw.fin?.[key] : heavy.us.fin?.[key]) || null,
       outlook: (() => { try { return Outlook.analyze(d.bars, { window: 500, backtestDays: 400 }); } catch (e) { log('outlook 失敗', key, e.message); return null; } })(),
     };
   }

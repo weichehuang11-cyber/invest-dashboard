@@ -40,6 +40,19 @@ function finmind(u) {
   if (ds === 'TaiwanStockInstitutionalInvestorsBuySell') return { status: 200, msg: 'success', data: days.flatMap(d => ['Foreign_Investor', 'Foreign_Dealer_Self', 'Investment_Trust', 'Dealer_self', 'Dealer_Hedging'].map(name => ({ date: d, stock_id: id, name, buy: Math.round(rnd() * 3e6), sell: Math.round(rnd() * 3e6) }))) };
   if (ds === 'TaiwanStockMonthRevenue') return { status: 200, msg: 'success', data: Array.from({ length: 26 }, (_, i) => { const y = 2024 + Math.floor((i + 8) / 12), m = ((i + 8) % 12) + 1; return { date: `${y}-${String(m).padStart(2, '0')}-01`, stock_id: id, revenue: 1e10 * (1 + i * 0.02), revenue_month: m, revenue_year: y }; }) };
   if (ds === 'TaiwanStockMarginPurchaseShortsale') return { status: 200, msg: 'success', data: days.slice(-10).map((d, i) => ({ date: d, stock_id: id, MarginPurchaseTodayBalance: 20000 + i * 100, ShortSaleTodayBalance: 1500 + i * 10 })) };
+  const qs = ['2024-03-31', '2024-06-30', '2024-09-30', '2024-12-31', '2025-03-31', '2025-06-30', '2025-09-30', '2025-12-31', '2026-03-31', '2026-06-30'];
+  if (ds === 'TaiwanStockFinancialStatements') return { status: 200, msg: 'success', data: qs.flatMap((d, i) => { const rev = 1e11 * (1 + i * 0.05); return [
+    { date: d, stock_id: id, type: 'Revenue', value: rev, origin_name: '營業收入合計' }, { date: d, stock_id: id, type: 'GrossProfit', value: rev * (0.5 + i * 0.005), origin_name: '營業毛利（毛損）' },
+    { date: d, stock_id: id, type: 'OperatingIncome', value: rev * (0.4 + i * 0.004), origin_name: '營業利益（損失）' }, { date: d, stock_id: id, type: 'IncomeAfterTaxes', value: rev * 0.35, origin_name: '本期淨利（淨損）' },
+    { date: d, stock_id: id, type: 'EPS', value: 8 + i, origin_name: '基本每股盈餘（元）' }]; }) };
+  if (ds === 'TaiwanStockBalanceSheet') return { status: 200, msg: 'success', data: qs.flatMap(d => [
+    { date: d, stock_id: id, type: 'TotalAssets', value: 5e12, origin_name: '資產總額' }, { date: d, stock_id: id, type: 'TotalAssets_per', value: 100, origin_name: '資產總額' },
+    { date: d, stock_id: id, type: 'Liabilities', value: 1.5e12, origin_name: '負債總額' }, { date: d, stock_id: id, type: 'Equity', value: 3.5e12, origin_name: '權益總額' },
+    { date: d, stock_id: id, type: 'CurrentAssets', value: 2.5e12, origin_name: '流動資產合計' }, { date: d, stock_id: id, type: 'CurrentLiabilities', value: 1e12, origin_name: '流動負債合計' },
+    { date: d, stock_id: id, type: 'CashAndCashEquivalents', value: 1.8e12, origin_name: '現金及約當現金' }]) };
+  if (ds === 'TaiwanStockCashFlowsStatement') return { status: 200, msg: 'success', data: qs.flatMap(d => { const m = +d.slice(5, 7) / 3; return [
+    { date: d, stock_id: id, type: 'CashFlowsFromOperatingActivities', value: 5e10 * m, origin_name: '營業活動之淨現金流入（流出）' },
+    { date: d, stock_id: id, type: 'PropertyAndPlantAndEquipment', value: -3e10 * m, origin_name: '取得不動產、廠房及設備' }]; }) };
   return { status: 400, msg: 'unknown dataset' };
 }
 
