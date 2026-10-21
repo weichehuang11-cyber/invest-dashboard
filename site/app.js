@@ -387,7 +387,7 @@ ${footer()}`;
       <div class="tbl-box opp"><table class="tbl"><thead><tr><th>#</th><th>標的</th><th class="num">價格</th><th class="num">今日</th><th>判斷</th><th>證據</th><th class="num">分數</th><th class="num">停損價（2 倍 ATR）</th>${lp ? '<th class="num">本機 1 日</th><th class="num">本機 5 日</th>' : ''}</tr></thead>
       <tbody>${keys.map(row).join('')}</tbody></table></div>
       <div class="cards">${keys.map(card).join('')}</div>
-      <p class="small muted" style="margin:0">買進門檻 ${s.items[s.ranking[0]]?.signal.buyThreshold ?? 63} 分（VIX 越高門檻越高）、賣出門檻 37 分。模型以「隔日漲跌」訓練，僅供參考。</p>`;
+      <p class="small muted" style="margin:0">買進門檻 ${s.items[s.ranking[0]]?.signal.buyThreshold ?? 63} 分（VIX 越高門檻越高）、賣出門檻 37 分。模型以「隔日漲跌」訓練。</p>`;
   }
 
   function viewSectors() {
@@ -407,7 +407,7 @@ ${footer()}`;
   function viewScoreMini() {
     const sc = S.snap.scorecard;
     return `<div class="hd"><h2 id="sc-h">模型成績單</h2><span class="note">近 30 天</span><a class="act" href="#/scorecard">詳細</a></div>
-      ${scoreRows(sc.d30)}<p class="small muted" style="margin:0">黑線＝50%（擲硬幣）；灰色＝樣本少於 30 筆，僅供參考。${sc.since ? `自 ${esc(sc.since)} 起累積 ${sc.total} 筆。` : '收盤後開始累積紀錄。'}</p>`;
+      ${scoreRows(sc.d30)}<p class="small muted" style="margin:0">黑線＝50%（擲硬幣）；灰色＝樣本少於 30 筆。${sc.since ? `自 ${esc(sc.since)} 起累積 ${sc.total} 筆。` : '收盤後開始累積紀錄。'}</p>`;
   }
 
   function viewChipMarket() {
@@ -421,7 +421,7 @@ ${footer()}`;
 
   function footer() {
     return `<footer class="src">資料來源：Yahoo 財經（報價、日 K）、臺灣證券交易所（三大法人、收盤行情）、FinMind（法人歷史、月營收）、芝加哥選擇權交易所（VIX 恐慌指數）、美國財政部（公債殖利率）。
-      訊號與模型為統計推估，非投資建議。資料${S.source === 'nas' ? '來自 NAS 備援' : '由 GitHub 排程產生'}，${esc(tpeTime(S.snap.generatedAt))}（${ago(S.snap.generatedAt)}）。</footer>`;
+      資料${S.source === 'nas' ? '來自 NAS 備援' : '由 GitHub 排程產生'}，${esc(tpeTime(S.snap.generatedAt))}（${ago(S.snap.generatedAt)}）。</footer>`;
   }
 
   async function afterHome() {
@@ -449,7 +449,7 @@ ${footer()}`;
       if (!S.llm[key]) {
         const v = S.snap.verdict;
         const envTxt = S.snap.env.map(e => `${e.label} ${e.value}${e.unit || ''} ${isNum(e.changePct) ? pct(e.changePct) : ''}（${e.meaning}）`).join('；');
-        S.llm[key] = await askLLM(`以下是今天的市場環境與規則判斷，請用繁體中文寫 2 句話給一般投資人：第一句說明現在市場的重點，第二句說明該怎麼做。不要列點，不要超過 80 字。\n判斷：${v.headline}\n理由：${v.detail}\n環境：${envTxt}`) || '';
+        S.llm[key] = await askLLM(`以下是今天的市場環境與規則判斷，請用繁體中文寫 2 句話給一般投資人（不要加免責聲明）：第一句說明現在市場的重點，第二句說明該怎麼做。不要列點，不要超過 80 字。\n判斷：${v.headline}\n理由：${v.detail}\n環境：${envTxt}`) || '';
       }
       const b2 = $('#ai-verdict');
       if (b2 && S.route === 'home') b2.innerHTML = S.llm[key] ? `<div class="ai"><b>本機 AI 解讀</b>${esc(S.llm[key])}</div>` : '';
@@ -563,7 +563,7 @@ ${footer()}`;
     const grade = r => {
       const band = Math.abs(r.cov80 - 80) <= 5 ? ['ok', '區間校準良好'] : r.cov80 < 75 ? ['warn', '區間偏窄，實際波動常超出'] : ['warn', '區間偏寬'];
       const best = Math.max(r.base, 100 - r.base), edge = r.dir == null ? null : r.dir - best;
-      const dir = edge == null ? ['warn', '方向無資料'] : edge >= 5 ? ['ok', `方向比單純猜測好 ${edge.toFixed(0)} 個百分點`] : edge >= 2 ? ['warn', '方向僅略優於單純猜測'] : ['bad', '方向沒有比單純猜測好，只當參考'];
+      const dir = edge == null ? ['warn', '方向無資料'] : edge >= 5 ? ['ok', `方向比單純猜測好 ${edge.toFixed(0)} 個百分點`] : edge >= 2 ? ['warn', '方向僅略優於單純猜測'] : ['bad', '方向沒有比單純猜測好'];
       return { band, dir };
     };
     const row = (l, r) => { if (!r) return ''; const g = grade(r); return `<tr><td>${l}</td><td class="num">${r.cov80}%</td><td class="num">${r.cov50}%</td><td class="num">${r.dir ?? '—'}%</td><td class="num muted">${Math.max(r.base, 100 - r.base)}%</td><td class="num muted">${r.n}</td></tr>
@@ -636,7 +636,7 @@ ${footer()}`;
           ${rv ? `<div><b class="small">分析師預估修正（今年 EPS）</b><dl class="facts mini" style="margin-top:6px"><div><dt>目前預估</dt><dd>${num(rv.current)}</dd></div><div><dt>近 30 日修正</dt><dd class="${cls(rv.d30)}">${pct(rv.d30, 1)}</dd></div><div><dt>近 90 日修正</dt><dd class="${cls(rv.d90)}">${pct(rv.d90, 1)}</dd></div><div><dt>近 30 日上修／下修</dt><dd>${rv.up30 ?? '—'}／${rv.down30 ?? '—'} 位</dd></div></dl></div>` : ''}
         </div>
       </div>
-      <p class="small muted" style="margin:0">${f.isFinancial ? '金融股沒有毛利率，現金流與負債比的意義不同，相關檢查已略過。' : ''}財報反映的是過去一季，對隔日漲跌幾乎沒有預測力；對未來 1～6 個月的方向、以及避開財務惡化的公司較有幫助。</p>
+      <p class="small muted" style="margin:0">${f.isFinancial ? '金融股沒有毛利率，現金流與負債比的意義不同，相關檢查已略過。' : ''}</p>
     </section>`;
   }
 
@@ -808,7 +808,7 @@ ${footer()}`;
       box.innerHTML = '<div class="ai" style="background:var(--bg);color:var(--ink2)"><b style="color:var(--ink)">本機 AI 解讀</b>產生中…</div>';
       if (S.llm[k] == null) {
         const T = thesis(it, holdings());
-        S.llm[k] = await askLLM(`請用繁體中文，用 2 到 3 句話解讀這檔股票目前的狀況與操作重點，不要列點，不超過 100 字。\n標的：${key} ${it.name}\n現價 ${it.price}（${pct(it.changePct)}），規則判斷：${SIG[it.signal.sig]}，分數 ${it.signal.score}\n支持：${T.pros.join('；') || '無'}\n風險：${T.cons.join('；') || '無'}`, key) || '';
+        S.llm[k] = await askLLM(`請用繁體中文，用 2 到 3 句話解讀這檔股票目前的狀況與操作重點（不要加免責聲明），不要列點，不超過 100 字。\n標的：${key} ${it.name}\n現價 ${it.price}（${pct(it.changePct)}），規則判斷：${SIG[it.signal.sig]}，分數 ${it.signal.score}\n支持：${T.pros.join('；') || '無'}\n風險：${T.cons.join('；') || '無'}`, key) || '';
       }
       const b2 = $('#ai-stock');
       if (b2 && S.route === 's/' + key) b2.innerHTML = S.llm[k] ? `<div class="ai" style="background:var(--bg);color:var(--ink2)"><b style="color:var(--ink)">本機 AI 解讀</b>${esc(S.llm[k])}</div>` : '';
@@ -836,7 +836,7 @@ ${footer()}`;
       const q = $('#ask-q').value.trim(); if (!q) return;
       const it = S.snap.items[key], T = thesis(it, holdings()), out = $('#ask-a');
       out.innerHTML = '<div class="ai" style="background:var(--bg);color:var(--ink2)"><b style="color:var(--ink)">本機 AI</b>思考中…</div>';
-      const a = await askLLM(`用繁體中文簡短回答（不超過 150 字），最後提醒這不是投資建議。\n問題：${q}\n標的：${key} ${it.name}，現價 ${it.price}（${pct(it.changePct)}），判斷 ${SIG[it.signal.sig]}，分數 ${it.signal.score}，停損 ${it.signal.stop}\n支持：${T.pros.join('；') || '無'}\n風險：${T.cons.join('；') || '無'}`, key);
+      const a = await askLLM(`用繁體中文簡短回答（不超過 150 字），不要加免責聲明。\n問題：${q}\n標的：${key} ${it.name}，現價 ${it.price}（${pct(it.changePct)}），判斷 ${SIG[it.signal.sig]}，分數 ${it.signal.score}，停損 ${it.signal.stop}\n支持：${T.pros.join('；') || '無'}\n風險：${T.cons.join('；') || '無'}`, key);
       if ($('#ask-a')) $('#ask-a').innerHTML = `<div class="ai" style="background:var(--bg);color:var(--ink2)"><b style="color:var(--ink)">本機 AI</b>${esc(a || '沒有回應，確認語言模型服務是否開著。')}</div>`;
     };
   }
@@ -1328,7 +1328,7 @@ ${footer()}`;
         ${res[0].r.open ? `<p class="small" style="margin:0">目前持有中：${esc(res[0].r.open.date)} 以 ${px(res[0].r.open.px)} 進場，未實現 <b class="${cls(res[0].r.open.unreal)}">${pct(res[0].r.open.unreal, 1)}</b></p>` : ''}</div>`
         : `<div><b class="small">各檔結果（依「贏過一直持有」排序）</b><div class="tbl-box"><table class="tbl rtbl"><thead><tr><th>標的</th><th class="num">策略</th><th class="num">一直持有</th><th class="num">差異</th><th class="num">已平倉</th><th class="num">勝率</th><th class="num">最大回撤</th></tr></thead><tbody>
         ${per.map(p => `<tr><td><a href="#" data-btkey="${esc(p.key)}">${esc(p.key)}</a> <span class="small muted">${esc(p.name)}</span>${p.open ? ' <span class="tag buy">持有中</span>' : ''}</td><td class="num ${cls(p.s)}">${pct(p.s, 1)}</td><td class="num ${cls(p.b)}">${pct(p.b, 1)}</td><td class="num ${cls(p.s - p.b)}"><b>${pct(p.s - p.b, 1)}</b></td><td class="num">${p.n}</td><td class="num">${p.win == null ? '—' : p.win.toFixed(0) + '%'}</td><td class="num down">${pct(p.mdd, 1)}</td></tr>`).join('')}</tbody></table></div></div>`}
-      <p class="small muted" style="margin:0">規則：收盤後計算技術分數（與系統相同公式，不含 AI 模型與 VIX 門檻調整），隔天開盤成交；停損停利在盤中觸價成交，跳空時以開盤價計。已扣交易成本，未計股利。歷史約 2 年。注意：一直調參數直到結果最好，等於「看著答案找規則」，未來不一定有效——請以前後兩半段都穩定的設定為準。</p>`;
+      <p class="small muted" style="margin:0">規則：收盤後計算技術分數（與系統相同公式，不含 AI 模型與 VIX 門檻調整），隔天開盤成交；停損停利在盤中觸價成交，跳空時以開盤價計。已扣交易成本，未計股利。歷史約 2 年。</p>`;
   }
   function bindBacktest() {
     const read = () => { BT.scope = $('#bt-scope').value; BT.buy = +$('#bt-buy').value || BT_DEF.buy; BT.sell = +$('#bt-sell').value || BT_DEF.sell; BT.stopAtr = +$('#bt-stop').value || 0; BT.takePct = +$('#bt-take').value || 0; BT.maxDays = +$('#bt-days').value || 0; BT.costTW = +$('#bt-ctw').value || 0; BT.costUS = +$('#bt-cus').value || 0; BT.trend = $('#bt-trend').checked; LS.set('bt', BT); };
@@ -1347,7 +1347,7 @@ ${footer()}`;
 <section class="card" aria-labelledby="bt0"><div class="hd"><h2 id="bt0">策略回測</h2><span class="note">過去 2 年照技術面訊號操作的結果，可自行調整門檻、停損、停利；另附 AI 模型的樣本外表現</span><a class="act btn primary sm" href="#/backtest" style="color:#fff">開始回測</a></div></section>
 <section class="card" aria-labelledby="sc1"><div class="hd"><h2 id="sc1">模型成績單</h2><span class="note">${esc(sc.note)}</span></div>
   <div class="grid2"><div style="display:flex;flex-direction:column;gap:12px"><b class="small">近 30 天</b>${scoreRows(sc.d30)}</div><div style="display:flex;flex-direction:column;gap:12px"><b class="small">近 90 天</b>${scoreRows(sc.d90)}</div></div>
-  <p class="small muted" style="margin:0">黑線＝50%（擲硬幣）。灰色條＝樣本少於 30 筆，數字不穩定。${sc.since ? `自 ${esc(sc.since)} 起共 ${sc.total} 筆。` : ''}</p></section>
+  <p class="small muted" style="margin:0">黑線＝50%（擲硬幣）。灰色條＝樣本少於 30 筆。${sc.since ? `自 ${esc(sc.since)} 起共 ${sc.total} 筆。` : ''}</p></section>
 <section class="card" aria-labelledby="sc2"><div class="hd"><h2 id="sc2">資料狀態</h2><span class="note">本次更新：${esc(tpeTime(S.snap.generatedAt))}・${S.snap.mode.startsWith('full') ? '收盤後完整更新' : '盤中快速更新'}・用時 ${S.snap.buildSeconds} 秒</span></div>
   <table class="tbl wrap" style="min-width:0"><tbody>${Object.entries(st).map(([k, v]) => `<tr><td>${esc(STZ[k] || k)}</td><td class="${/fail|no-token/.test(String(v)) ? 'bad-text' : ''}">${esc(String(v).replace('no-token', '未設定權杖').replace(/^fail.*/, '失敗'))}</td></tr>`).join('')}
   <tr><td>資料來源</td><td>${S.source === 'nas' ? 'NAS 備援' : 'GitHub'}</td></tr>
