@@ -33,13 +33,18 @@ async function miIndex(date) {
     }
   }
   const ct = tables.find(t => /每日收盤行情/.test(t.title || '') && Array.isArray(t.data));
-  const closes = {};
+  const closes = {}, names = {}, chg = {};
   if (ct) {
-    const iC = col(ct.fields || [], /^收盤價$/);
-    if (iC >= 0) for (const row of ct.data) { const id = String(row[0] || '').trim(), c = num(row[iC]); if (/^\d{4}$/.test(id) && c > 0) closes[id] = c; }
+    const f = ct.fields || [], iC = col(f, /^收盤價$/), iS = col(f, /^漲跌\(\+\/-\)$/), iD = col(f, /^漲跌價差$/);
+    if (iC >= 0) for (const row of ct.data) {
+      const id = String(row[0] || '').trim(), c = num(row[iC]);
+      if (!/^\d{4,6}[A-Z]?$/.test(id) || !(c > 0)) continue;
+      closes[id] = c; names[id] = String(row[1] || '').trim();
+      if (iS >= 0 && iD >= 0) { const sg = String(row[iS] || ''), d = (sg.includes('-') ? -1 : sg.includes('+') ? 1 : 0) * num(row[iD]); chg[id] = c - d > 0 ? d / (c - d) * 100 : 0; }
+    }
   }
   if (!adv && !Object.keys(closes).length) return null;
-  return { date, adv: adv?.n ?? null, upLimit: adv?.limit ?? null, dec: dec?.n ?? null, downLimit: dec?.limit ?? null, unch: unch?.n ?? null, closes };
+  return { date, adv: adv?.n ?? null, upLimit: adv?.limit ?? null, dec: dec?.n ?? null, downLimit: dec?.limit ?? null, unch: unch?.n ?? null, closes, names, chg };
 }
 
 /**
@@ -47,7 +52,7 @@ async function miIndex(date) {
  * hist = { dates: [...], c: { id: [close...] }, breadth: [{date, adv, dec, unch, upLimit, downLimit}] }
  */
 async function updateTwHistory(hist, latestDate, { maxBackfill = 10, keep = 70, log = () => {} } = {}) {
-  hist = hist && hist.dates ? hist : { dates: [], c: {}, breadth: [] };
+  hist = hist && hist.dates ? hist : { dates: [], c: {}, breadth: [], names: {} };
   const want = []; let d = latestDate;
   for (let i = 0; i < keep && want.length < keep; i++) { want.push(d); d = prevTradingDate(d); }
   const have = new Set(hist.dates);
@@ -75,13 +80,16 @@ async function updateTwHistory(hist, latestDate, { maxBackfill = 10, keep = 70, 
   }
   const bmap = Object.fromEntries((hist.breadth || []).map(b => [b.date, b]));
   for (const [dt, g] of Object.entries(got)) bmap[dt] = { date: dt, adv: g.adv, dec: g.dec, unch: g.unch, upLimit: g.upLimit, downLimit: g.downLimit };
-  return { dates, c, breadth: dates.map(dt => bmap[dt]).filter(Boolean) };
+  const latest = Object.keys(got).sort().pop();
+  const names = { ...(hist.names || {}), ...(got[latest]?.names || {}) };
+  const lastChg = latest === dates[dates.length - 1] ? got[latest].chg : (hist.lastChg || {});
+  return { dates, c, names, lastChg, breadth: dates.map(dt => bmap[dt]).filter(Boolean) };
 }
 
 /** 由收盤歷史算：站上 20／60 日線比例、20 日新高新低家數，以及每日序列（畫走勢用） */
 function twBreadthStats(hist) {
   if (!hist?.dates?.length) return null;
-  const n = hist.dates.length, ids = Object.keys(hist.c);
+  const n = hist.dates.length, ids = Object.keys(hist.c).filter(id => /^[1-9]\d{3}$/.test(id));   // 只算普通股（排除 ETF）
   const pctAbove = (k, t) => {
     let a = 0, m = 0;
     for (const id of ids) {
@@ -201,6 +209,22 @@ async function twMargin(date) {
   return { date, balance: num(row[iT]) / 1e5, prev: iY >= 0 ? num(row[iY]) / 1e5 : null };   // 仟元 → 億元
 }
 
+// ── 櫃買中心（上櫃）每日收盤 ─────────────────────────────────
+async function tpexQuotes() {
+  const rows = await get('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes', { timeout: 30000 });
+  if (!Array.isArray(rows) || !rows.length) return null;
+  const s = rows[0];
+  const kId = findKey(s, /^SecuritiesCompanyCode$/i, /代號/), kN = findKey(s, /^CompanyName$/i, /名稱/), kC = findKey(s, /^Close$/i, /收盤/), kCh = findKey(s, /^Change$/i, /漲跌/), kD = findKey(s, /^Date$/i, /日期/);
+  if (!kId || !kC) return { error: `欄位無法辨識：${Object.keys(s).slice(0, 8).join('|')}` };
+  const out = {};
+  for (const r of rows) {
+    const id = String(r[kId] || '').trim(), c = num(r[kC]); if (!/^\d{4,6}[A-Z]?$/.test(id) || !(c > 0)) continue;
+    const ch = kCh ? num(r[kCh]) : 0;
+    out[id] = { n: String(r[kN] || '').trim(), c, p: c - ch > 0 ? ch / (c - ch) * 100 : 0 };
+  }
+  return { date: kD ? String(rows[0][kD]) : null, rows: out };
+}
+
 // ── FRED（公開 CSV，不需權杖）────────────────────────────────
 async function fred(id, days = 400) {
   const key = process.env.FRED_API_KEY;
@@ -217,4 +241,4 @@ async function fred(id, days = 400) {
   return out.filter(x => x.date >= cut);
 }
 
-module.exports = { miIndex, updateTwHistory, twBreadthStats, taifexForeignTX, taifexPutCall, pickForeignTX, pickPC, twValuation, twMargin, fred, csvParse, median };
+module.exports = { tpexQuotes, miIndex, updateTwHistory, twBreadthStats, taifexForeignTX, taifexPutCall, pickForeignTX, pickPC, twValuation, twMargin, fred, csvParse, median };

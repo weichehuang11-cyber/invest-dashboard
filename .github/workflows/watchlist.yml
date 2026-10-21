@@ -1,0 +1,58 @@
+name: 修改觀察清單
+
+# 在網站按「加入觀察清單」會開一個預填標題的 Issue；只有專案擁有者開的 Issue 才會被處理。
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: watchlist
+  cancel-in-progress: false
+
+jobs:
+  edit:
+    if: github.event.issue.user.login == github.repository_owner && (contains(github.event.issue.title, '觀察清單') || contains(github.event.issue.title, 'watchlist'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --omit=dev
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+      - name: 修改 config/watchlist.json
+        id: edit
+        env:
+          TITLE: ${{ github.event.issue.title }}
+          BODY: ${{ github.event.issue.body }}
+        run: |
+          NAME=$(printf '%s' "$BODY" | sed -n 's/^名稱[:：]\s*//p' | head -1)
+          OUT=$(node pipeline/watchlist-edit.js "$TITLE" "$NAME" | tail -1)
+          echo "$OUT"
+          echo "msg=$(echo "$OUT" | jq -r .msg)" >> "$GITHUB_OUTPUT"
+          echo "changed=$(echo "$OUT" | jq -r .changed)" >> "$GITHUB_OUTPUT"
+      - name: 存檔並重新產生資料
+        if: steps.edit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "watchlist: ${{ github.event.issue.title }} (#${{ github.event.issue.number }})"
+          git push -q
+          # 用 GITHUB_TOKEN 推送不會自動觸發其他 workflow，所以直接觸發一次完整更新
+          gh api -X POST repos/${{ github.repository }}/actions/workflows/update.yml/dispatches -f ref=main -f 'inputs[full]=all'
+      - name: 回覆並關閉
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MSG: ${{ steps.edit.outputs.msg }}
+        run: |
+          gh api -X POST repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments -f body="$MSG"
+          gh api -X PATCH repos/${{ github.repository }}/issues/${{ github.event.issue.number }} -f state=closed

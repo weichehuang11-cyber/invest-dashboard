@@ -207,6 +207,7 @@ async function main() {
       const m = await Market.twMargin(lastDate);
       if (m) { push('marginHist', { date: lastDate, balance: r2(m.balance, 1) }); if (m.prev != null && !(heavy.tw.marginHist.length > 1)) heavy.tw.marginHist.unshift({ date: TWSE.prevTradingDate(lastDate), balance: r2(m.prev, 1) }); status.margin = 'ok'; } else status.margin = 'fail';
     } catch (e) { status.margin = 'fail: ' + e.message; }
+    try { const tq = await Market.tpexQuotes(); if (tq && !tq.error) { heavy.tw.tpex = tq; status.tpex = `${Object.keys(tq.rows).length} 檔`; } else status.tpex = 'fail: ' + (tq?.error || '無資料'); } catch (e) { status.tpex = 'fail: ' + e.message; }
     // 財報（季報變動慢：每 5 天更新一次；有 FINMIND_TOKEN 用權杖，沒有用免權杖額度）
     heavy.tw.fin = heavy.tw.fin || {};
     { let ok = 0, err = null;
@@ -498,6 +499,25 @@ async function main() {
       key, dates: sl(d.bars.dates), open: sl(d.bars.open).map(v => r2(v, 4)), high: sl(d.bars.high).map(v => r2(v, 4)),
       low: sl(d.bars.low).map(v => r2(v, 4)), close: sl(d.bars.close).map(v => r2(v, 4)), volume: sl(d.bars.volume),
     });
+  }
+  // 全市場清單（搜尋與快速檢視用）：台股上市（含 ETF）＋上櫃；觀察清單另標記
+  {
+    const H = heavy.tw.hist || {}, U = [], series = { dates: (H.dates || []).slice(-60), c: {} };
+    const wset = new Set([...wl.us, ...wl.tw]);
+    const nD = (H.dates || []).length;
+    for (const [id, arr] of Object.entries(H.c || {})) {
+      const last = arr[nD - 1]; if (!(last > 0)) continue;
+      const cl = arr.slice(-60);
+      const ma = k => { const w = arr.slice(-k); return w.length === k && w.every(v => v > 0) ? w.reduce((a, b) => a + b, 0) / k : null; };
+      const m20 = ma(20), m60 = ma(60), r20 = arr[nD - 21] > 0 ? (last / arr[nD - 21] - 1) * 100 : null;
+      U.push({ k: id, n: H.names?.[id] || id, m: 'tw', x: 'TWSE', c: last, p: r2(H.lastChg?.[id] ?? null), a20: m20 ? last > m20 : null, a60: m60 ? last > m60 : null, r20: r2(r20, 1), w: wset.has(id) ? 1 : 0 });
+      series.c[id] = cl.map(v => (v > 0 ? r2(v, 2) : null));
+    }
+    for (const [id, q] of Object.entries(heavy.tw.tpex?.rows || {})) if (!U.some(u => u.k === id)) U.push({ k: id, n: q.n, m: 'tw', x: 'TPEx', c: q.c, p: r2(q.p), w: wset.has(id) ? 1 : 0 });
+    for (const k of wl.us) if (items[k]) U.push({ k, n: items[k].name, m: 'us', x: 'US', c: items[k].price, p: items[k].changePct, w: 1 });
+    writeJSON(path.join(OUT, 'universe.json'), { date: H.dates?.[nD - 1] || null, tpexDate: heavy.tw.tpex?.date || null, list: U });
+    writeJSON(path.join(OUT, 'universe_hist.json'), series);
+    status.universe = `${U.length} 檔`;
   }
   log('輸出完成', OUT);
 

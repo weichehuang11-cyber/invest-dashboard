@@ -702,7 +702,7 @@ ${footer()}`;
 
   function viewStock(key, b) {
     const it = S.snap.items[key];
-    if (!it) return `<section class="card"><h2 style="margin:0">找不到 ${esc(key)}</h2><p class="empty">這個代號不在觀察清單。要追蹤請加到 GitHub 專案的 config/watchlist.json。</p><div><a class="btn" href="#/">回總覽</a></div></section>`;
+    if (!it) return `<section class="card"><h2 style="margin:0">找不到 ${esc(key)}</h2><p class="empty">這個代號不在觀察清單。</p><div class="actions"><a class="btn primary" href="#/q/${encodeURIComponent(key)}">快速檢視／加入觀察清單</a><a class="btn" href="#/">回總覽</a></div></section>`;
     const P = holdings(), T = thesis(it, P), g = it.signal, ta = it.ta || {}, f = it.fund || {}, c = it.chip;
     const lp = S.localPreds[key];
     const range52 = isNum(ta.high52) && isNum(ta.low52) && ta.high52 > ta.low52 ? (it.price - ta.low52) / (ta.high52 - ta.low52) * 100 : null;
@@ -714,7 +714,8 @@ ${footer()}`;
 <div><a href="#/" class="small">← 回總覽</a></div>
 <section class="card" aria-labelledby="s-h">
   <div class="hd"><h1 id="s-h" style="margin:0;font-size:22px">${esc(key)} ${esc(it.name)}</h1><span class="note">${it.market === 'tw' ? '台股' : '美股'}・${esc(it.currency || '')}${pos ? `・持有 ${int(pos.shares)} 股` : ''}</span>
-    <button type="button" class="btn sm act-r" data-star="${esc(key)}" aria-pressed="${isStar(key)}">${isStar(key) ? '★ 已自選' : '☆ 加入自選'}</button></div>
+ <a class="small muted" href="${watchlistLink(key, it.name, true)}" target="_blank" rel="noopener" style="margin-left:auto">從觀察清單移除</a>
+    <button type="button" class="btn sm" data-star="${esc(key)}" aria-pressed="${isStar(key)}">${isStar(key) ? '★ 已自選' : '☆ 加入自選'}</button></div>
   <div class="quote">
     <div><div style="display:flex;align-items:baseline;gap:12px"><span class="px">${px(it.price)}</span><span class="ch ${cls(it.changePct)}">${sign(it.price - it.prevClose)}${fix(Math.abs(it.price - it.prevClose), it.price >= 100 ? 1 : 2)}（${pct(it.changePct)}）</span></div>
       <div class="small muted">${esc(it.marketDate)}・成交量為 20 日均量 ${isNum(ta.relVolume) ? ta.relVolume.toFixed(1) : '—'} 倍</div></div>
@@ -1398,6 +1399,12 @@ ${footer()}`;
       main.innerHTML = viewStock(key, b); document.title = `${key} ${nameOf(key)}・訊號終端`;
       bindStock(key); bindMine(key);
       afterStock(key);
+    } else if (S.route.startsWith('q')) {
+      const key = decodeURIComponent(h.split('/')[1] || '').toUpperCase();
+      if (S.snap.items[key]) { location.replace('#/s/' + encodeURIComponent(key)); return; }
+      main.innerHTML = '<p class="loading">載入中…</p>';
+      const html = await viewQuick(key); if (!location.hash.includes('/q/')) return;
+      main.innerHTML = html; document.title = `${key}・訊號終端`;
     } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); bindPortfolio(); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
     else if (S.route === 'backtest') { const k = h.split('/')[1]; if (k) { BT.scope = decodeURIComponent(k).toUpperCase(); LS.set('bt', BT); } main.innerHTML = viewBacktest(); bindBacktest(); document.title = '策略回測・訊號終端'; }
     else if (S.route === 'journal') { main.innerHTML = viewJournal(); document.title = '我的成績單・訊號終端'; afterJournal(); }
@@ -1407,26 +1414,62 @@ ${footer()}`;
     else { main.innerHTML = viewHome(); document.title = '訊號終端'; afterHome(); }
   }
 
+  // ── 全市場清單：搜尋任何台股、快速檢視、一鍵加入觀察清单 ─────────
+  let UNI = null, UNIH = null;
+  async function loadUniverse() { if (UNI) return UNI; try { UNI = await getJSON(S.base + 'universe.json'); } catch (_) { UNI = { list: [] }; } return UNI; }
+  const repoInfo = () => { const owner = location.hostname.split('.')[0], repo = location.pathname.split('/').filter(Boolean)[0] || 'invest-dashboard'; return { owner, repo }; };
+  function watchlistLink(key, name, remove) {
+    const { owner, repo } = repoInfo();
+    const t = `${remove ? '移除' : '加入'}觀察清單 ${key}`;
+    const body = `${name ? `名稱：${name}\n` : ''}\n（直接按「Submit new issue」送出即可，系統會自動${remove ? '移除' : '加入'}並在約 3～5 分鐘後更新網站。只有專案擁有者送出的才會生效。）`;
+    return `https://github.com/${owner}/${repo}/issues/new?title=${encodeURIComponent(t)}&body=${encodeURIComponent(body)}`;
+  }
+  async function viewQuick(key) {
+    const U = await loadUniverse(), u = U.list.find(x => x.k === key);
+    if (!u) return `<div><a href="#/" class="small">← 回總覽</a></div><section class="card"><h2 style="margin:0">找不到 ${esc(key)}</h2>
+      <p class="empty">全市場清單裡沒有這個代號。${/^[A-Z.\-]+$/.test(key) ? '美股可以直接加入觀察清單，系統會先確認代號是否存在。' : '請確認代號是否正確（上市、上櫃、ETF 都可以）。'}</p>
+      <div class="actions"><a class="btn primary" href="${watchlistLink(key)}" target="_blank" rel="noopener">加入觀察清單</a><a class="btn" href="#/">回總覽</a></div></section>`;
+    if (!UNIH && u.x === 'TWSE') { try { UNIH = await getJSON(S.base + 'universe_hist.json'); } catch (_) { UNIH = { dates: [], c: {} }; } }
+    const ser = UNIH?.c?.[key] || [];
+    return `<div><a href="#/" class="small">← 回總覽</a></div>
+<section class="card" aria-labelledby="qk-h">
+  <div class="hd"><h1 id="qk-h" style="margin:0;font-size:22px">${esc(key)} ${esc(u.n)}</h1><span class="note">${u.x === 'TPEx' ? '上櫃' : u.x === 'TWSE' ? (/^00/.test(key) ? '上市 ETF' : '上市') : '美股'}・快速檢視（不在觀察清單）</span></div>
+  <div class="quote"><div><div style="display:flex;align-items:baseline;gap:12px"><span class="px">${px(u.c)}</span><span class="ch ${cls(u.p)}">${pct(u.p)}</span></div><div class="small muted">${esc((u.x === 'TPEx' ? UNI.tpexDate : UNI.date) || '')} 收盤</div></div></div>
+  ${ser.filter(isNum).length > 5 ? `<div>${spark(ser, { w: 600, h: 90 })}<div class="small muted">近 ${ser.filter(isNum).length} 個交易日收盤</div></div>` : ''}
+  <dl class="facts mini">
+    <div><dt>20 日線</dt><dd>${u.a20 == null ? '—' : u.a20 ? '<span class="up">站上</span>' : '<span class="down">跌破</span>'}</dd></div>
+    <div><dt>60 日線</dt><dd>${u.a60 == null ? '—' : u.a60 ? '<span class="up">站上</span>' : '<span class="down">跌破</span>'}</dd></div>
+    <div><dt>近 20 日報酬</dt><dd class="${cls(u.r20)}">${pct(u.r20, 1)}</dd></div>
+  </dl>
+  <div style="background:var(--acc-bg);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+    <b>想看完整分析？加入觀察清單</b>
+    <span class="small">加入後系統會每天計算技術面、籌碼、財報、AI 模型、走勢推論與回測。按下按鈕會開啟 GitHub，直接按「Submit new issue」送出，約 3～5 分鐘後這檔就會有完整頁面（需要登入你的 GitHub 帳號）。</span>
+    <div><a class="btn primary" href="${watchlistLink(key, u.n)}" target="_blank" rel="noopener">加入觀察清單</a></div>
+  </div>
+</section>${footer()}`;
+  }
+
   function setupSearch() {
     const inp = $('#search-input'), box = $('#search-results'), form = $('#search');
-    const all = () => Object.values(S.snap.items);
+    const all = () => { const w = Object.values(S.snap.items).map(it => ({ key: it.key, name: it.name, changePct: it.changePct, w: 1 })); const seen = new Set(w.map(x => x.key)); return [...w, ...(UNI?.list || []).filter(u => !seen.has(u.k)).map(u => ({ key: u.k, name: u.n, changePct: u.p, w: 0, x: u.x }))]; };
     const norm = v => String(v || '').trim().toUpperCase().replace(/\.TWO?$/, '');
     const find = q => {
       q = norm(q); if (!q) return [];
       const exact = all().filter(it => it.key === q);
       const starts = all().filter(it => it.key !== q && it.key.startsWith(q));
       const name = all().filter(it => !it.key.startsWith(q) && String(it.name).toUpperCase().includes(q));
-      return [...exact, ...starts, ...name].slice(0, 8);
+      const byW = a => a.sort((x, y) => y.w - x.w);
+      return [...exact, ...byW(starts), ...byW(name)].slice(0, 10);
     };
     let hits = [], cur = -1;
-    const go = key => { box.hidden = true; inp.value = ''; inp.blur(); location.hash = '#/s/' + encodeURIComponent(key); };
+    const go = key => { box.hidden = true; inp.value = ''; inp.blur(); location.hash = (S.snap.items[key] ? '#/s/' : '#/q/') + encodeURIComponent(key); };
     const draw = () => {
       if (!inp.value.trim()) { box.hidden = true; return; }
       box.hidden = false;
-      box.innerHTML = hits.length ? hits.map((it, i) => `<li role="option" data-key="${esc(it.key)}" aria-selected="${i === cur}"><b>${esc(it.key)}</b><span>${esc(it.name)}</span><span class="${cls(it.changePct)}">${pct(it.changePct)}</span></li>`).join('')
-        : `<li class="none">觀察清單沒有「${esc(inp.value.trim())}」。要追蹤請加到 config/watchlist.json</li>`;
+      box.innerHTML = hits.length ? hits.map((it, i) => `<li role="option" data-key="${esc(it.key)}" aria-selected="${i === cur}"><b>${esc(it.key)}</b><span>${esc(it.name)}${it.w ? ' <span class="tag buy" style="font-size:10px">觀察中</span>' : ''}</span><span class="${cls(it.changePct)}">${pct(it.changePct)}</span></li>`).join('')
+        : `<li class="none" data-key="${esc(norm(inp.value))}">找不到「${esc(inp.value.trim())}」。${/^[A-Za-z.\-]+$/.test(inp.value.trim()) ? '美股代號可以點這裡加入觀察清單。' : '台股請輸入上市、上櫃或 ETF 代號。'}</li>`;
     };
-    inp.addEventListener('input', () => { hits = find(inp.value); cur = hits.length ? 0 : -1; draw(); });
+    inp.addEventListener('input', async () => { if (!UNI) { await loadUniverse(); } hits = find(inp.value); cur = hits.length ? 0 : -1; draw(); });
     inp.addEventListener('keydown', e => {
       if (e.key === 'ArrowDown' && hits.length) { cur = (cur + 1) % hits.length; draw(); e.preventDefault(); }
       else if (e.key === 'ArrowUp' && hits.length) { cur = (cur - 1 + hits.length) % hits.length; draw(); e.preventDefault(); }
@@ -1434,12 +1477,12 @@ ${footer()}`;
     });
     box.addEventListener('pointerdown', e => { const li = e.target.closest('[data-key]'); if (li) { e.preventDefault(); go(li.dataset.key); } });
     inp.addEventListener('blur', () => setTimeout(() => { box.hidden = true; }, 150));
-    inp.addEventListener('focus', () => { if (inp.value.trim()) { hits = find(inp.value); draw(); } });
+    inp.addEventListener('focus', () => { loadUniverse(); if (inp.value.trim()) { hits = find(inp.value); draw(); } });
     form.onsubmit = e => {
       e.preventDefault();
       const q = norm(inp.value); if (!q) return;
       const h = find(q);
-      if (h.length) go(h[cur >= 0 && h[cur] ? cur : 0].key); else { hits = []; draw(); }
+      if (h.length) go(h[cur >= 0 && h[cur] ? cur : 0].key); else go(q);
     };
   }
 
