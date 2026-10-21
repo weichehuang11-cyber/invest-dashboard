@@ -6,20 +6,30 @@
  */
 const MODEL = process.env.AI_MODEL || 'openai/gpt-4.1-mini';
 
-async function chat(messages, { json = false, timeout = 60000 } = {}) {
-  const token = process.env.GH_MODELS_TOKEN;
-  if (!token) throw new Error('沒有 GH_MODELS_TOKEN');
+async function post(url, model, messages, json, token, timeout) {
   const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), timeout);
   try {
-    const r = await fetch('https://models.github.ai/inference/chat/completions', {
-      method: 'POST', signal: ctl.signal,
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ model: MODEL, messages, temperature: 0.4, ...(json ? { response_format: { type: 'json_object' } } : {}) }),
+    const r = await fetch(url, {
+      method: 'POST', signal: ctl.signal, redirect: 'manual',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'X-GitHub-Api-Version': '2022-11-28' },
+      body: JSON.stringify({ model, messages, temperature: 0.4, ...(json ? { response_format: { type: 'json_object' } } : {}) }),
     });
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${(await r.text()).slice(0, 120)}`);
-    const j = await r.json();
-    return j.choices?.[0]?.message?.content || '';
+    const text = await r.text();
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${text.slice(0, 100)}`);
+    let j; try { j = JSON.parse(text); } catch (_) { throw new Error(`回應不是 JSON（${r.status}）：${text.slice(0, 40)}`); }
+    const c = j.choices?.[0]?.message?.content;
+    if (!c) throw new Error('沒有回覆內容');
+    return c;
   } finally { clearTimeout(t); }
+}
+/** 依序嘗試：GitHub Models 新端點 → 舊的 Azure 端點 */
+async function chat(messages, { json = false, timeout = 90000 } = {}) {
+  const token = process.env.GH_MODELS_TOKEN;
+  if (!token) throw new Error('沒有 GH_MODELS_TOKEN');
+  const tries = [['https://models.github.ai/inference/chat/completions', MODEL], ['https://models.inference.ai.azure.com/chat/completions', MODEL.replace(/^[^/]+\//, '')]];
+  let err;
+  for (const [url, model] of tries) { try { return await post(url, model, messages, json, token, timeout); } catch (e) { err = e; } }
+  throw err;
 }
 
 const SIG = { BUY: '買進', SELL: '賣出', HOLD: '觀望' };
@@ -39,7 +49,7 @@ ${facts}
 
 請輸出 JSON：{"verdict": "3 句話以內的今日市場解讀：重點、原因、該怎麼做（不超過 120 字）", "stocks": {"代號": "一句話點評，30 字以內，說出最關鍵的一件事"}}，stocks 要涵蓋上面每一檔。`;
   const txt = await chat([{ role: 'system', content: sys }, { role: 'user', content: user }], { json: true });
-  const j = JSON.parse(txt);
+  const j = JSON.parse((txt.match(/\{[\s\S]*\}/) || [txt])[0]);
   return { model: MODEL, at: new Date().toISOString(), verdict: String(j.verdict || '').trim(), stocks: Object.fromEntries(Object.entries(j.stocks || {}).map(([k, v]) => [String(k).toUpperCase(), String(v).trim()])) };
 }
 
