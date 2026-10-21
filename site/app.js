@@ -385,7 +385,8 @@ ${footer()}`;
     return `
       <div class="hd"><h2 id="opp-h">機會清單</h2><span class="note">${isMob() ? '證據燈：' : `依綜合分數排序・證據：技術／籌碼／基本面／模型（`}${cfg.colors === 'us' ? '實心綠' : '實心紅'}＝支持、${cfg.colors === 'us' ? '實心紅' : '實心綠'}＝反對${isMob() ? '' : '、空心＝中性、虛線＝無資料）'}</span>${n && all.length > n ? `<a class="act" href="#/all">看全部 ${all.length} 檔</a>` : ''}</div>
       <div class="filters">${seg('mk', UI.mk, [['all', '全部'], ['tw', '台股'], ['us', '美股']])}${seg('cat', UI.cat, [['all', '全部訊號'], ['buy', '買進'], ['sell', '賣出'], ['star', '★ 自選'], ['held', '持有中']])}${seg('sort', UI.sort, [['score', '依分數'], ['up', '漲最多'], ['down', '跌最多']])}</div>
-      ${keys.length ? '' : `<p class="empty">${UI.cat === 'star' ? '還沒有自選股。到個股頁按「☆ 加入自選」。' : UI.cat === 'held' ? '還沒有持股，或持股不在觀察清單。' : '沒有符合條件的標的。'}</p>`}
+      ${keys.length ? '' : `<div class="nudge" style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>${UI.cat === 'star' ? '目前篩選「★ 自選」，但還沒有自選股（到個股頁按「☆ 加入自選」）。' : UI.cat === 'held' ? '目前篩選「持有中」，但持股不在觀察清單。' : '目前的篩選條件沒有符合的標的。'}</span><button type="button" class="btn sm" data-of="reset" data-v="1">顯示全部</button></div>`}
+      ${(UI.mk !== 'all' || UI.cat !== 'all') && keys.length ? `<p class="small muted" style="margin:0">已篩選：${[UI.mk === 'tw' ? '台股' : UI.mk === 'us' ? '美股' : '', { buy: '買進', sell: '賣出', star: '自選', held: '持有中' }[UI.cat] || ''].filter(Boolean).join('、')}・<a href="#" data-of="reset" data-v="1">清除</a></p>` : ''}
       <div class="tbl-box opp"><table class="tbl"><thead><tr><th>#</th><th>標的</th><th class="num">價格</th><th class="num">今日</th><th>判斷</th><th>證據</th><th class="num">分數</th><th class="num">停損價（2 倍 ATR）</th>${lp ? '<th class="num">本機 1 日</th><th class="num">本機 5 日</th>' : ''}</tr></thead>
       <tbody>${keys.map(row).join('')}</tbody></table></div>
       <div class="cards">${keys.map(card).join('')}</div>
@@ -1777,6 +1778,7 @@ ${footer()}`;
         const k = f.dataset.of, v = f.dataset.v;
         if (k === 'idx') { S.idx = v; LS.set('idx', v); fillIndexSection(); return; }
         if (k === 'range') { S.range = +v; LS.set('range', S.range); const b = S.bars[S.route.slice(2).toUpperCase()]; const box = $('#pxchart')?.closest('.card'); if (b && box) { const it = S.snap.items[b.key]; box.querySelector('.chart-wrap').innerHTML = lineChart(b, it); bindChart(); } return; }
+        if (k === 'reset') { e.preventDefault(); UI.mk = 'all'; UI.cat = 'all'; UI.sort = 'score'; LS.set('oppF', UI); const bx = $('#opps'); if (bx) bx.innerHTML = viewOpps(S.route === 'all' ? 0 : isMob() ? 6 : 10); return; }
         UI[k] = v; LS.set('oppF', UI);
         const box = $('#opps'); if (box) box.innerHTML = viewOpps(S.route === 'all' ? 0 : isMob() ? 6 : 10);
         return;
