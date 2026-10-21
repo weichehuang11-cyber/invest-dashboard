@@ -1,0 +1,21 @@
+name: AI 連線診斷
+on: workflow_dispatch
+permissions:
+  contents: write
+  models: read
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 測試
+        env:
+          T: ${{ github.token }}
+        run: |
+          B='{"model":"openai/gpt-4.1-mini","messages":[{"role":"user","content":"說 hi"}]}'
+          {
+            echo "== 1 models.github.ai"; curl -sS -i -X POST https://models.github.ai/inference/chat/completions -H "Authorization: Bearer $T" -H "Content-Type: application/json" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -d "$B" | head -c 1500
+            echo; echo "== 2 catalog"; curl -sS -i https://models.github.ai/catalog/models -H "Authorization: Bearer $T" | head -c 600
+            echo; echo "== 3 no accept"; curl -sS -i -X POST https://models.github.ai/inference/chat/completions -H "Authorization: Bearer $T" -H "Content-Type: application/json" -d "$B" | head -c 800
+          } > diag.txt 2>&1
+          git config user.name bot; git config user.email bot@users.noreply.github.com
+          git checkout -q --orphan diag && git rm -rfq . && git add diag.txt && git commit -qm diag && git push -qf origin diag
