@@ -203,12 +203,17 @@ async function twMargin(date) {
 
 // ── FRED（公開 CSV，不需權杖）────────────────────────────────
 async function fred(id, days = 400) {
-  const t = await get(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}`, { as: 'text', timeout: 25000 });
+  const key = process.env.FRED_API_KEY;
+  const cut = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  if (key) {   // 有權杖就用官方 API（較穩定）
+    const j = await get(`https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${key}&file_type=json&observation_start=${cut}`, { timeout: 25000 });
+    return (j.observations || []).map(o => ({ date: o.date, v: parseFloat(o.value) })).filter(x => Number.isFinite(x.v));
+  }
+  const t = await get(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}&cosd=${cut}`, { as: 'text', timeout: 30000, headers: { Accept: 'text/csv,*/*' } });
   const rows = csvParse(t);
   const kv = Object.keys(rows[0] || {}).find(k => k.toUpperCase() === id.toUpperCase()) || Object.keys(rows[0] || {})[1];
   const kd = Object.keys(rows[0] || {})[0];
   const out = rows.map(r => ({ date: r[kd], v: parseFloat(r[kv]) })).filter(x => Number.isFinite(x.v));
-  const cut = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
   return out.filter(x => x.date >= cut);
 }
 

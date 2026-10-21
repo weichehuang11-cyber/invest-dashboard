@@ -79,8 +79,10 @@ function buildHealth({ heavy, daily, vix, tsy, sectorsList }) {
   if (fh.length) {
     const l = lastOf(fh), p5 = fh[fh.length - 6];
     H.tw.futures = { date: l.date, net: l.net, chg: fh.length > 1 ? l.net - fh[fh.length - 2].net : null, chg5: p5 ? l.net - p5.net : null, pct: pctRank(fh.map(x => x.net), l.net), hist: fh.slice(-40) };
-    if (l.net < -30000) sig(2, 'neg', `外資台指期淨空單 ${Math.abs(l.net).toLocaleString()} 口，避險或看空部位偏重`);
-    else if (l.net > 10000) sig(1, 'pos', `外資台指期淨多單 ${l.net.toLocaleString()} 口`);
+    const c5 = H.tw.futures.chg5, pr = H.tw.futures.pct;
+    if (c5 != null && c5 < -10000) sig(2, 'neg', `外資台指期 5 日內淨空單增加 ${Math.abs(c5).toLocaleString()} 口（目前淨${l.net < 0 ? '空' : '多'} ${Math.abs(l.net).toLocaleString()} 口），避險或看空快速升溫`);
+    else if (c5 != null && c5 > 10000) sig(1, 'pos', `外資台指期 5 日內回補 ${c5.toLocaleString()} 口空單`);
+    else if (pr != null && fh.length >= 20 && pr <= 10) sig(2, 'neg', `外資台指期淨空單 ${Math.abs(l.net).toLocaleString()} 口，處於近期最高的 10%`);
   }
   const pc = heavy.tw.pcHist || [];
   if (pc.length) { const l = lastOf(pc); H.tw.putcall = { date: l.date, oi: l.oi, vol: l.vol, pct: pctRank(pc.map(x => x.oi), l.oi), hist: pc.slice(-40) }; }
@@ -244,11 +246,11 @@ async function main() {
 
   // ── 3c. 信用與金融壓力（FRED 公開 CSV）：完整更新時抓 ───────────
   if (FULL) {
-    heavy.macro = heavy.macro || {};
+    heavy.macro = heavy.macro || {}; let fredErr = null;
     for (const [k, id] of [['hy', 'BAMLH0A0HYM2'], ['stress', 'STLFSI4'], ['nfci', 'NFCI']]) {
-      try { const s2 = await Market.fred(id); if (s2.length) heavy.macro[k] = s2.slice(-300); } catch (e) { log('FRED 失敗', id, e.message); }
+      try { const s2 = await Market.fred(id); if (s2.length) heavy.macro[k] = s2.slice(-300); else fredErr = fredErr || `${id} 無資料`; } catch (e) { fredErr = fredErr || `${id} ${e.message}`; log('FRED 失敗', id, e.message); }
     }
-    status.fred = ['hy', 'stress', 'nfci'].filter(k => heavy.macro[k]?.length).length + '/3';
+    status.fred = ['hy', 'stress', 'nfci'].filter(k => heavy.macro[k]?.length).length + '/3' + (fredErr ? `（${fredErr}）` : '');
   }
 
   // ── 4. 每檔：指標、籌碼、基本面、模型、訊號 ─────────────────────

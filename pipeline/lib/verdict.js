@@ -33,7 +33,7 @@ function build({ vix, spx, twii, foreign, curve, health }, prev) {
   }
   const b = health?.tw?.breadth;
   if (b?.above20 != null) { if (b.above20 < 25) add(-1, `台股僅 ${b.above20.toFixed(0)}% 個股站上 20 日線`); else if (b.above20 > 75) add(1, `台股 ${b.above20.toFixed(0)}% 個股站上 20 日線`); }
-  if (health?.tw?.futures?.net < -30000) add(-1, `外資台指期淨空單 ${Math.abs(health.tw.futures.net).toLocaleString()} 口`);
+  if (health?.tw?.futures?.chg5 < -10000) add(-1, `外資台指期 5 日增加空單 ${Math.abs(health.tw.futures.chg5).toLocaleString()} 口`);
   if (health?.us?.vixTerm?.ratio > 1) add(-1, 'VIX 期限結構倒掛（急性恐慌）');
   if (health?.us?.hy?.chg > 0.5) add(-1, `高收益債利差擴大 ${health.us.hy.chg.toFixed(2)} 個百分點`);
   if (curve?.spread != null && curve.spread < 0) add(-1, `美債 10 年減 2 年利差 ${curve.spread.toFixed(2)}，曲線倒掛`);

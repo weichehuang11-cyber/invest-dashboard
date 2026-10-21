@@ -106,6 +106,7 @@ jobs:
       - name: 產生資料
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: |
           ARGS="--out=out/data --state=state"
           [ -n "${{ steps.mode.outputs.full }}" ] && ARGS="$ARGS --full=${{ steps.mode.outputs.full }}"
