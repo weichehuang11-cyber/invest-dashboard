@@ -32,6 +32,7 @@ const Fin = require('./lib/financials');
 const AI = require('./lib/ai');
 const Conviction = require('./lib/conviction');
 const News = require('./lib/news');
+const Digest = require('./lib/digest');
 
 const ROOT = path.join(__dirname, '..');
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const [k, v] = a.replace(/^--/, '').split('='); return [k, v ?? true]; }));
@@ -590,7 +591,7 @@ async function main() {
     watchlist: { us: wl.us, tw: wl.tw },
   };
   // 雲端 AI 解讀：收盤後完整更新時產生，盤中沿用上一次的
-  if (FULL && (process.env.GH_MODELS_TOKEN || process.env.ANTHROPIC_API_KEY)) {
+  if (FULL && (process.env.GH_MODELS_TOKEN || process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY)) {
     try { heavy.ai = await AI.commentary(snapshot); status.ai = `ok（${heavy.ai.model}）`; } catch (e) { status.ai = 'fail: ' + e.message.slice(0, 300); }
   }
   snapshot.ai = heavy.ai || null;
@@ -664,6 +665,29 @@ async function main() {
     // 台股成交值排行與漲幅排行（市場實際在追的股票）
     const twU = U.filter(u => u.m === 'tw' && /^\d{4}$/.test(u.k) && Number.isFinite(u.p));
     news.twMovers = twU.filter(u => u.p >= 5).sort((a, b) => b.p - a.p).slice(0, 20).map(u => ({ key: u.k, name: u.n, p: u.p, r20: u.r20 ?? null }));
+    // 全球市場快報（可信媒體＋全球行情；AI 摘要每 3 小時或收盤後更新一次）
+    try {
+      const Q = await Digest.quotes(yf).catch(e => { log('全球行情失敗', e.message); return []; });
+      const stories = await Digest.headlines(log);
+      const rule = Digest.ruleSummary(Q, stories);
+      const dFile = path.join(STATE, 'digest.json');
+      let prev = readJSON(dFile, null);
+      const hasAI = !!(process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY);
+      if (hasAI && stories.length >= 8 && (!prev?.at || Date.now() - Date.parse(prev.at) > 3 * 3600000 || FULL)) {
+        try {
+          const ai = await Digest.aiSummary(AI.chat, Q, stories);
+          prev = { at: new Date().toISOString(), model: AI.chat.last || null, ...ai };
+          writeJSON(dFile, prev); console.log('DIGEST_CHANGED');
+          status.digestAI = 'ok ' + (prev.model || '');
+        } catch (e) { status.digestAI = 'fail: ' + e.message.slice(0, 200); }
+      }
+      news.digest = { at: new Date().toISOString(), quotes: Q, stories: stories.slice(0, 40).map(({ tk, score, ...x }) => x), rule, ai: prev && prev.headline ? prev : null };
+      if (FULL && args['archive-daily']) {
+        const day = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+        writeJSON(path.join(path.resolve(String(args['archive-daily'])), 'digest', day.slice(0, 4), `${day}-${fullTW && !fullUS ? 'tw' : fullUS && !fullTW ? 'us' : 'all'}.json`), news.digest);
+      }
+      status.digest = `${Q.filter(q => q.price != null).length} 項行情／${stories.length} 則事件${news.digest.ai ? '／AI' : ''}`;
+    } catch (e) { status.digest = 'fail: ' + e.message.slice(0, 200); }
     writeJSON(path.join(OUT, 'news.json'), news);
     heavy.newsLast = news;
     status.news = `${news.status.market} 則／題材 ${news.themes.length}／個股 ${news.status.stocks}`;

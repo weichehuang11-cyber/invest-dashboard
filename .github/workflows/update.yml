@@ -105,15 +105,18 @@ jobs:
           echo "更新模式：${FULL:-盤中快速更新}"
 
       - name: 產生資料
+        id: build
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           GH_MODELS_TOKEN: ${{ github.token }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           ARGS="--out=out/data --state=state"
           [ -n "${{ steps.mode.outputs.full }}" ] && ARGS="$ARGS --full=${{ steps.mode.outputs.full }} --archive-daily=state/archive"
-          node pipeline/build.js $ARGS
+          node pipeline/build.js $ARGS | tee build.log
+          grep -q DIGEST_CHANGED build.log && echo "digest=1" >> "$GITHUB_OUTPUT" || true
 
       - name: 組合網站
         run: |
@@ -138,8 +141,8 @@ jobs:
           echo "$OUT"
           if echo "$OUT" | grep -q NOTIFIED_CHANGED; then echo "changed=1" >> "$GITHUB_OUTPUT"; fi
 
-      - name: 儲存狀態（完整更新，或通知紀錄有變）
-        if: steps.mode.outputs.full != '' || steps.notify.outputs.changed == '1'
+      - name: 儲存狀態（完整更新、通知紀錄或全球快報有變）
+        if: steps.mode.outputs.full != '' || steps.notify.outputs.changed == '1' || steps.build.outputs.digest == '1'
         run: |
           cd state
           if [ ! -d .git ] && [ ! -f .git ]; then

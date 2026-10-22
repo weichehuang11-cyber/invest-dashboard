@@ -35,13 +35,31 @@ async function claude(messages, timeout) {
     return JSON.parse(text).content?.map(c => c.text || '').join('') || '';
   } finally { clearTimeout(t); }
 }
-/** 依序嘗試：Anthropic（有金鑰時）→ GitHub Models */
+/** Google Gemini（免費額度；到 aistudio.google.com 申請 API key，設成 GEMINI_API_KEY） */
+async function gemini(messages, json, timeout) {
+  const sys = messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), timeout);
+  try {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, { method: 'POST', signal: ctl.signal,
+      headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY, 'content-type': 'application/json' },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents: messages.filter(m => m.role !== 'system').map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
+        generationConfig: { temperature: 0.4, ...(json ? { responseMimeType: 'application/json' } : {}) } }) });
+    const text = await r.text();
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${text.slice(0, 160)}`);
+    const out = JSON.parse(text).candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+    if (!out) throw new Error('沒有回覆內容');
+    return out;
+  } finally { clearTimeout(t); }
+}
+/** 依序嘗試：Anthropic → Gemini → GitHub Models（有哪個金鑰就用哪個） */
 async function chat(messages, { json = false, timeout = 90000 } = {}) {
   const errs = [];
-  if (process.env.ANTHROPIC_API_KEY) { try { return await claude(messages, timeout); } catch (e) { errs.push('anthropic: ' + e.message); } }
+  if (process.env.ANTHROPIC_API_KEY) { try { const r = await claude(messages, timeout); chat.last = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5'; return r; } catch (e) { errs.push('anthropic: ' + e.message); } }
+  if (process.env.GEMINI_API_KEY) { try { const r = await gemini(messages, json, timeout); chat.last = process.env.GEMINI_MODEL || 'gemini-2.5-flash'; return r; } catch (e) { errs.push('gemini: ' + e.message); } }
   const token = process.env.GH_MODELS_TOKEN;
-  if (token) for (const [url, model] of [['https://models.github.ai/inference/chat/completions', MODEL]]) { try { return await post(url, model, messages, json, token, timeout); } catch (e) { errs.push(`${new URL(url).host}: ${e.message}`); } }
-  throw new Error(errs.join(' ｜ ') || '沒有可用的 AI（請設定 ANTHROPIC_API_KEY）');
+  if (token) for (const [url, model] of [['https://models.github.ai/inference/chat/completions', MODEL]]) { try { const r = await post(url, model, messages, json, token, timeout); chat.last = model; return r; } catch (e) { errs.push(`${new URL(url).host}: ${e.message}`); } }
+  throw new Error(errs.join(' ｜ ') || '沒有可用的 AI（請設定 GEMINI_API_KEY 或 ANTHROPIC_API_KEY）');
 }
 
 const SIG = { BUY: '買進', SELL: '賣出', HOLD: '觀望' };
@@ -62,7 +80,7 @@ ${facts}
 請輸出 JSON：{"verdict": "3 句話以內的今日市場解讀：重點、原因、該怎麼做（不超過 120 字）", "stocks": {"代號": "一句話點評，30 字以內，說出最關鍵的一件事"}}，stocks 要涵蓋上面每一檔。`;
   const txt = await chat([{ role: 'system', content: sys }, { role: 'user', content: user }], { json: true });
   const j = JSON.parse((txt.match(/\{[\s\S]*\}/) || [txt])[0]);
-  return { model: process.env.ANTHROPIC_API_KEY ? (process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5') : MODEL, at: new Date().toISOString(), verdict: String(j.verdict || '').trim(), stocks: Object.fromEntries(Object.entries(j.stocks || {}).map(([k, v]) => [String(k).toUpperCase(), String(v).trim()])) };
+  return { model: chat.last || MODEL, at: new Date().toISOString(), verdict: String(j.verdict || '').trim(), stocks: Object.fromEntries(Object.entries(j.stocks || {}).map(([k, v]) => [String(k).toUpperCase(), String(v).trim()])) };
 }
 
 module.exports = { chat, commentary, MODEL };
