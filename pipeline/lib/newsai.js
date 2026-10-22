@@ -6,7 +6,7 @@
 const idOf = t => { let h = 5381; const s = String(t).replace(/\s+/g, '').toLowerCase(); for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(36); };
 
 const SYS = '你是財經新聞編輯，替忙碌的投資人把新聞整理成繁體中文快讀。只能根據提供的內容（標題、導言、內文、其他媒體標題）；不要編造數字、日期或細節。全部用繁體中文（台灣用語），公司名可保留英文或常見中文譯名。';
-const FORMAT = '{"id":"編號","t":"繁體中文標題，25 字內","s":"摘要：發生什麼、關鍵數字、原因，2～3 句、110 字內","k":["重點 1，25 字內","重點 2","最多 3 點，只寫內容裡有的事實"],"w":"對投資人的意義：影響哪些市場或產業、該注意什麼，40 字內","i":"利多／利空／中性","m":["相關市場或標的，最多 3 個"]}';
+const FORMAT = '{"id":"編號","t":"繁體中文標題，25 字內","s":"摘要：發生什麼、關鍵數字、原因，2～3 句、110 字內","k":["重點 1，25 字內","重點 2","最多 3 點，只寫內容裡有的事實"],"w":"對投資人的意義：影響哪些市場或產業、該注意什麼，40 字內","i":"利多／利空／中性","m":["相關市場或個股，最多 3 個；個股請寫「中文名（代號）」，例如 特斯拉（TSLA）、台積電（2330）"]}';
 const ctxOf = x => [x.desc ? '導言：' + x.desc : '', x.body ? '內文：' + x.body.slice(0, 900) : '', x.alt?.length ? '其他媒體：' + x.alt.slice(0, 4).join('／') : ''].filter(Boolean).join('｜');
 function save(cache, id, r, extra = {}) {
   cache.map[id] = { t: String(r.t || '').slice(0, 60), s: String(r.s || '').slice(0, 260), k: (r.k || []).map(String).filter(Boolean).slice(0, 3), w: String(r.w || '').slice(0, 100),

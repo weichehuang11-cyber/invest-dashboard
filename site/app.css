@@ -527,3 +527,5 @@ ul.news .tone { font-size: 10px; margin-right: 4px; }
 .th-stk .stk { white-space: normal; }
 
 .brand .ver { font-size: 11px; font-weight: 500; letter-spacing: 0; margin-left: 6px; padding: 1px 6px; border-radius: 99px; background: rgba(255,255,255,.14); color: #C9CED8; vertical-align: 2px; }
+.nc a.mk.lk { text-decoration: none; border: 1px solid color-mix(in srgb, var(--acc) 30%, #fff); }
+.nc a.mk.lk:hover { background: var(--acc); color: #fff; }

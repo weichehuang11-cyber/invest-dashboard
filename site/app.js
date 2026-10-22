@@ -246,6 +246,18 @@
   const newsAgo = at => { if (!at) return ''; const m = Math.round((Date.now() - Date.parse(at)) / 60000); return m < 60 ? `${Math.max(m, 1)} 分鐘前` : m < 1440 ? `${Math.round(m / 60)} 小時前` : `${Math.round(m / 1440)} 天前`; };
   const safeUrl = u => (/^https?:\/\//i.test(String(u || '')) ? u : '#');
   const impBadge = i => (i > 0 ? '<span class="imp up">利多</span>' : i < 0 ? '<span class="imp down">利空</span>' : '');
+  // 新聞標籤 → 個股：代號、常見中文名、觀察清單與全市場名稱
+  const MK_ALIAS = { 特斯拉: 'TSLA', 輝達: 'NVDA', 蘋果: 'AAPL', 微軟: 'MSFT', 谷歌: 'GOOGL', Google: 'GOOGL', Alphabet: 'GOOGL', 亞馬遜: 'AMZN', Amazon: 'AMZN', Meta: 'META', 臉書: 'META', 超微: 'AMD', 博通: 'AVGO', 英特爾: 'INTC', 高通: 'QCOM', 美光: 'MU', 甲骨文: 'ORCL', 網飛: 'NFLX', 波音: 'BA', 艾司摩爾: 'ASML', 台積電: '2330', 鴻海: '2317', 聯發科: '2454', 廣達: '2382', 台達電: '2308', 日月光: '3711', 緯創: '3231', 富邦金: '2881', 國泰金: '2882', 中華電: '2412' };
+  function mkKey(m) {
+    const t = String(m || '').trim(); if (!t) return null;
+    const code = t.match(/(?:^|[\s（(])(\d{4}|[A-Z]{1,5})(?:[\s）)]|$)/); if (code && (S.snap?.items?.[code[1]] || /^\d{4}$/.test(code[1]) || /^[A-Z]{2,5}$/.test(code[1]))) return code[1];
+    const name = t.replace(/[（(].*$/, '').trim();
+    if (MK_ALIAS[name]) return MK_ALIAS[name];
+    const it = Object.values(S.snap?.items || {}).find(x => x.name === name || x.name?.replace(/\s+(Inc\.?|Corp\.?|Corporation)$/i, '') === name); if (it) return it.key;
+    const u = (typeof UNI !== 'undefined' && UNI?.list || []).find(x => x.n === name); return u ? u.k : null;
+  }
+  const mkChip = m => { const k = mkKey(m); const label = String(m).replace(/[（(]\s*([A-Z]{1,5}|\d{4})\s*[）)]/, '').trim() || m;
+    return k ? `<a class="mk lk" href="#/${S.snap?.items?.[k] ? 's' : 'q'}/${encodeURIComponent(k)}">${esc(label)} ›</a>` : `<span class="mk">${esc(label)}</span>`; };
   function newsCard(n, opt = {}) {
     const t = n.zh || n.title, en = !n.zh && /^[\x00-\x7F]+$/.test(n.title);
     const src = n.sources?.length ? n.sources : n.source ? [n.source] : [];
@@ -258,7 +270,7 @@
       ${n.sum ? `<p class="nc-s">${esc(n.sum)}</p>` : en ? '<p class="nc-s muted">英文報導，中文摘要會在下一次整理時補上。</p>' : n.desc ? `<p class="nc-s">${esc(n.desc.slice(0, 110))}</p>` : ''}
       ${n.kp?.length ? `<ul class="nc-k">${n.kp.map(k => `<li>${esc(k)}</li>`).join('')}</ul>` : ''}
       ${n.why ? `<div class="nc-w"><b>投資意義</b>${esc(n.why)}</div>` : ''}
-      <div class="nc-m">${(n.mk || []).map(m => `<span class="mk">${esc(m)}</span>`).join('')}<span class="nc-src">${esc(srcTxt)}${basis ? `・${basis}` : ''}</span><a class="nc-o" href="${esc(safeUrl(n.link))}" target="_blank" rel="noopener" aria-label="開啟原文">原文 ↗</a></div>
+      <div class="nc-m">${(n.mk || []).map(mkChip).join('')}<span class="nc-src">${esc(srcTxt)}${basis ? `・${basis}` : ''}</span><a class="nc-o" href="${esc(safeUrl(n.link))}" target="_blank" rel="noopener" aria-label="開啟原文">原文 ↗</a></div>
     </article>`;
   }
   function themeCard(t, full) {
@@ -1905,7 +1917,7 @@ ${footer()}`;
     } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); bindPortfolio(); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
     else if (S.route === 'history') { main.innerHTML = '<p class="loading">載入歷史快照…</p>'; const html = await viewHistory(h.split('/')[1]); if (S.route !== 'history') return; main.innerHTML = html; const sel = $('#hs-day'); if (sel) sel.onchange = () => { location.hash = '#/history/' + sel.value; }; document.title = '歷史快照・訊號終端'; }
     else if (S.route === 'backtest') { const k = h.split('/')[1]; if (k) { BT.scope = decodeURIComponent(k).toUpperCase(); LS.set('bt', BT); } main.innerHTML = viewBacktest(); bindBacktest(); document.title = '策略回測・訊號終端'; }
-    else if (S.route === 'news') { main.innerHTML = '<p class="loading">載入新聞…</p>'; const N = await loadNews(); if (S.route !== 'news') return; main.innerHTML = viewNews(N); bindDigest(); setupFolds(); document.title = '新聞・訊號終端'; }
+    else if (S.route === 'news') { main.innerHTML = '<p class="loading">載入新聞…</p>'; const [N] = await Promise.all([loadNews(), loadUniverse()]); if (S.route !== 'news') return; main.innerHTML = viewNews(N); bindDigest(); setupFolds(); document.title = '新聞・訊號終端'; }
     else if (S.route === 'journal') { main.innerHTML = viewJournal(); document.title = '我的成績單・訊號終端'; afterJournal(); }
     else if (S.route === 'scorecard') { main.innerHTML = viewScorecard(); document.title = '模型成績・訊號終端'; }
     else if (S.route === 'settings') { main.innerHTML = viewSettings(); bindSettings(); document.title = '設定・訊號終端'; }
