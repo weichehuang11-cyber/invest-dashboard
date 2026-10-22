@@ -25,6 +25,8 @@ jobs:
           if git rev-parse "$V" >/dev/null 2>&1; then echo "$V 已存在，略過"; exit 0; fi
           # 取出 CHANGELOG 中這個版本的段落
           awk -v v="## $V" 'index($0, v)==1 {f=1; next} /^## v/ && f {exit} f' CHANGELOG.md > notes.md
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$V" -m "訊號終端 $V"
           git push origin "$V"
           gh release create "$V" --title "訊號終端 $V" --notes-file notes.md
