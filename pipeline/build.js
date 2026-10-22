@@ -701,9 +701,9 @@ async function main() {
       const groups = [fullStories.slice(0, 40), news.market || [], ...news.themes.map(t => t.news), ...Object.values(news.per).map(l => l.slice(0, 4))];
       const hasAI = !!(process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY);
       let ranAI = false;
-      if (hasAI && (!cache.tried || cache.lastError || Date.now() - Date.parse(cache.tried) > 55 * 60000 || FULL)) {
+      if (hasAI && (!cache.tried || cache.v !== 2 || cache.lastError || Date.now() - Date.parse(cache.tried) > 55 * 60000 || FULL)) {
         const r = await NewsAI.summarize(groups.flat(), AI.chat, cache, { log });
-        cache.tried = new Date().toISOString(); ranAI = true;
+        cache.tried = new Date().toISOString(); ranAI = true; cache.v = 2;
         if (process.env.GEMINI_API_KEY) { const d = await NewsAI.deepen(fullStories, AI.grounded, cache, { log }); status.newsDeep = d.err ? 'fail: ' + d.err : `查證 ${d.added} 則`; }
         cache.lastError = r.errs[0] || null;
         writeJSON(cFile, cache); console.log('DIGEST_CHANGED');
