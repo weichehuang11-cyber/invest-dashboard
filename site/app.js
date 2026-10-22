@@ -591,10 +591,11 @@ ${footer()}`;
   // ── 高信心訊號 ───────────────────────────────────────────────
   const CT = { ex20: '20 日贏大盤', ex5: '5 日贏大盤', up20: '20 日上漲' };
   const convBadge = it => (it.conv?.high?.length ? `<span class="tag hc" title="過去 5 年驗證期命中率">${it.conv.dir < 0 ? '高信心偏空' : '高信心'} ${it.conv.high[0].hit.toFixed(0)}%</span>` : '');
-  function convTable(ev, only) {
+  function convTable(ev, only, tbl) {
     if (!ev) return '<p class="empty" style="margin:0">尚無資料</p>';
+    const T0 = tbl || ev.table;
     const cell = x => { if (!x?.test) return '<td class="num muted">—</td>'; const t = x.test; return `<td class="num${x.high ? ' hc-cell' : ''}"><b>${t.hit.toFixed(0)}%</b><div class="small muted">${t.n} 次・均 ${t.avg > 0 ? '+' : ''}${t.avg.toFixed(1)}%</div></td>`; };
-    const rows = Object.entries(ev.table).filter(([k]) => !only || k === only);
+    const rows = Object.entries(T0).filter(([k]) => !only || k === only);
     return `<div class="tbl-box"><table class="tbl rtbl"><thead><tr><th>信心分組</th><th class="num">出現比例</th><th class="num">${CT.ex5}</th><th class="num">${CT.ex20}</th><th class="num">${CT.up20}</th></tr></thead><tbody>
       ${rows.map(([k, v]) => `<tr><td>${k}${v.dir < 0 ? '<div class="small muted">命中＝之後輸大盤／下跌</div>' : ''}</td><td class="num">${v.share}%</td>${cell(v.ex5)}${cell(v.ex20)}${cell(v.up20)}</tr>`).join('')}</tbody></table></div>`;
   }
@@ -606,8 +607,9 @@ ${footer()}`;
       <div class="cvbar" role="img" aria-label="信心分數 ${c.score}（−6 到 +6）"><div style="left:${pct6}%"></div><span>−6 偏空</span><span>0</span><span>+6 偏多</span></div>
       <p style="margin:0;font-weight:600">信心分數 ${c.score > 0 ? '+' : ''}${c.score}：${c.bucket}</p>
       <ul class="checks">${c.items.map(x => `<li class="${x.pt > 0 ? 'ok' : x.pt < 0 ? 'hit' : 'na'}"><span class="ic">${x.pt > 0 ? '＋' : x.pt < 0 ? '－' : '·'}</span><b>${esc(x.name)}</b><span class="small muted">${esc(x.txt)}</span></li>`).join('')}</ul>
-      <div class="fh"><b class="small">過去 5 年，${it.market === 'tw' ? '台股' : '美股'}觀察清單出現「${c.bucket}」之後（驗證期）</b>${convTable(ev, c.bucket)}
-      <p class="small muted" style="margin:0">${c.high.length ? `✅ ${c.high.map(h => `${CT[h.target]} ${h.hit}%`).join('、')}：驗證期命中率達 65% 以上，建立期也穩定。` : '這個分組在驗證期沒有任何一項達到 65%，只當參考。'} 驗證期：${esc(ev?.cut || '')} 之後；每 5 個交易日取樣一次。</p></div></section>`;
+      <div class="fh"><b class="small">過去 5 年，${it.market === 'tw' ? '台股' : '美股'}大型股（${ev?.stocks || ''} 檔）出現「${c.bucket}」之後（驗證期）</b>${convTable(ev, c.bucket)}
+      ${c.regime && ev?.regimes?.[c.regime] ? `<b class="small">只看大盤${c.regime === 'bull' ? '多頭（在 200 日線之上）' : '空頭（在 200 日線之下）'}的時候（現在就是這個環境）</b>${convTable(ev, c.bucket, ev.regimes[c.regime])}` : ''}
+      <p class="small muted" style="margin:0">${c.high.length ? `✅ ${c.high.map(h => `${CT[h.target]} ${h.hit}%${h.regime ? '（大盤' + (h.regime === 'bull' ? '多頭' : '空頭') + '時）' : ''}`).join('、')}：驗證期命中率達 65% 以上，建立期也穩定。` : '這個分組在驗證期沒有任何一項達到 65%，只當參考。'} 驗證期：${esc(ev?.cut || '')} 之後；每 5 個交易日取樣一次。</p></div></section>`;
   }
 
   // ── 財報重點 ──────────────────────────────────────────────────
@@ -1520,8 +1522,9 @@ ${footer()}`;
     return `
 <section class="card" aria-labelledby="bt0"><div class="hd"><h2 id="bt0">策略回測</h2><span class="note">過去 2 年照技術面訊號操作的結果，可自行調整門檻、停損、停利；另附 AI 模型的樣本外表現</span><a class="act btn primary sm" href="#/backtest" style="color:#fff">開始回測</a></div></section>
 <section class="card" aria-labelledby="hs0"><div class="hd"><h2 id="hs0">歷史快照</h2><span class="note">查任何一天收盤後的判斷、訊號、指標，並看當天訊號到現在的結果</span><a class="act btn sm" href="#/history">查詢</a></div></section>
-<section class="card" aria-labelledby="hc0"><div class="hd"><h2 id="hc0">高信心訊號：過去 5 年的實際命中率</h2><span class="note">依六項條件的信心分數分組；只看「驗證期」（後 40% 時間）的結果，綠底＝命中率 ≥ 65% 且穩定</span></div>
-  ${['tw', 'us'].map(m => S.snap.conviction?.[m] ? `<div><b class="small">${m === 'tw' ? '台股' : '美股'}觀察清單（${esc(S.snap.conviction[m].from)} → ${esc(S.snap.conviction[m].to)}，驗證期自 ${esc(S.snap.conviction[m].cut)}）</b>${convTable(S.snap.conviction[m])}</div>` : '').join('')}
+<section class="card" aria-labelledby="hc0"><div class="hd"><h2 id="hc0">高信心訊號：過去 5 年的實際命中率</h2><span class="note">樣本：台灣 50、標普 100 大型股＋觀察清單；依六項條件的信心分數分組，只看「驗證期」（後 40% 時間）的結果，綠底＝命中率 ≥ 65% 且穩定</span></div>
+  ${['tw', 'us'].map(m => { const E = S.snap.conviction?.[m]; if (!E) return ''; return `<div><b class="small">${m === 'tw' ? '台股' : '美股'}大型股 ${E.stocks || ''} 檔（${esc(E.from)} → ${esc(E.to)}，驗證期自 ${esc(E.cut)}）・目前大盤${E.regimeNow === 'bull' ? '多頭' : E.regimeNow === 'bear' ? '空頭' : '—'}</b>${convTable(E)}
+    ${E.regimes ? `<details><summary class="small">依大盤環境分開看（多頭 ${E.regShare?.bull ?? '—'}% 的時間）</summary><b class="small">大盤多頭時</b>${convTable(E, null, E.regimes.bull)}<b class="small">大盤空頭時</b>${convTable(E, null, E.regimes.bear)}</details>` : ''}</div>`; }).join('')}
   <p class="small muted" style="margin:0">「均」是每次的平均超額報酬（偏空分組以「之後輸大盤」為正）。命中率高但平均報酬低，代表贏的時候贏得少；請同時看兩者。條件固定不做最佳化，以避免用過去資料「調出」好看的數字。</p></section>
 <section class="card" aria-labelledby="sc1"><div class="hd"><h2 id="sc1">模型成績單</h2><span class="note">${esc(sc.note)}</span></div>
   <div class="grid2"><div style="display:flex;flex-direction:column;gap:12px"><b class="small">近 30 天</b>${scoreRows(sc.d30)}</div><div style="display:flex;flex-direction:column;gap:12px"><b class="small">近 90 天</b>${scoreRows(sc.d90)}</div></div>

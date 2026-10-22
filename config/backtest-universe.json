@@ -1,0 +1,5 @@
+{
+  "_說明": "高信心訊號的回測樣本（大型股）。只用來統計命中率，不會出現在網站清單。可自行增減。",
+  "tw": ["2330","2317","2454","2308","2382","2881","2882","2891","2303","2412","2886","2884","2357","3711","2885","2892","1216","2345","2880","3231","2301","2890","5880","2327","2603","3034","2002","2883","1303","2887","3037","1301","2379","3008","4938","6669","2395","2912","3045","5876","1101","2207","4904","3017","1326","3661","2059","6505","2618","1590"],
+  "us": ["AAPL","MSFT","NVDA","AMZN","GOOGL","META","BRK-B","AVGO","TSLA","JPM","LLY","V","UNH","XOM","MA","JNJ","PG","HD","COST","ABBV","MRK","WMT","NFLX","CVX","KO","PEP","BAC","AMD","ADBE","CRM","TMO","ORCL","MCD","CSCO","ACN","ABT","LIN","WFC","DHR","INTU","DIS","TXN","QCOM","VZ","IBM","AMGN","PM","CAT","GE","NOW","AMAT","UNP","NEE","ISRG","PFE","CMCSA","SPGI","RTX","LOW","HON","T","GS","BKNG","UBER","MS","PGR","BLK","ELV","SCHW","LMT","C","AXP","TJX","SYK","VRTX","MDT","BMY","DE","GILD","ADP","MU","ADI","LRCX","PLD","CB","MMC","SBUX","MO","SO","BA","INTC","CL","DUK","USB","GD","TGT","CVS","EMR","MET","COP"]
+}

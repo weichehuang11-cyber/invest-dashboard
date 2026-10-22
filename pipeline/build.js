@@ -373,27 +373,47 @@ async function main() {
   }
   log('個股完成', Object.keys(items).length);
 
-  // ── 4a. 高信心訊號：信心分數＋5 年回測（依市場分開驗證）──────────
+  // ── 4a. 高信心訊號：信心分數＋5 年回測（樣本＝台灣 50／標普 100 大型股＋觀察清單，依市場與大盤環境分開驗證）──
   const conviction = {};
   {
-    const groups = { tw: [], us: [] };
+    const UNIV = readJSON(path.join(ROOT, 'config', 'backtest-universe.json'), { tw: [], us: [] });
+    heavy.convEval = heavy.convEval || {};
+    const benchOf = m => longDaily[m === 'tw' ? '^TWII' : '^GSPC'] || daily[m === 'tw' ? '^TWII' : '^GSPC'];
+    const cur = { tw: [], us: [] };
     for (const it of Object.values(items)) {
-      const d = daily[it.key], bench = longDaily[it.market === 'tw' ? '^TWII' : '^GSPC'] || daily[it.market === 'tw' ? '^TWII' : '^GSPC'];
-      if (!d || !bench || d.bars.close.length < 200) continue;
-      try { const sc = Conviction.score(d.bars, bench.bars); groups[it.market].push({ it, b: d.bars, sc }); } catch (e) { log('信心分數失敗', it.key, e.message); }
+      const d = daily[it.key], bench = benchOf(it.market);
+      if (!d || !bench || d.bars.close.length < 300) continue;
+      try { cur[it.market].push({ it, b: d.bars, sc: Conviction.score(d.bars, bench.bars) }); } catch (e) { log('信心分數失敗', it.key, e.message); }
     }
     for (const m of ['tw', 'us']) {
-      if (!groups[m].length) continue;
-      const ev = Conviction.evaluate(groups[m]);
+      const bench = benchOf(m);
+      const needEval = (m === 'tw' ? fullTW : fullUS) || !heavy.convEval[m];
+      if (needEval && bench) {
+        const sample = [...cur[m].map(x => ({ b: x.b, sc: x.sc }))];
+        const have = new Set(cur[m].map(x => x.it.key));
+        await mapSeries((UNIV[m] || []).filter(k => !have.has(k)), async k => {
+          const d = await Yahoo.daily(k, '5y').catch(() => null);
+          if (d && d.bars.close.length >= 300) sample.push({ b: d.bars, sc: Conviction.score(d.bars, bench.bars) });
+        }, 250);
+        const ev = Conviction.evaluate(sample);
+        heavy.convEval[m] = { ...ev, stocks: sample.length, at: new Date().toISOString() };
+      }
+      const ev = heavy.convEval[m]; if (!ev) continue;
       conviction[m] = ev;
-      for (const { it, sc } of groups[m]) {
+      const lastBench = bench?.bars?.close || [], regNow = (() => { const a = lastBench.slice(-200); return a.length === 200 ? (a[199] > a.reduce((x, y) => x + y, 0) / 200 ? 'bull' : 'bear') : null; })();
+      conviction[m].regimeNow = regNow;
+      for (const { it, sc } of cur[m]) {
         const last = sc.scores[sc.scores.length - 1]; if (!last) continue;
-        const bucket = Conviction.bucketOf(last.score), row = ev.table[bucket] || {};
-        const highs = ['ex20', 'ex5', 'up20'].filter(k => row[k]?.high).map(k => ({ target: k, hit: row[k].test.hit, n: row[k].test.n, avg: row[k].test.avg }));
-        it.conv = { score: last.score, bucket, dir: row.dir, items: last.items.map(([name, pt, txt]) => ({ name, pt, txt })), high: highs };
+        const bucket = Conviction.bucketOf(last.score), row = ev.table[bucket] || {}, rrow = regNow ? ev.regimes?.[regNow]?.[bucket] : null;
+        const highs = [];
+        for (const k of ['ex20', 'ex5', 'up20']) {
+          if (rrow?.[k]?.high) highs.push({ target: k, hit: rrow[k].test.hit, n: rrow[k].test.n, avg: rrow[k].test.avg, regime: regNow });
+          else if (row[k]?.high) highs.push({ target: k, hit: row[k].test.hit, n: row[k].test.n, avg: row[k].test.avg, regime: null });
+        }
+        it.conv = { score: last.score, bucket, dir: row.dir, regime: regNow, items: last.items.map(([name, pt, txt]) => ({ name, pt, txt })), high: highs };
       }
     }
-    status.conviction = Object.entries(conviction).map(([m, e]) => `${m} ${e.n} 筆`).join('、') || '無';
+    status.conviction = Object.entries(conviction).map(([m, e]) => `${m} ${e.stocks || '?'} 檔／${e.n} 筆`).join('、') || '無';
   }
 
   // ── 4b. 模型樣本外紀錄：訓練日之後每天的模型判斷（回測頁用，避免用訓練過的資料自我評分）──

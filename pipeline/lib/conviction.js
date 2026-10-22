@@ -51,6 +51,8 @@ function score(b, bench) {
   const bm = new Map(bench.dates.map((d, i) => [d, bench.close[i]]));
   const bc = b.dates.map(d => bm.get(d) ?? null);
   for (let i = 1; i < n; i++) if (bc[i] == null) bc[i] = bc[i - 1];
+  // 大盤環境：大盤收盤在 200 日線之上＝多頭，否則＝空頭
+  const reg = new Array(n).fill(null); { let s = 0, k = 0; const q = []; for (let i = 0; i < n; i++) { const v = bc[i]; if (v == null) continue; q.push(v); s += v; if (q.length > 200) s -= q.shift(); if (q.length === 200) reg[i] = v > s / 200 ? 'bull' : 'bear'; } }
   const out = new Array(n).fill(null);
   for (let i = 80; i < n; i++) {
     const c = S.c, r20 = c[i] / c[i - 20] - 1, b20 = bc[i] && bc[i - 20] ? bc[i] / bc[i - 20] - 1 : null, r60 = c[i] / c[i - 60] - 1;
@@ -63,9 +65,9 @@ function score(b, bench) {
       ['20 日線', c[i] > S.m20[i] ? 1 : -1, c[i] > S.m20[i] ? '收盤在 20 日線之上' : '收盤在 20 日線之下'],
       ['RSI', S.rsi[i] >= 50 && S.rsi[i] <= 70 ? 1 : S.rsi[i] >= 30 && S.rsi[i] < 50 ? -1 : 0, `RSI ${Math.round(S.rsi[i])}`],
     ];
-    out[i] = { date: b.dates[i], score: items.reduce((s, x) => s + x[1], 0), items };
+    out[i] = { date: b.dates[i], score: items.reduce((s, x) => s + x[1], 0), items, regime: reg[i] };
   }
-  return { scores: out, bc };
+  return { scores: out, bc, regime: reg };
 }
 
 const BUCKETS = [['強烈偏多', s => s >= 5], ['偏多', s => s >= 3 && s <= 4], ['中性', s => s >= -2 && s <= 2], ['偏空', s => s <= -3 && s >= -4], ['強烈偏空', s => s <= -5]];
@@ -82,7 +84,7 @@ function evaluate(list, step = 5) {
     for (let i = 80; i + 20 < c.length; i += step) {
       const s = scores[i]; if (!s) continue;
       const ex = k => (bc[i] && bc[i + k] ? (c[i + k] / c[i] - 1) - (bc[i + k] / bc[i] - 1) : null);
-      rows.push({ date: b.dates[i], score: s.score, ex5: ex(5), ex20: ex(20), up20: c[i + 20] / c[i] - 1 });
+      rows.push({ date: b.dates[i], score: s.score, regime: s.regime, ex5: ex(5), ex20: ex(20), up20: c[i + 20] / c[i] - 1 });
     }
   }
   rows.sort((a, z) => a.date.localeCompare(z.date));
@@ -95,17 +97,22 @@ function evaluate(list, step = 5) {
     const avgW = wins.length ? wins.reduce((s, x) => s + x, 0) / wins.length : 0, avgL = loss.length ? -loss.reduce((s, x) => s + x, 0) / loss.length : 0;
     return { n: v.length, hit: +hit.toFixed(1), avg: +(signed.reduce((s, x) => s + x, 0) / v.length).toFixed(2), avgWin: +avgW.toFixed(2), avgLoss: +avgL.toFixed(2), payoff: avgL > 0 ? +(avgW / avgL).toFixed(2) : null };
   };
-  const table = {};
-  for (const [name, f] of BUCKETS) {
-    const g = rows.filter(r => f(r.score)), dir = /偏多/.test(name) ? 1 : /偏空/.test(name) ? -1 : 1;
-    const tr = g.filter(r => r.date < cut), te = g.filter(r => r.date >= cut);
-    table[name] = { dir, share: rows.length ? +(g.length / rows.length * 100).toFixed(1) : 0 };
-    for (const k of ['ex5', 'ex20', 'up20']) {
-      const a = stat(tr, k, dir), z = stat(te, k, dir);
-      table[name][k] = { train: a, test: z, high: !!(name !== '中性' && z && a && z.hit >= 65 && z.n >= 40 && a.hit >= 60) };
+  const mk = subset => {
+    const table = {};
+    for (const [name, f] of BUCKETS) {
+      const g = subset.filter(r => f(r.score)), dir = /偏多/.test(name) ? 1 : /偏空/.test(name) ? -1 : 1;
+      const tr = g.filter(r => r.date < cut), te = g.filter(r => r.date >= cut);
+      table[name] = { dir, share: subset.length ? +(g.length / subset.length * 100).toFixed(1) : 0 };
+      for (const k of ['ex5', 'ex20', 'up20']) {
+        const a = stat(tr, k, dir), z = stat(te, k, dir);
+        table[name][k] = { train: a, test: z, high: !!(name !== '中性' && z && a && z.hit >= 65 && z.n >= 40 && a.hit >= 60) };
+      }
     }
-  }
-  return { cut, n: rows.length, from: rows[0]?.date || null, to: rows[rows.length - 1]?.date || null, table };
+    return table;
+  };
+  const table = mk(rows), regimes = { bull: mk(rows.filter(r => r.regime === 'bull')), bear: mk(rows.filter(r => r.regime === 'bear')) };
+  const regShare = { bull: +(rows.filter(r => r.regime === 'bull').length / Math.max(1, rows.length) * 100).toFixed(1) };
+  return { cut, n: rows.length, from: rows[0]?.date || null, to: rows[rows.length - 1]?.date || null, table, regimes, regShare };
 }
 
 module.exports = { score, evaluate, bucketOf, BUCKETS };
