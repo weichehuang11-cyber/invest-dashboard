@@ -173,14 +173,14 @@
       if (r.status === 404) { LS.set('remoteGist', ''); S.remote = null; return null; }
       const f = (await r.json()).files?.[REMOTE_FILE]; let txt = f?.content;
       if (f?.truncated) txt = await (await fetch(f.raw_url, { cache: 'no-store' })).text();
-      const d = JSON.parse(txt); d.age = (Date.now() - Date.parse(d.at)) / 60000; d.fresh = d.age < 45;
+      const d = JSON.parse(txt); d.age = (Date.now() - Date.parse(d.at)) / 60000; d.fresh = d.age < 16;   // 電腦每 10 分鐘上傳一次；超過 16 分鐘沒上傳＝電腦已關機或睡眠
       S.remote = d; S.remoteAt = Date.now();
       if (d.age < 240 && !localAny()) for (const [k, v] of Object.entries(d.preds || {})) { const p = v.npu || v.cpu; if (p && !S.localPreds[k]) S.localPreds[k] = { d1: p.d1, d5: p.d5, eng: (v.npu ? 'NPU' : 'CPU') + '・電腦' }; }
       return d;
     } catch (_) { S.remote = null; S.remoteAt = Date.now(); return null; }
   }
   const remoteEngines = d => [d.engines?.npu?.ok && 'NPU', d.engines?.cpu?.ok && 'CPU', d.engines?.llm?.ok && '語言模型'].filter(Boolean);
-  const remoteAI = (txt, d) => `<div class="ai"><b>電腦 AI 解讀</b>${esc(txt)}<span class="small" style="opacity:.7;display:block;margin-top:4px">你的電腦（${esc(d.llm?.model || '本機語言模型')}）・${agoMin((Date.now() - Date.parse(d.llm?.at || d.at)) / 60000)}${d.llm?.basedOn && S.snap && d.llm.basedOn !== S.snap.generatedAt ? '・根據較早的資料' : ''}</span></div>`;
+  const remoteAI = (txt, d) => `<div class="ai"><b>電腦 AI 解讀</b>${esc(txt)}<span class="small" style="opacity:.7;display:block;margin-top:4px">你的電腦（${esc(d.llm?.model || '本機語言模型')}）・${agoMin((Date.now() - Date.parse(d.llm?.at || d.at)) / 60000)}${d.fresh ? '' : '・電腦目前離線'}${d.llm?.basedOn && S.snap && d.llm.basedOn !== S.snap.generatedAt ? '・根據較早的資料' : ''}</span></div>`;
   function updateLocalPill() {
     const el = $('#pill-local'); if (!el) return;
     if (!S.local.checked) return;
@@ -188,7 +188,7 @@
     const on = Object.keys(LOCAL).filter(k => S.local[k]).map(k => LOCAL[k].label);
     const R = !on.length && S.remote && S.remote.age < 240 ? S.remote : null;
     el.className = 'pill ' + (on.length || R?.fresh ? 'ok' : R ? 'warn' : '');
-    el.querySelector('.t').textContent = on.length ? `本機加速：${on.join('、')}` : R ? `電腦運算：${remoteEngines(R).join('、')}・${agoMin(R.age)}` : '雲端模式';
+    el.querySelector('.t').textContent = on.length ? `本機加速：${on.join('、')}` : R ? (R.fresh ? `電腦運算：${remoteEngines(R).join('、')}・${agoMin(R.age)}` : `電腦已離線・最後同步 ${agoMin(R.age)}`) : '雲端模式';
   }
 
   async function localPredict(keys) {
@@ -1749,7 +1749,7 @@ ${footer()}`;
       R.push(row(!!a?.answer && !a.error, '語言模型（埠 8768）', `模型 ${esc(a?.model || lh.default)}（已安裝：${esc(lh.models.join('、'))}）・回答花 ${(ms / 1000).toFixed(1)} 秒${a?.answer ? `<br>「${esc(a.answer.slice(0, 120))}」` : '・沒有回答'}`));
     }
     const rd = await loadRemote(true, true);
-    const rr = rd ? row(rd.fresh, '電腦運算同步（手機用）', `最後上傳 ${agoMin(rd.age)}・${remoteEngines(rd).join('、') || '無'}・預測 ${Object.keys(rd.preds || {}).length} 檔・AI 解讀 ${Object.keys(rd.llm?.stocks || {}).length} 檔${rd.fresh ? '' : '（超過 45 分鐘沒更新：電腦可能關機或睡眠）'}`)
+    const rr = rd ? row(rd.fresh, '電腦運算同步（手機用）', `最後上傳 ${agoMin(rd.age)}・${remoteEngines(rd).join('、') || '無'}・預測 ${Object.keys(rd.preds || {}).length} 檔・AI 解讀 ${Object.keys(rd.llm?.stocks || {}).length} 檔${rd.fresh ? '' : '（超過 16 分鐘沒更新：電腦已關機或睡眠）'}`)
       : row(false, '電腦運算同步（手機用）', SY.get().token ? '還沒有電腦上傳的結果：在電腦的 local-ai 資料夾執行 setup-phone.bat' : '這台裝置還沒設定 GitHub 權杖（上方「加密備份與同步」）');
     out.innerHTML = R.join('') + rr + `<p class="small muted">在電腦上：前三項打勾＝本機加速有在運作。在手機上：前三項會打叉是正常的，看最後一項「電腦運算同步」即可。</p>`;
     probeLocal();
@@ -2098,6 +2098,9 @@ ${footer()}`;
       if (localAny()) { if (S.route === 'home' || S.route.startsWith('s/')) render(); return; }
       const d = await loadRemote(); updateLocalPill();
       if (d && (S.route === 'home' || S.route.startsWith('s/'))) render();
+      const refreshRemote = async () => { if (localAny() || !SY.get().token) return; const was = S.remote?.fresh; const r = await loadRemote(true); updateLocalPill(); if (r && was !== r.fresh && (S.route === 'home' || S.route.startsWith('s/'))) render(); };
+      setInterval(refreshRemote, 5 * 60000);
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshRemote(); });   // 手機切回網頁時立即更新狀態
     });
     // 每 5 分鐘檢查一次新資料（分頁在前景時）
     setInterval(() => { if (!document.hidden) refreshNow(false); }, 3 * 60000);
