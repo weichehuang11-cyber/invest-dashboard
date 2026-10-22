@@ -1643,13 +1643,43 @@ ${footer()}`;
     <div class="field"><label for="st-colors">漲跌顏色</label><select id="st-colors"><option value="tw"${cfg.colors === 'tw' ? ' selected' : ''}>台股習慣：紅漲綠跌</option><option value="us"${cfg.colors === 'us' ? ' selected' : ''}>美股習慣：綠漲紅跌</option></select></div>
     <div class="field"><label for="st-nas">NAS 備援網址</label><input id="st-nas" type="url" value="${esc(cfg.nasUrl)}" placeholder="https://你的-nas.tailxxxx.ts.net"><span class="hint">GitHub 資料過舊或取不到時，改從這裡讀。必須是 https 開頭（例如 Tailscale 網址）。</span></div>
     <div class="field"><label><input id="st-local" type="checkbox"${cfg.localEnabled ? ' checked' : ''}> 啟用本機加速（自動偵測 NPU／CPU／語言模型）</label><span class="hint">在你的電腦上打開時，會連到本機的推論服務。第一次瀏覽器可能會詢問是否允許存取區域網路，請按允許。</span></div>
+    <div class="field"><button type="button" class="btn sm" id="lt-run">檢查本機 NPU／CPU／語言模型</button><span class="hint">要在裝了本機服務的那台電腦上按。會實際跑一次預測與一次語言模型問答，顯示是哪個硬體在跑。</span><div id="lt-out"></div></div>
     <div class="field"><label for="st-host">本機服務位址</label><input id="st-host" value="${esc(cfg.localHost)}" placeholder="localhost"><span class="hint">通常是 localhost；在家中其他裝置使用時可填那台電腦的區網 IP（例如 192.168.1.100）。</span></div>
     <div class="actions"><button class="btn primary" type="submit">儲存</button><button type="button" class="btn" id="st-test">測試連線</button></div>
     <p id="st-msg" class="small" role="status"></p>
   </form></section>
 <p class="small muted">網站版本 ${esc((document.querySelector('script[src^="app.js"]')?.getAttribute('src').split('v=')[1]) || '開發版')}</p>`;
   }
+  async function localDiag() {
+    const out = $('#lt-out'); if (!out) return;
+    out.innerHTML = '<p class="small muted">檢查中…（語言模型第一次回答可能要 10–60 秒）</p>';
+    const row = (ok, name, txt) => `<div class="ltr"><span style="color:${ok ? '#1E9E5A' : '#D93636'}">${ok ? '✔' : '✘'}</span><b>${esc(name)}</b><span class="small">${txt}</span></div>`;
+    const R = [];
+    const hist = (await loadBars(S.snap.ranking[0]))?.close?.slice(-120) || Array.from({ length: 60 }, (_, i) => 100 + i);
+    for (const k of ['npu', 'cpu']) {
+      let h = null; try { h = await getJSON(localUrl(k, '/health'), 2500); } catch (e) { R.push(row(false, LOCAL[k].label + ` 服務（埠 ${LOCAL[k].port}）`, '連不到：服務沒開，或瀏覽器擋了本機連線（Chrome／Edge 跳出「存取區域網路裝置」要按允許）')); continue; }
+      const t0 = performance.now(); let p = null; try { p = await postJSON(localUrl(k, '/predict/batch'), { stocks: [{ sym: 'TEST', history: hist }] }, 8000); } catch (_) {}
+      const ms = Math.round(performance.now() - t0), r = p?.results?.TEST;
+      try { h = await getJSON(localUrl(k, '/health'), 2500); } catch (_) {}
+      const unit = k === 'npu' ? (h.unit || h.engine) : (h.unit || h.engine);
+      const real = k === 'npu' ? (p?.provider && p.provider !== 'linear' ? `實際執行：<b>${esc(h.unit || p.provider)}</b>` : `<span class="down">沒有用到 ONNX 模型（${esc(h.error || '舊版服務，請更新程式並重開')}），目前是線性係數</span>`) : `實際執行：<b>${esc(unit)}</b>`;
+      R.push(row(!!r, LOCAL[k].label + ` 服務（埠 ${LOCAL[k].port}）`, `${real}・測試預測 ${r ? `5 日 ${pct(r.d5_pct)}` : '失敗'}・往返 ${ms} ms${isNum(h.runs) ? `・累計跑了 ${h.runs} 次${h.last_at ? `（最近 ${esc(h.last_at)}）` : ''}` : ''}`));
+    }
+    let lh = null; try { lh = await getJSON(localUrl('llm', '/health'), 4000); } catch (_) {}
+    if (!lh) R.push(row(false, '語言模型（埠 8768）', '連不到：本機服務沒開'));
+    else if (lh.status !== 'ok') R.push(row(false, '語言模型（埠 8768）', '服務有開，但 Ollama 沒在跑：安裝 Ollama 後執行 ollama serve'));
+    else if (!lh.models?.length) R.push(row(false, '語言模型（埠 8768）', `Ollama 有開但沒有模型：在命令列執行 ollama pull ${esc(lh.default || 'qwen2.5:7b')}`));
+    else {
+      out.innerHTML = R.join('') + '<p class="small muted">語言模型回答中…</p>';
+      const t0 = performance.now(); let a = null; try { a = await postJSON(localUrl('llm', '/api/ask'), { q: '用一句繁體中文說明什麼是本益比', stream: false }, 90000); } catch (_) {}
+      const ms = Math.round(performance.now() - t0);
+      R.push(row(!!a?.answer && !a.error, '語言模型（埠 8768）', `模型 ${esc(a?.model || lh.default)}（已安裝：${esc(lh.models.join('、'))}）・回答花 ${(ms / 1000).toFixed(1)} 秒${a?.answer ? `<br>「${esc(a.answer.slice(0, 120))}」` : '・沒有回答'}`));
+    }
+    out.innerHTML = R.join('') + `<p class="small muted">全部打勾＝本機加速有在運作；回總覽時右上角會顯示「本機加速：NPU、CPU、語言模型」。</p>`;
+    probeLocal();
+  }
   function bindSettings() {
+    const lt = $('#lt-run'); if (lt) lt.onclick = localDiag;
     bindSyncSettings();
     const msg = $('#st-msg');
     const readForm = () => { cfg.colors = $('#st-colors').value; cfg.nasUrl = $('#st-nas').value.trim(); cfg.localEnabled = $('#st-local').checked; cfg.localHost = $('#st-host').value.trim() || 'localhost'; };

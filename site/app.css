@@ -457,3 +457,5 @@ ul.news .tone { font-size: 10px; margin-right: 4px; }
 .dgr > span:last-child { text-align: right; }
 #dg-cat { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
 #dg-cat .act { background: var(--acc); color: #fff; border-color: var(--acc); }
+.ltr { display: grid; grid-template-columns: 18px auto 1fr; gap: 4px 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line2); }
+.ltr > .small { grid-column: 2 / -1; line-height: 1.5; }
