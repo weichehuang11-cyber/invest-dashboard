@@ -243,6 +243,7 @@
   const skLink = (k, n) => { const nm = n && n !== k ? shortName(n) : ''; return `<a href="#/${S.snap?.items?.[k] ? 's' : 'q'}/${encodeURIComponent(k)}" title="${esc(n || k)}">${esc(k)}${nm ? ' ' + esc(nm) : ''}</a>`; };
   const toneDot = t => (t > 0 ? '<span class="tone up" title="偏正面">▲</span>' : t < 0 ? '<span class="tone down" title="偏負面">▼</span>' : '');
   const newsAgo = at => { if (!at) return ''; const m = Math.round((Date.now() - Date.parse(at)) / 60000); return m < 60 ? `${Math.max(m, 1)} 分鐘前` : m < 1440 ? `${Math.round(m / 60)} 小時前` : `${Math.round(m / 1440)} 天前`; };
+  const safeUrl = u => (/^https?:\/\//i.test(String(u || '')) ? u : '#');
   const impBadge = i => (i > 0 ? '<span class="imp up">利多</span>' : i < 0 ? '<span class="imp down">利空</span>' : '');
   function newsCard(n, opt = {}) {
     const t = n.zh || n.title, en = !n.zh && /^[\x00-\x7F]+$/.test(n.title);
@@ -256,7 +257,7 @@
       ${n.sum ? `<p class="nc-s">${esc(n.sum)}</p>` : en ? '<p class="nc-s muted">英文報導，中文摘要會在下一次整理時補上。</p>' : n.desc ? `<p class="nc-s">${esc(n.desc.slice(0, 110))}</p>` : ''}
       ${n.kp?.length ? `<ul class="nc-k">${n.kp.map(k => `<li>${esc(k)}</li>`).join('')}</ul>` : ''}
       ${n.why ? `<div class="nc-w"><b>投資意義</b>${esc(n.why)}</div>` : ''}
-      <div class="nc-m">${(n.mk || []).map(m => `<span class="mk">${esc(m)}</span>`).join('')}<span class="nc-src">${esc(srcTxt)}${basis ? `・${basis}` : ''}</span><a class="nc-o" href="${esc(n.link)}" target="_blank" rel="noopener" aria-label="開啟原文">原文 ↗</a></div>
+      <div class="nc-m">${(n.mk || []).map(m => `<span class="mk">${esc(m)}</span>`).join('')}<span class="nc-src">${esc(srcTxt)}${basis ? `・${basis}` : ''}</span><a class="nc-o" href="${esc(safeUrl(n.link))}" target="_blank" rel="noopener" aria-label="開啟原文">原文 ↗</a></div>
     </article>`;
   }
   function themeCard(t, full) {
@@ -288,7 +289,7 @@
     return `<div class="dg-head"><span class="pill ${moodCls}">${esc(mood)}</span><b>${esc(use.headline || '')}</b></div>
       <ul class="dg-b">${(use.bullets || []).slice(0, compact ? 5 : 8).map(b => `<li>${esc(b)}</li>`).join('')}</ul>
       ${use.conclusion ? `<div class="dg-c"><b>結論</b>${esc(use.conclusion)}</div>` : ''}
-      ${!A && R.lead?.length ? `<div class="small"><b>今日頭條</b><ul class="news" style="margin-top:4px">${R.lead.map(x => `<li><a href="${esc(x.link)}" target="_blank" rel="noopener">${esc(x.title)}</a> <span class="muted">${esc((x.sources || []).join('、'))}</span></li>`).join('')}</ul></div>` : ''}
+      ${!A && R.lead?.length ? `<div class="small"><b>今日頭條</b><ul class="news" style="margin-top:4px">${R.lead.map(x => `<li><a href="${esc(safeUrl(x.link))}" target="_blank" rel="noopener">${esc(x.title)}</a> <span class="muted">${esc((x.sources || []).join('、'))}</span></li>`).join('')}</ul></div>` : ''}
       ${A?.watch?.length ? `<div class="small"><b>接下來盯：</b>${A.watch.map(esc).join('｜')}</div>` : ''}
       <p class="small muted" style="margin:0">${A ? `AI 摘要（${esc(A.model || '')}）・${esc(newsAgo(A.at))}整理，行情 ${esc(newsAgo(D.at))}更新` : `依全球行情自動整理・${esc(newsAgo(D.at))}更新（設定 AI 金鑰後會改成 AI 讀完頭條寫的摘要）`}</p>`;
   }

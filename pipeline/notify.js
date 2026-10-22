@@ -180,15 +180,15 @@ if (require.main === module) (async () => {
   if (args.weekly) { await send(`訊號終端週報 ${tpeDay()}`, weekly(snap, P, String(args.bars || 'out/data/bars'))); return; }
   const stFile = path.join(String(args.state || 'state'), 'notified.json');
   const notified = readJSON(stFile, {});
-  // 全球市場快報：早上（美股收盤後 06–10 點）與傍晚（台股收盤後 17–21 點）各推一次
+  // 全球市場快報：早上（美股收盤後 05–10 點，低優先、不響鈴）與傍晚（台股收盤後 16–21 點）各推一次
   {
     const D = readJSON(path.join(path.dirname(String(args.snap || 'out/data/snapshot.json')), 'news.json'), null)?.digest;
-    const h = new Date(Date.now() + 8 * 3600000).getUTCHours(), slot = h >= 6 && h < 10 ? 'am' : h >= 17 && h < 21 ? 'pm' : null;
+    const h = new Date(Date.now() + 8 * 3600000).getUTCHours(), slot = h >= 5 && h < 10 ? 'am' : h >= 16 && h < 21 ? 'pm' : null;
     const id = `digest:${tpeDay()}:${slot}`;
     if (D && slot && !notified[id] && (D.stories || []).length >= 5) {
       const U = D.ai || D.rule || {};
       const lines = [U.headline, ...(U.bullets || []).slice(0, 6).map(b => '• ' + b), U.conclusion ? '結論：' + U.conclusion : null, (D.ai?.watch || []).length ? '接下來盯：' + D.ai.watch.join('｜') : null].filter(Boolean);
-      if (await send(`${slot === 'am' ? '早安' : '收盤'}全球市場快報`, lines, { priority: 3, tags: ['newspaper'] })) {
+      if (await send(`${slot === 'am' ? '早安' : '收盤'}全球市場快報`, lines, { priority: slot === 'am' ? 2 : 3, tags: ['newspaper'] })) {
         notified[id] = tpeDay(); fs.mkdirSync(path.dirname(stFile), { recursive: true }); fs.writeFileSync(stFile, JSON.stringify(notified)); console.log('NOTIFIED_CHANGED');
       }
     }

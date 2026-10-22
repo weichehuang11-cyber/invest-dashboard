@@ -30,7 +30,7 @@ async function fetchBodies(items, { max = 15 } = {}) {
   }));
 }
 
-async function summarize(items, chat, cache, { max = 120, batch = 25, log = () => {} } = {}) {
+async function summarize(items, chat, cache, { max = 80, batch = 40, log = () => {} } = {}) {
   cache.map = cache.map || {};
   const todo = [], seen = new Set();
   for (const it of items) { const id = idOf(it.title); if (seen.has(id)) continue; seen.add(id); const c = cache.map[id]; if (!c || (c.v !== 2 && (it.body || it.alt))) todo.push({ id, ...it }); }
