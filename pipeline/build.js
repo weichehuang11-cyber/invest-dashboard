@@ -698,7 +698,7 @@ async function main() {
       const cFile = path.join(STATE, 'newsai.json'), cache = readJSON(cFile, { map: {} });
       const groups = [news.digest?.stories || [], news.market || [], ...news.themes.map(t => t.news), ...Object.values(news.per).map(l => l.slice(0, 4))];
       const hasAI = !!(process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY);
-      if (hasAI && (!cache.tried || Date.now() - Date.parse(cache.tried) > 55 * 60000 || FULL)) {
+      if (hasAI && (!cache.tried || cache.lastError || Date.now() - Date.parse(cache.tried) > 55 * 60000 || FULL)) {
         const r = await NewsAI.summarize(groups.flat(), AI.chat, cache, { log });
         cache.tried = new Date().toISOString();
         cache.lastError = r.errs[0] || null;

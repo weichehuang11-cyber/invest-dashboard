@@ -36,19 +36,38 @@ async function claude(messages, timeout) {
   } finally { clearTimeout(t); }
 }
 /** Google Gemini（免費額度；到 aistudio.google.com 申請 API key，設成 GEMINI_API_KEY） */
+let GEM_MODEL = null;
+/** 找出這把金鑰能用的最新 Flash 模型（Google 會淘汰舊模型名稱，所以每次執行自動挑） */
+async function geminiModel(key) {
+  if (process.env.GEMINI_MODEL) return process.env.GEMINI_MODEL;
+  if (GEM_MODEL) return GEM_MODEL;
+  try {
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': key } });
+    const j = await r.json();
+    const names = (j.models || []).filter(m => (m.supportedGenerationMethods || []).includes('generateContent')).map(m => m.name.replace(/^models\//, ''))
+      .filter(n => /^gemini-[\d.]+-flash(-latest)?$|^gemini-flash-latest$/.test(n) && !/lite|image|tts|live|exp|preview|thinking/.test(n));
+    const ver = n => parseFloat((n.match(/gemini-([\d.]+)/) || [])[1] || '0');
+    names.sort((a, b) => ver(b) - ver(a) || (a.includes('latest') ? 1 : -1));
+    GEM_MODEL = names[0] || 'gemini-flash-latest';
+  } catch (_) { GEM_MODEL = 'gemini-flash-latest'; }
+  return GEM_MODEL;
+}
+/** Google Gemini（免費額度；到 aistudio.google.com 申請 API key，設成 GEMINI_API_KEY） */
 async function gemini(messages, json, timeout) {
   const sys = messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const key = process.env.GEMINI_API_KEY;
+  const model = await geminiModel(key);
   const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), timeout);
   try {
     const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, { method: 'POST', signal: ctl.signal,
-      headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY, 'content-type': 'application/json' },
+      headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
       body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents: messages.filter(m => m.role !== 'system').map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
         generationConfig: { temperature: 0.4, ...(json ? { responseMimeType: 'application/json' } : {}) } }) });
     const text = await r.text();
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${text.slice(0, 160)}`);
+    if (!r.ok) { if (r.status === 404) GEM_MODEL = null; throw new Error(`${model} HTTP ${r.status} ${text.slice(0, 160)}`); }
     const out = JSON.parse(text).candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
     if (!out) throw new Error('沒有回覆內容');
+    chat.lastGem = model;
     return out;
   } finally { clearTimeout(t); }
 }
@@ -56,9 +75,9 @@ async function gemini(messages, json, timeout) {
 async function chat(messages, { json = false, timeout = 90000 } = {}) {
   const errs = [];
   if (process.env.ANTHROPIC_API_KEY) { try { const r = await claude(messages, timeout); chat.last = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5'; return r; } catch (e) { errs.push('anthropic: ' + e.message); } }
-  if (process.env.GEMINI_API_KEY) { try { const r = await gemini(messages, json, timeout); chat.last = process.env.GEMINI_MODEL || 'gemini-2.5-flash'; return r; } catch (e) { errs.push('gemini: ' + e.message); } }
+  if (process.env.GEMINI_API_KEY) { try { const r = await gemini(messages, json, timeout); chat.last = chat.lastGem; return r; } catch (e) { errs.push('gemini: ' + e.message); } }
   const token = process.env.GH_MODELS_TOKEN;
-  if (token) for (const [url, model] of [['https://models.github.ai/inference/chat/completions', MODEL]]) { try { const r = await post(url, model, messages, json, token, timeout); chat.last = model; return r; } catch (e) { errs.push(`${new URL(url).host}: ${e.message}`); } }
+  if (token && !process.env.GEMINI_API_KEY && !process.env.ANTHROPIC_API_KEY) for (const [url, model] of [['https://models.github.ai/inference/chat/completions', MODEL]]) { try { const r = await post(url, model, messages, json, token, timeout); chat.last = model; return r; } catch (e) { errs.push(`${new URL(url).host}: ${e.message}`); } }
   throw new Error(errs.join(' ｜ ') || '沒有可用的 AI（請設定 GEMINI_API_KEY 或 ANTHROPIC_API_KEY）');
 }
 
