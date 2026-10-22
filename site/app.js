@@ -155,13 +155,40 @@
     S.local = r; updateLocalPill();
   }
   const localAny = () => S.local.npu || S.local.cpu || S.local.llm;
+  // ── 電腦運算同步：手機（或沒有本機服務的裝置）讀取電腦上傳到私密 Gist 的結果 ──
+  const REMOTE_FILE = 'signal-local.json';
+  const agoMin = m => (m < 1 ? '剛剛' : m < 60 ? `${Math.round(m)} 分鐘前` : m < 1440 ? `${Math.round(m / 60)} 小時前` : `${Math.round(m / 1440)} 天前`);
+  async function loadRemote(force, anyDevice) {
+    const tok = SY.get().token; if (!tok || (localAny() && !anyDevice)) return null;
+    if (S.remote !== undefined && !force && Date.now() - (S.remoteAt || 0) < 5 * 60000) return S.remote;
+    const hd = { Authorization: 'Bearer ' + tok, Accept: 'application/vnd.github+json' };
+    try {
+      let id = LS.get('remoteGist', '');
+      if (!id) {
+        const l = await (await fetch('https://api.github.com/gists?per_page=100', { headers: hd, cache: 'no-store' })).json();
+        const g = (Array.isArray(l) ? l : []).find(x => x.files?.[REMOTE_FILE]); if (!g) { S.remote = null; S.remoteAt = Date.now(); return null; }
+        id = g.id; LS.set('remoteGist', id);
+      }
+      const r = await fetch('https://api.github.com/gists/' + id, { headers: hd, cache: 'no-store' });
+      if (r.status === 404) { LS.set('remoteGist', ''); S.remote = null; return null; }
+      const f = (await r.json()).files?.[REMOTE_FILE]; let txt = f?.content;
+      if (f?.truncated) txt = await (await fetch(f.raw_url, { cache: 'no-store' })).text();
+      const d = JSON.parse(txt); d.age = (Date.now() - Date.parse(d.at)) / 60000; d.fresh = d.age < 45;
+      S.remote = d; S.remoteAt = Date.now();
+      if (d.age < 240 && !localAny()) for (const [k, v] of Object.entries(d.preds || {})) { const p = v.npu || v.cpu; if (p && !S.localPreds[k]) S.localPreds[k] = { d1: p.d1, d5: p.d5, eng: (v.npu ? 'NPU' : 'CPU') + '・電腦' }; }
+      return d;
+    } catch (_) { S.remote = null; S.remoteAt = Date.now(); return null; }
+  }
+  const remoteEngines = d => [d.engines?.npu?.ok && 'NPU', d.engines?.cpu?.ok && 'CPU', d.engines?.llm?.ok && '語言模型'].filter(Boolean);
+  const remoteAI = (txt, d) => `<div class="ai"><b>電腦 AI 解讀</b>${esc(txt)}<span class="small" style="opacity:.7;display:block;margin-top:4px">你的電腦（${esc(d.llm?.model || '本機語言模型')}）・${agoMin((Date.now() - Date.parse(d.llm?.at || d.at)) / 60000)}</span></div>`;
   function updateLocalPill() {
     const el = $('#pill-local'); if (!el) return;
     if (!S.local.checked) return;
     if (S.local.off) { el.className = 'pill'; el.querySelector('.t').textContent = '本機加速已關閉'; return; }
     const on = Object.keys(LOCAL).filter(k => S.local[k]).map(k => LOCAL[k].label);
-    el.className = 'pill ' + (on.length ? 'ok' : '');
-    el.querySelector('.t').textContent = on.length ? `本機加速：${on.join('、')}` : '雲端模式';
+    const R = !on.length && S.remote && S.remote.age < 240 ? S.remote : null;
+    el.className = 'pill ' + (on.length || R?.fresh ? 'ok' : R ? 'warn' : '');
+    el.querySelector('.t').textContent = on.length ? `本機加速：${on.join('、')}` : R ? `電腦運算：${remoteEngines(R).join('、')}・${agoMin(R.age)}` : '雲端模式';
   }
 
   async function localPredict(keys) {
@@ -591,6 +618,8 @@ ${footer()}`;
       }
       const b2 = $('#ai-verdict');
       if (b2 && S.route === 'home') b2.innerHTML = S.llm[key] ? `<div class="ai"><b>本機 AI 解讀</b>${esc(S.llm[key])}</div>` : '';
+    } else if (!S.local.llm && S.route === 'home' && S.remote?.llm?.verdict && S.remote.age < 240) {
+      const box = $('#ai-verdict'); if (box && !box.querySelector('.ai-remote')) box.insertAdjacentHTML('beforeend', remoteAI(S.remote.llm.verdict, S.remote).replace('class="ai"', 'class="ai ai-remote"'));
     }
   }
 
@@ -1005,6 +1034,9 @@ ${footer()}`;
       S.localTried[key] = true;
       await localPredict([key]);
       if (S.localPreds[key] && S.route === 's/' + key) { render(); return; }
+    }
+    if (!S.local.llm && S.remote?.llm?.stocks?.[key] && S.remote.age < 240) {
+      const box = $('#ai-stock'); if (box) box.innerHTML = remoteAI(S.remote.llm.stocks[key], S.remote).replace('class="ai"', 'class="ai" style="background:var(--bg);color:var(--ink2)"');
     }
     if (S.local.llm) {
       const it = S.snap.items[key]; if (!it) return;
@@ -1715,7 +1747,10 @@ ${footer()}`;
       const ms = Math.round(performance.now() - t0);
       R.push(row(!!a?.answer && !a.error, '語言模型（埠 8768）', `模型 ${esc(a?.model || lh.default)}（已安裝：${esc(lh.models.join('、'))}）・回答花 ${(ms / 1000).toFixed(1)} 秒${a?.answer ? `<br>「${esc(a.answer.slice(0, 120))}」` : '・沒有回答'}`));
     }
-    out.innerHTML = R.join('') + `<p class="small muted">全部打勾＝本機加速有在運作；回總覽時右上角會顯示「本機加速：NPU、CPU、語言模型」。</p>`;
+    const rd = await loadRemote(true, true);
+    const rr = rd ? row(rd.fresh, '電腦運算同步（手機用）', `最後上傳 ${agoMin(rd.age)}・${remoteEngines(rd).join('、') || '無'}・預測 ${Object.keys(rd.preds || {}).length} 檔・AI 解讀 ${Object.keys(rd.llm?.stocks || {}).length} 檔${rd.fresh ? '' : '（超過 45 分鐘沒更新：電腦可能關機或睡眠）'}`)
+      : row(false, '電腦運算同步（手機用）', SY.get().token ? '還沒有電腦上傳的結果：在電腦的 local-ai 資料夾執行 setup-phone.bat' : '這台裝置還沒設定 GitHub 權杖（上方「加密備份與同步」）');
+    out.innerHTML = R.join('') + rr + `<p class="small muted">在電腦上：前三項打勾＝本機加速有在運作。在手機上：前三項會打叉是正常的，看最後一項「電腦運算同步」即可。</p>`;
     probeLocal();
   }
   function bindSettings() {
@@ -2058,7 +2093,11 @@ ${footer()}`;
     // 回到這個分頁或 App 時立刻檢查新資料（手機切回來不用等）
     document.addEventListener('visibilitychange', () => { if (!document.hidden && S.snap && Date.now() - Date.parse(S.snap.generatedAt) > 10 * 60000) refreshNow(false); });
     await render();
-    probeLocal().then(() => { if (localAny() && (S.route === 'home' || S.route.startsWith('s/'))) render(); });
+    probeLocal().then(async () => {
+      if (localAny()) { if (S.route === 'home' || S.route.startsWith('s/')) render(); return; }
+      const d = await loadRemote(); updateLocalPill();
+      if (d && (S.route === 'home' || S.route.startsWith('s/'))) render();
+    });
     // 每 5 分鐘檢查一次新資料（分頁在前景時）
     setInterval(() => { if (!document.hidden) refreshNow(false); }, 3 * 60000);
   }
