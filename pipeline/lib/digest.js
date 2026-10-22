@@ -67,7 +67,7 @@ async function headlines(log) {
     if (c) { c.items.push(n); c.sources.add(n.source); } else clusters.push({ lang: n.lang, tk: n.tk, items: [n], sources: new Set([n.source]) });
   }
   const stories = clusters.map(c => { const h = c.items[0]; const age = h.at ? (Date.now() - Date.parse(h.at)) / 3600000 : 12;
-    return { title: h.title, link: h.link, source: h.source, at: h.at, lang: h.lang, cat: h.cat, sources: [...c.sources].slice(0, 5), n: c.items.length, score: c.sources.size * 4 + Math.min(c.items.length, 4) - age / 6 - (h.cat === '其他' ? 3 : 0) }; })
+    return { title: h.title, desc: h.desc, link: h.link, source: h.source, at: h.at, lang: h.lang, cat: h.cat, sources: [...c.sources].slice(0, 5), n: c.items.length, score: c.sources.size * 4 + Math.min(c.items.length, 4) - age / 6 - (h.cat === '其他' ? 3 : 0) }; })
     .sort((a, b) => b.score - a.score);
   log && log(`全球新聞：原始 ${all.length}，可信來源 ${list.length}，事件 ${stories.length}`);
   return stories;

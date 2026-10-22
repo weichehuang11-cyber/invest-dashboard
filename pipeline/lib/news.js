@@ -16,7 +16,9 @@ function parseRss(xml) {
     if (!source && / - [^-]+$/.test(title)) source = title.split(' - ').pop();
     if (source && title.endsWith(' - ' + source)) title = title.slice(0, -(source.length + 3));
     const t = Date.parse(tag('pubDate'));
-    out.push({ title, link: tag('link'), source, at: Number.isFinite(t) ? new Date(t).toISOString() : null });
+    let desc = tag('description').replace(/\s+/g, ' ').trim();
+    if (!desc || desc.replace(/\s/g, '').includes(title.replace(/\s/g, '').slice(0, 20))) desc = '';
+    out.push({ title, link: tag('link'), source, at: Number.isFinite(t) ? new Date(t).toISOString() : null, desc: desc.slice(0, 300) || undefined });
   }
   return out;
 }

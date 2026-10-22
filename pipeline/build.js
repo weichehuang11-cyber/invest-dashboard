@@ -33,6 +33,7 @@ const AI = require('./lib/ai');
 const Conviction = require('./lib/conviction');
 const News = require('./lib/news');
 const Digest = require('./lib/digest');
+const NewsAI = require('./lib/newsai');
 
 const ROOT = path.join(__dirname, '..');
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const [k, v] = a.replace(/^--/, '').split('='); return [k, v ?? true]; }));
@@ -679,7 +680,11 @@ async function main() {
           prev = { at: new Date().toISOString(), model: AI.chat.last || null, ...ai };
           writeJSON(dFile, prev); console.log('DIGEST_CHANGED');
           status.digestAI = 'ok ' + (prev.model || '');
-        } catch (e) { status.digestAI = 'fail: ' + e.message.slice(0, 200); }
+        } catch (e) {
+          status.digestAI = 'fail: ' + e.message.slice(0, 200);
+          // 失敗原因記在狀態檔（原因改變時才存），方便遠端查看
+          if (prev?.lastError !== status.digestAI) { prev = { ...(prev || {}), lastError: status.digestAI, lastErrorAt: new Date().toISOString() }; writeJSON(dFile, prev); console.log('DIGEST_CHANGED'); }
+        }
       }
       news.digest = { at: new Date().toISOString(), quotes: Q, stories: stories.slice(0, 40).map(({ tk, score, ...x }) => x), rule, ai: prev && prev.headline ? prev : null };
       if (FULL && args['archive-daily']) {
@@ -688,6 +693,21 @@ async function main() {
       }
       status.digest = `${Q.filter(q => q.price != null).length} 項行情／${stories.length} 則事件${news.digest.ai ? '／AI' : ''}`;
     } catch (e) { status.digest = 'fail: ' + e.message.slice(0, 200); }
+    // 逐則繁中摘要（有 AI 金鑰時；每小時最多處理一次新新聞，結果快取）
+    try {
+      const cFile = path.join(STATE, 'newsai.json'), cache = readJSON(cFile, { map: {} });
+      const groups = [news.digest?.stories || [], news.market || [], ...news.themes.map(t => t.news), ...Object.values(news.per).map(l => l.slice(0, 4))];
+      const hasAI = !!(process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY);
+      if (hasAI && (!cache.tried || Date.now() - Date.parse(cache.tried) > 55 * 60000 || FULL)) {
+        const r = await NewsAI.summarize(groups.flat(), AI.chat, cache, { log });
+        cache.tried = new Date().toISOString();
+        cache.lastError = r.errs[0] || null;
+        writeJSON(cFile, cache); console.log('DIGEST_CHANGED');
+        status.newsAI = `新增 ${r.added}、待處理 ${r.pending}${r.errs.length ? '、錯誤：' + r.errs[0] : ''}`;
+      }
+      for (const g of groups) NewsAI.attach(g, cache);
+      news.aiSummaries = Object.keys(cache.map || {}).length;
+    } catch (e) { status.newsAI = 'fail: ' + e.message.slice(0, 200); }
     writeJSON(path.join(OUT, 'news.json'), news);
     heavy.newsLast = news;
     status.news = `${news.status.market} 則／題材 ${news.themes.length}／個股 ${news.status.stocks}`;

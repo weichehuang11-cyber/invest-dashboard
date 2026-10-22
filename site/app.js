@@ -241,12 +241,21 @@
   const skLink = (k, n) => `<a href="#/${S.snap?.items?.[k] ? 's' : 'q'}/${encodeURIComponent(k)}">${esc(k)}${n && n !== k ? ' ' + esc(n) : ''}</a>`;
   const toneDot = t => (t > 0 ? '<span class="tone up" title="偏正面">▲</span>' : t < 0 ? '<span class="tone down" title="偏負面">▼</span>' : '');
   const newsAgo = at => { if (!at) return ''; const m = Math.round((Date.now() - Date.parse(at)) / 60000); return m < 60 ? `${Math.max(m, 1)} 分鐘前` : m < 1440 ? `${Math.round(m / 60)} 小時前` : `${Math.round(m / 1440)} 天前`; };
-  const newsLi = n => `<li>${toneDot(n.tone)}<a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a> <span class="small muted">${esc(n.source || '')}${n.at ? '・' + newsAgo(n.at) : ''}</span></li>`;
+  const impBadge = i => (i > 0 ? '<span class="imp up">利多</span>' : i < 0 ? '<span class="imp down">利空</span>' : '');
+  function newsCard(n) {
+    const t = n.zh || n.title, en = !n.zh && /^[\x00-\x7F]+$/.test(n.title);
+    const srcs = n.sources?.length ? n.sources.join('、') : (n.source || '');
+    return `<article class="nc">
+      <div class="nc-t">${impBadge(n.imp ?? 0)}${esc(t)}</div>
+      ${n.sum ? `<p class="nc-s">${esc(n.sum)}</p>` : en ? '<p class="nc-s muted">（英文報導，中文摘要會在下一次整理時補上）</p>' : n.desc ? `<p class="nc-s">${esc(n.desc.slice(0, 90))}</p>` : ''}
+      <div class="nc-m">${(n.mk || []).map(m => `<span class="mk">${esc(m)}</span>`).join('')}<span>${esc(srcs)}${n.n > 1 ? `・${n.n} 家報導` : ''}${n.at ? '・' + newsAgo(n.at) : ''}</span><a href="${esc(n.link)}" target="_blank" rel="noopener">原文 ›</a></div>
+    </article>`;
+  }
   function themeCard(t, full) {
     const st = t.stocks.slice(0, full ? 10 : 6);
     return `<div class="theme"><div class="th-hd"><b>${esc(t.name)}</b>${t.auto ? '<span class="pill">新聞自動抓到</span>' : ''}<span class="small muted">${t.count} 則新聞${isNum(t.avgChg) ? `・相關股今日平均 <span class="${cls(t.avgChg)}">${pct(t.avgChg)}</span>` : ''}${t.tone ? `・語氣 ${t.tone > 0 ? '<span class="up">偏多</span>' : '<span class="down">偏空</span>'}` : ''}</span></div>
       ${st.length ? `<div class="th-stk">${st.map(x => `<span class="stk${x.w ? ' w' : ''}">${skLink(x.key, x.name)}${isNum(x.p) ? ` <span class="${cls(x.p)}">${pct(x.p, 1)}</span>` : ''}${full && isNum(x.r20) ? ` <span class="small muted">20日 ${pct(x.r20, 0)}</span>` : ''}</span>`).join('')}</div>` : '<p class="small muted" style="margin:4px 0">新聞標題沒有點名個股</p>'}
-      ${full ? `<ul class="news">${t.news.map(newsLi).join('')}</ul>` : ''}</div>`;
+      ${full ? `<div class="ncl">${t.news.slice(0, 2).map(newsCard).join('')}</div>` : ''}</div>`;
   }
   function viewThemesMini(N) {
     if (!N?.themes?.length) return `<div class="hd"><h2 id="th-h">熱門題材</h2></div><p class="empty">還沒有新聞資料，下一次更新後出現。</p>`;
@@ -278,20 +287,24 @@
   }
   function viewDigest(D) {
     if (!D) return '';
+    const isEn = x => !x.zh && /^[\x00-\x7F]+$/.test(x.title);
+    // 有中文摘要時，只列已翻成中文的新聞（全部繁體中文）
+    const st = D.stories.some(x => x.zh) ? D.stories.filter(x => !isEn(x)) : D.stories;
+    D = { ...D, stories: st };
     const cats = [...new Set(D.stories.map(x => x.cat))];
-    return `<section class="card" aria-labelledby="dgf-h"><div class="hd"><h1 id="dgf-h" style="margin:0;font-size:20px">全球市場快報</h1><span class="note">只收有公信力的財經媒體・同一事件多家報導排越前面</span></div>
+    return `<section class="card" aria-labelledby="dgf-h"><div class="hd"><h1 id="dgf-h" style="margin:0;font-size:20px">全球市場快報</h1><span class="note">路透、彭博、CNBC、華爾街日報、中央社、經濟日報等</span></div>
   <div class="dg">${dgSummary(D, false)}</div>
-  ${dgQuotes(D.quotes)}
 </section>
-<section class="card" aria-labelledby="dgs-h"><div class="hd"><h2 id="dgs-h">全球頭條</h2><span class="note">近 36 小時</span></div>
-  <div class="segs" id="dg-cat"><button type="button" class="btn sm act" data-c="">全部</button>${cats.map(c => `<button type="button" class="btn sm" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>
-  <ul class="news" id="dg-list">${D.stories.map(x => `<li data-c="${esc(x.cat)}"><span class="pill">${esc(x.cat)}</span>${x.lang === 'en' ? '<span class="pill">EN</span>' : ''}<a href="${esc(x.link)}" target="_blank" rel="noopener">${esc(x.title)}</a> <span class="small muted">${esc(x.sources.join('、'))}${x.n > 1 ? `・<b>${x.n} 則報導</b>` : ''}${x.at ? '・' + newsAgo(x.at) : ''}</span></li>`).join('')}</ul>
+<section class="card fold all" data-fold="dgq" aria-labelledby="dgq-h"><div class="hd"><h2 id="dgq-h">全球行情</h2><span class="note">股、債、匯、原物料</span></div>${dgQuotes(D.quotes)}</section>
+<section class="card" aria-labelledby="dgs-h"><div class="hd"><h2 id="dgs-h">重點新聞</h2><span class="note">每則附繁中摘要・多家媒體同時報導的排前面</span></div>
+  <div class="segs" id="dg-cat"><button type="button" class="btn sm act" data-c="">重點</button>${cats.map(c => `<button type="button" class="btn sm" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+  <div class="ncl" id="dg-list">${D.stories.map((x, i) => `<div data-c="${esc(x.cat)}" data-i="${i}"${i >= 10 ? ' hidden' : ''}>${newsCard(x)}</div>`).join('')}</div>
 </section>`;
   }
   function bindDigest() {
     const seg = $('#dg-cat'); if (!seg) return;
     seg.onclick = e => { const b = e.target.closest('button'); if (!b) return; seg.querySelectorAll('button').forEach(x => x.classList.toggle('act', x === b));
-      document.querySelectorAll('#dg-list li').forEach(li => { li.hidden = !!b.dataset.c && li.dataset.c !== b.dataset.c; }); };
+      document.querySelectorAll('#dg-list > div').forEach(li => { li.hidden = b.dataset.c ? li.dataset.c !== b.dataset.c : +li.dataset.i >= 10; }); };
   }
 
   function viewNews(N) {
@@ -301,20 +314,20 @@
 ${viewDigest(N.digest)}
 <section class="card" aria-labelledby="nw-h"><div class="hd"><h2 id="nw-h">熱門題材與相關個股（台股）</h2><span class="note">${esc(newsAgo(N.at))}更新・題材依新聞則數、相關股今日漲跌與標題語氣排序</span></div>
   <div class="themes full">${N.themes.map(t => themeCard(t, true)).join('') || '<p class="empty">目前沒有明顯題材</p>'}</div>
-  <p class="small muted">題材字典在 config/themes.json，可自行增減；新聞標題出現「XX概念股／XX族群／XX供應鏈」兩次以上會自動列為新題材。相關個股＝題材新聞標題裡點名的股票。</p></section>
-<section class="card" aria-labelledby="mv-h"><div class="hd"><h2 id="mv-h">台股今日強勢股（漲幅 ≥5%）</h2><span class="note">資金實際在追的股票</span></div>
-    ${mv.length ? `<div class="th-stk">${mv.map(x => `<span class="stk">${skLink(x.key, x.name)} <span class="${cls(x.p)}">${pct(x.p, 1)}</span></span>`).join('')}</div>` : '<p class="empty">今天沒有</p>'}</section>
-  <section class="card" aria-labelledby="tr-h"><div class="hd"><h2 id="tr-h">美股熱搜</h2><span class="note">Yahoo 財經</span></div>
-    ${tr.length ? `<div class="th-stk">${tr.map(k => `<span class="stk">${skLink(k)}</span>`).join('')}</div>` : '<p class="empty">暫無</p>'}</section>
-<section class="card fold all" data-fold="mnews" aria-labelledby="mn-h"><div class="hd"><h2 id="mn-h">台股相關新聞</h2><span class="note">Google 新聞・最新在前</span></div>
-  <ul class="news">${(N.market || []).map(newsLi).join('') || '<li class="empty">暫無</li>'}</ul></section>
+  <p class="small muted">相關個股＝題材新聞裡點名的股票；外框標示的是你的觀察清單。</p></section>
+<section class="card" aria-labelledby="mv-h"><div class="hd"><h2 id="mv-h">市場在追的股票</h2><span class="note">台股漲幅 ≥5%・美股 Yahoo 熱搜</span></div>
+  ${mv.length ? `<div class="small muted">台股</div><div class="th-stk">${mv.map(x => `<span class="stk">${skLink(x.key, x.name)} <span class="${cls(x.p)}">${pct(x.p, 1)}</span></span>`).join('')}</div>` : ''}
+  ${tr.length ? `<div class="small muted">美股</div><div class="th-stk">${tr.map(k => `<span class="stk">${skLink(k)}</span>`).join('')}</div>` : ''}
+  ${!mv.length && !tr.length ? '<p class="empty">暫無</p>' : ''}</section>
+<section class="card fold all" data-fold="mnews" aria-labelledby="mn-h"><div class="hd"><h2 id="mn-h">台股新聞</h2><span class="note">最新在前・附摘要</span></div>
+  <div class="ncl">${(N.market || []).filter(n => n.sum || !/^[\x00-\x7F]+$/.test(n.title)).slice(0, 15).map(newsCard).join('') || '<p class="empty">暫無</p>'}</div></section>
 ${footer()}`;
   }
   async function stockNews(key) {
     const N = await loadNews(), box = $('#s-news'); if (!box || S.route !== 's/' + key) return;
     const list = N?.per?.[key] || [], th = (N?.themes || []).filter(t => t.stocks.some(x => x.key === key));
     box.innerHTML = `<div class="hd"><h2 id="sn-h">相關新聞</h2><span class="note">近 3 天${th.length ? '・所屬熱門題材：' + th.map(t => `<b>${esc(t.name)}</b>`).join('、') : ''}</span></div>
-      <div>${list.length ? `<ul class="news">${list.map(newsLi).join('')}</ul>` : '<p class="empty">近 3 天沒有找到新聞</p>'}</div>`;
+      <div>${list.length ? `<div class="ncl">${list.slice(0, 8).map(newsCard).join('')}</div>` : '<p class="empty">近 3 天沒有找到新聞</p>'}</div>`;
     box.hidden = false; setupFolds();
   }
 
