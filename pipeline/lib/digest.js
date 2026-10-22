@@ -14,6 +14,13 @@ const CREDIBLE = /Reuters|路透|Bloomberg|彭博|CNBC|Wall Street Journal|WSJ|�
 
 const Q_ZH = ['國際股市', '美股 收盤', '美債 殖利率', '聯準會', '油價', '金價', '美元 匯率', '日股 OR 日經指數', '陸股 OR 港股', '歐股', '央行 利率', '關稅 OR 地緣政治'];
 const Q_EN = ['stock market', 'Wall Street stocks', 'Treasury yields', 'Federal Reserve', 'oil prices', 'gold prices', 'dollar currencies', 'Asian markets', 'European stocks', 'China economy'];
+const CNYES = { headline: '頭條', wd_stock: '國際股', forex: '外匯', future: '期貨原物料' };
+const stripHtml = h => String(h || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
+async function cnyes(cat, limit = 30) {
+  const j = await get(`https://api.cnyes.com/media/api/v1/newslist/category/${cat}?page=1&limit=${limit}`, { timeout: 15000, retries: 1, headers: { Origin: 'https://news.cnyes.com', Referer: 'https://news.cnyes.com/' } });
+  return (j?.items?.data || []).map(n => ({ title: stripHtml(n.title), link: `https://news.cnyes.com/news/id/${n.newsId}`, source: '鉅亨網', at: n.publishAt ? new Date(n.publishAt * 1000).toISOString() : null,
+    desc: stripHtml(n.summary).slice(0, 300) || undefined, body: stripHtml(n.content).slice(0, 1500) || undefined, lang: 'zh' }));
+}
 const CNBC = { 'CNBC 頭條': 100003114, 'CNBC 市場': 20409666, 'CNBC 經濟': 20910258 };
 
 const CATS = [
@@ -55,6 +62,7 @@ async function headlines(log) {
   const all = [];
   for (const q of Q_ZH) { try { all.push(...(await gnews(`${q} (${ZH_SITES})`, true)).map(x => ({ ...x, lang: 'zh' }))); } catch (_) {} }
   for (const q of Q_EN) { try { all.push(...(await gnews(`${q} (${EN_SITES})`, false)).map(x => ({ ...x, lang: 'en' }))); } catch (_) {} }
+  for (const c of Object.keys(CNYES)) { try { all.push(...await cnyes(c)); } catch (e) { log && log('鉅亨 API 失敗', c, e.message); } }
   for (const [src, id] of Object.entries(CNBC)) { try { const r = parseRss(await get(`https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=${id}`, { as: 'text', timeout: 15000, retries: 1 })); all.push(...r.map(x => ({ ...x, source: x.source || 'CNBC', lang: 'en' }))); } catch (_) {} }
   const since = Date.now() - 36 * 3600000, seen = new Set();
   const NOISE = /速報|快訊|Market Talk|Roundup|盤中|個股|目標價|EPS預估|漲停|跌停|\(\d{4}(-TW)?\)|Podcast|Live:|LIVE|Quiz|Opinion|觀點|專欄/i;
@@ -67,7 +75,9 @@ async function headlines(log) {
     if (c) { c.items.push(n); c.sources.add(n.source); } else clusters.push({ lang: n.lang, tk: n.tk, items: [n], sources: new Set([n.source]) });
   }
   const stories = clusters.map(c => { const h = c.items[0]; const age = h.at ? (Date.now() - Date.parse(h.at)) / 3600000 : 12;
-    return { title: h.title, desc: h.desc, link: h.link, source: h.source, at: h.at, lang: h.lang, cat: h.cat, sources: [...c.sources].slice(0, 5), n: c.items.length, score: c.sources.size * 4 + Math.min(c.items.length, 4) - age / 6 - (h.cat === '其他' ? 3 : 0) }; })
+    const body = c.items.map(x => x.body).find(Boolean), desc = h.desc || c.items.map(x => x.desc).find(Boolean);
+    const alt = c.items.slice(1, 6).map(x => x.title + (x.desc ? '：' + x.desc.slice(0, 120) : ''));
+    return { title: h.title, desc, body, alt: alt.length ? alt : undefined, link: h.link, source: h.source, at: h.at, lang: h.lang, cat: h.cat, sources: [...c.sources].slice(0, 5), n: c.items.length, score: c.sources.size * 4 + Math.min(c.items.length, 4) - age / 6 - (h.cat === '其他' ? 3 : 0) }; })
     .sort((a, b) => b.score - a.score);
   log && log(`全球新聞：原始 ${all.length}，可信來源 ${list.length}，事件 ${stories.length}`);
   return stories;
@@ -118,4 +128,4 @@ async function aiSummary(chat, Q, stories) {
   return { headline: String(j.headline || ''), mood: String(j.mood || ''), bullets: (j.bullets || []).map(String).slice(0, 8), conclusion: String(j.conclusion || ''), watch: (j.watch || []).map(String).slice(0, 4) };
 }
 
-module.exports = { quotes, headlines, ruleSummary, aiSummary, catOf, GLOBAL };
+module.exports = { cnyes, quotes, headlines, ruleSummary, aiSummary, catOf, GLOBAL };

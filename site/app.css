@@ -460,19 +460,32 @@ ul.news .tone { font-size: 10px; margin-right: 4px; }
 .ltr { display: grid; grid-template-columns: 18px auto 1fr; gap: 4px 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line2); }
 .ltr > .small { grid-column: 2 / -1; line-height: 1.5; }
 /* 新聞卡片（逐則摘要） */
-.ncl { display: flex; flex-direction: column; gap: 0; }
+.ncl { display: flex; flex-direction: column; gap: 10px; }
+.ncl.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; align-items: start; }
 .ncl > div[hidden] { display: none; }
-.nc { padding: 10px 0; border-bottom: 1px solid var(--line2); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.ncl > :last-child .nc, .ncl > .nc:last-child { border-bottom: 0; }
-.nc-t { font-weight: 600; font-size: 15px; line-height: 1.45; overflow-wrap: anywhere; }
-.nc-s { margin: 0; font-size: 14px; line-height: 1.55; color: var(--ink2); overflow-wrap: anywhere; }
-.nc-m { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 12px; color: var(--mute); }
-.nc-m a { margin-left: auto; white-space: nowrap; }
-.nc .mk { background: var(--bg); border-radius: 4px; padding: 1px 6px; color: var(--ink2); }
-.imp { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-right: 6px; vertical-align: 2px; }
+.nc { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px 10px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow: hidden; }
+.nc::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--line); }
+.nc.pos::before { background: var(--up); } .nc.neg::before { background: var(--down); }
+.nc-top { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--mute); }
+.nc-cat { font-weight: 600; color: var(--acc); }
+.nc-time { margin-left: auto; white-space: nowrap; }
+.nc-t { margin: 0; font-size: 16px; font-weight: 700; line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
+.nc-s { margin: 0; font-size: 14px; line-height: 1.65; color: var(--ink2); overflow-wrap: anywhere; }
+.nc-k { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; font-size: 13.5px; line-height: 1.5; color: var(--ink); }
+.nc-k li { position: relative; padding-left: 14px; }
+.nc-k li::before { content: ''; position: absolute; left: 3px; top: .62em; width: 5px; height: 5px; border-radius: 50%; background: var(--acc); }
+.nc-w { font-size: 13px; line-height: 1.55; background: var(--bg); border-radius: 8px; padding: 6px 10px; color: var(--ink2); }
+.nc-w b { color: var(--ink); margin-right: 6px; font-size: 12px; }
+.nc-m { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; font-size: 12px; color: var(--mute); padding-top: 2px; }
+.nc .mk { background: color-mix(in srgb, var(--acc) 9%, #fff); color: var(--acc); border-radius: 99px; padding: 1px 8px; font-weight: 500; }
+.nc-src { min-width: 0; }
+.nc-o { margin-left: auto; white-space: nowrap; font-weight: 600; text-decoration: none; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--ink2); }
+.nc-o:hover { border-color: var(--acc); color: var(--acc); }
+.imp { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px; }
 .imp.up { background: color-mix(in srgb, var(--up) 12%, #fff); color: var(--up); }
 .imp.down { background: color-mix(in srgb, var(--down) 12%, #fff); color: var(--down); }
-.theme .ncl { border-top: 1px dashed var(--line2); margin-top: 2px; }
+@media (max-width: 640px) { .ncl.grid { grid-template-columns: 1fr; } .nc { padding: 11px 12px 9px 14px; } .nc-t { font-size: 15.5px; } }
+.theme .ncl { margin-top: 6px; }
 .th-rows { display: flex; flex-direction: column; gap: 6px; }
 .th-row { display: grid; grid-template-columns: auto auto 1fr; gap: 4px 10px; align-items: baseline; }
 @media (max-width: 640px) { .th-row { grid-template-columns: auto 1fr; } .th-row > .small:last-child { grid-column: 1 / -1; color: var(--ink2); } }

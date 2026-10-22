@@ -667,9 +667,10 @@ async function main() {
     const twU = U.filter(u => u.m === 'tw' && /^\d{4}$/.test(u.k) && Number.isFinite(u.p));
     news.twMovers = twU.filter(u => u.p >= 5).sort((a, b) => b.p - a.p).slice(0, 20).map(u => ({ key: u.k, name: u.n, p: u.p, r20: u.r20 ?? null }));
     // 全球市場快報（可信媒體＋全球行情；AI 摘要每 3 小時或收盤後更新一次）
+    let fullStories = [];
     try {
       const Q = await Digest.quotes(yf).catch(e => { log('全球行情失敗', e.message); return []; });
-      const stories = await Digest.headlines(log);
+      const stories = await Digest.headlines(log); fullStories = stories;
       const rule = Digest.ruleSummary(Q, stories);
       const dFile = path.join(STATE, 'digest.json');
       let prev = readJSON(dFile, null);
@@ -686,7 +687,7 @@ async function main() {
           if (prev?.lastError !== status.digestAI) { prev = { ...(prev || {}), lastError: status.digestAI, lastErrorAt: new Date().toISOString() }; writeJSON(dFile, prev); console.log('DIGEST_CHANGED'); }
         }
       }
-      news.digest = { at: new Date().toISOString(), quotes: Q, stories: stories.slice(0, 40).map(({ tk, score, ...x }) => x), rule, ai: prev && prev.headline ? prev : null };
+      news.digest = { at: new Date().toISOString(), quotes: Q, stories: stories.slice(0, 40).map(({ tk, score, body, alt, ...x }) => x), rule, ai: prev && prev.headline ? prev : null };
       if (FULL && args['archive-daily']) {
         const day = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
         writeJSON(path.join(path.resolve(String(args['archive-daily'])), 'digest', day.slice(0, 4), `${day}-${fullTW && !fullUS ? 'tw' : fullUS && !fullTW ? 'us' : 'all'}.json`), news.digest);
@@ -696,17 +697,20 @@ async function main() {
     // 逐則繁中摘要（有 AI 金鑰時；每小時最多處理一次新新聞，結果快取）
     try {
       const cFile = path.join(STATE, 'newsai.json'), cache = readJSON(cFile, { map: {} });
-      const groups = [news.digest?.stories || [], news.market || [], ...news.themes.map(t => t.news), ...Object.values(news.per).map(l => l.slice(0, 4))];
+      try { const tw = await Digest.cnyes('tw_stock', 25); const seenT = new Set(news.market.map(x => x.title.replace(/\s/g, '').slice(0, 30))); news.market = [...tw.filter(x => !seenT.has(x.title.replace(/\s/g, '').slice(0, 30))), ...news.market].sort((a, b) => (b.at || '').localeCompare(a.at || '')).slice(0, 50); } catch (e) { log('鉅亨台股新聞失敗', e.message); }
+      const groups = [fullStories.slice(0, 40), news.market || [], ...news.themes.map(t => t.news), ...Object.values(news.per).map(l => l.slice(0, 4))];
       const hasAI = !!(process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY);
       let ranAI = false;
       if (hasAI && (!cache.tried || cache.lastError || Date.now() - Date.parse(cache.tried) > 55 * 60000 || FULL)) {
         const r = await NewsAI.summarize(groups.flat(), AI.chat, cache, { log });
         cache.tried = new Date().toISOString(); ranAI = true;
+        if (process.env.GEMINI_API_KEY) { const d = await NewsAI.deepen(fullStories, AI.grounded, cache, { log }); status.newsDeep = d.err ? 'fail: ' + d.err : `查證 ${d.added} 則`; }
         cache.lastError = r.errs[0] || null;
         writeJSON(cFile, cache); console.log('DIGEST_CHANGED');
         status.newsAI = `新增 ${r.added}、待處理 ${r.pending}${r.errs.length ? '、錯誤：' + r.errs[0] : ''}`;
       }
       for (const g of groups) NewsAI.attach(g, cache);
+      NewsAI.attach(news.digest?.stories, cache);
       if (ranAI || (hasAI && !cache.themes)) {
         const tr = await NewsAI.themeSummaries(news.themes, AI.chat, cache, { log });
         if (tr.added) { writeJSON(cFile, cache); console.log('DIGEST_CHANGED'); }
@@ -715,6 +719,7 @@ async function main() {
       NewsAI.attachThemes(news.themes, cache);
       news.aiSummaries = Object.keys(cache.map || {}).length;
     } catch (e) { status.newsAI = 'fail: ' + e.message.slice(0, 200); }
+    for (const n of news.market || []) { delete n.body; delete n.alt; }
     writeJSON(path.join(OUT, 'news.json'), news);
     heavy.newsLast = news;
     status.news = `${news.status.market} 則／題材 ${news.themes.length}／個股 ${news.status.stocks}`;

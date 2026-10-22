@@ -242,13 +242,19 @@
   const toneDot = t => (t > 0 ? '<span class="tone up" title="偏正面">▲</span>' : t < 0 ? '<span class="tone down" title="偏負面">▼</span>' : '');
   const newsAgo = at => { if (!at) return ''; const m = Math.round((Date.now() - Date.parse(at)) / 60000); return m < 60 ? `${Math.max(m, 1)} 分鐘前` : m < 1440 ? `${Math.round(m / 60)} 小時前` : `${Math.round(m / 1440)} 天前`; };
   const impBadge = i => (i > 0 ? '<span class="imp up">利多</span>' : i < 0 ? '<span class="imp down">利空</span>' : '');
-  function newsCard(n) {
+  function newsCard(n, opt = {}) {
     const t = n.zh || n.title, en = !n.zh && /^[\x00-\x7F]+$/.test(n.title);
-    const srcs = n.sources?.length ? n.sources.join('、') : (n.source || '');
-    return `<article class="nc">
-      <div class="nc-t">${impBadge(n.imp ?? 0)}${esc(t)}</div>
-      ${n.sum ? `<p class="nc-s">${esc(n.sum)}</p>` : en ? '<p class="nc-s muted">（英文報導，中文摘要會在下一次整理時補上）</p>' : n.desc ? `<p class="nc-s">${esc(n.desc.slice(0, 90))}</p>` : ''}
-      <div class="nc-m">${(n.mk || []).map(m => `<span class="mk">${esc(m)}</span>`).join('')}<span>${esc(srcs)}${n.n > 1 ? `・${n.n} 家報導` : ''}${n.at ? '・' + newsAgo(n.at) : ''}</span><a href="${esc(n.link)}" target="_blank" rel="noopener">原文 ›</a></div>
+    const src = n.sources?.length ? n.sources : n.source ? [n.source] : [];
+    const srcTxt = src.length > 2 ? `${src.slice(0, 2).join('、')} 等 ${n.n || src.length} 家` : src.join('、') + (n.n > 1 && src.length < n.n ? ` 等 ${n.n} 則` : '');
+    const basis = n.ss === 'search' ? '已查證' : n.ss === 'body' ? '依內文' : n.ss === 'title' ? '依標題' : '';
+    const impCls = n.imp > 0 ? 'pos' : n.imp < 0 ? 'neg' : 'neu';
+    return `<article class="nc ${impCls}">
+      <div class="nc-top">${n.cat && !opt.noCat ? `<span class="nc-cat">${esc(n.cat)}</span>` : ''}${impBadge(n.imp ?? 0)}<span class="nc-time">${n.at ? newsAgo(n.at) : ''}</span></div>
+      <h3 class="nc-t">${esc(t)}</h3>
+      ${n.sum ? `<p class="nc-s">${esc(n.sum)}</p>` : en ? '<p class="nc-s muted">英文報導，中文摘要會在下一次整理時補上。</p>' : n.desc ? `<p class="nc-s">${esc(n.desc.slice(0, 110))}</p>` : ''}
+      ${n.kp?.length ? `<ul class="nc-k">${n.kp.map(k => `<li>${esc(k)}</li>`).join('')}</ul>` : ''}
+      ${n.why ? `<div class="nc-w"><b>投資意義</b>${esc(n.why)}</div>` : ''}
+      <div class="nc-m">${(n.mk || []).map(m => `<span class="mk">${esc(m)}</span>`).join('')}<span class="nc-src">${esc(srcTxt)}${basis ? `・${basis}` : ''}</span><a class="nc-o" href="${esc(n.link)}" target="_blank" rel="noopener" aria-label="開啟原文">原文 ↗</a></div>
     </article>`;
   }
   function themeCard(t, full) {
@@ -303,7 +309,7 @@
 <section class="card fold all" data-fold="dgq" aria-labelledby="dgq-h"><div class="hd"><h2 id="dgq-h">全球行情</h2><span class="note">股、債、匯、原物料</span></div>${dgQuotes(D.quotes)}</section>
 <section class="card" aria-labelledby="dgs-h"><div class="hd"><h2 id="dgs-h">重點新聞</h2><span class="note">每則附繁中摘要・多家媒體同時報導的排前面</span></div>
   <div class="segs" id="dg-cat"><button type="button" class="btn sm act" data-c="">重點</button>${cats.map(c => `<button type="button" class="btn sm" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>
-  <div class="ncl" id="dg-list">${D.stories.map((x, i) => `<div data-c="${esc(x.cat)}" data-i="${i}"${i >= 10 ? ' hidden' : ''}>${newsCard(x)}</div>`).join('')}</div>
+  <div class="ncl grid" id="dg-list">${D.stories.map((x, i) => `<div data-c="${esc(x.cat)}" data-i="${i}"${i >= 10 ? ' hidden' : ''}>${newsCard(x)}</div>`).join('')}</div>
 </section>`;
   }
   function bindDigest() {
@@ -325,7 +331,7 @@ ${viewDigest(N.digest)}
   ${tr.length ? `<div class="small muted">美股</div><div class="th-stk">${tr.map(k => `<span class="stk">${skLink(k)}</span>`).join('')}</div>` : ''}
   ${!mv.length && !tr.length ? '<p class="empty">暫無</p>' : ''}</section>
 <section class="card fold all" data-fold="mnews" aria-labelledby="mn-h"><div class="hd"><h2 id="mn-h">台股新聞</h2><span class="note">最新在前・附摘要</span></div>
-  <div class="ncl">${(N.market || []).filter(n => n.sum || !/^[\x00-\x7F]+$/.test(n.title)).slice(0, 15).map(newsCard).join('') || '<p class="empty">暫無</p>'}</div></section>
+  <div class="ncl grid">${(N.market || []).filter(n => n.sum || !/^[\x00-\x7F]+$/.test(n.title)).slice(0, 15).map(newsCard).join('') || '<p class="empty">暫無</p>'}</div></section>
 ${footer()}`;
   }
   async function stockNews(key) {

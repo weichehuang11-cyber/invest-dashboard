@@ -71,6 +71,23 @@ async function gemini(messages, json, timeout) {
     return out;
   } finally { clearTimeout(t); }
 }
+/** Gemini＋Google 搜尋（讓 AI 自己查證新聞內容再摘要）；只回傳文字 */
+async function grounded(prompt, sys, timeout = 120000) {
+  const key = process.env.GEMINI_API_KEY; if (!key) throw new Error('沒有 GEMINI_API_KEY');
+  const model = await geminiModel(key);
+  for (let k = 0; k < 3; k++) {
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), timeout);
+    try {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, { method: 'POST', signal: ctl.signal,
+        headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents: [{ role: 'user', parts: [{ text: prompt }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0.3 } }) });
+      const text = await r.text();
+      if (!r.ok) { if (/^(429|500|503)$/.test(String(r.status)) && k < 2) { await new Promise(z => setTimeout(z, 8000 * (k + 1))); continue; } throw new Error(`${model} HTTP ${r.status} ${text.slice(0, 160)}`); }
+      return JSON.parse(text).candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+    } finally { clearTimeout(t); }
+  }
+  throw new Error('Gemini 忙碌');
+}
 /** 依序嘗試：Anthropic → Gemini → GitHub Models（有哪個金鑰就用哪個） */
 async function chat(messages, { json = false, timeout = 90000 } = {}) {
   const errs = [];
@@ -107,4 +124,4 @@ ${facts}
   return { model: chat.last || MODEL, at: new Date().toISOString(), verdict: String(j.verdict || '').trim(), stocks: Object.fromEntries(Object.entries(j.stocks || {}).map(([k, v]) => [String(k).toUpperCase(), String(v).trim()])) };
 }
 
-module.exports = { chat, commentary, MODEL };
+module.exports = { chat, grounded, commentary, MODEL };
