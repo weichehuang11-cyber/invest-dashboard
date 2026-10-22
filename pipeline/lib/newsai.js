@@ -104,7 +104,7 @@ function attachThemes(themes, cache) {
     t.sum = r.sum || undefined; t.phase = r.phase || undefined;
     for (const s of t.stocks) if (r.stocks?.[s.key]) s.why = r.stocks[s.key];
     // AI 判斷和題材沒有實際關聯的（只是剛好出現在同一則綜合新聞）就拿掉
-    t.stocks = t.stocks.filter(s => !(s.why && /未說明|無直接關聯|無關/.test(s.why) && (s.mentions || 0) < 2));
+    t.stocks = t.stocks.filter(s => !(s.why && /未說明|無直接關聯|無關|未提及/.test(s.why)));
   }
   return themes;
 }

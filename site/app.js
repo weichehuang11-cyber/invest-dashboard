@@ -238,7 +238,9 @@
     try { S.news = await getJSON(S.base + 'news.json'); S.newsAt = Date.now(); } catch (_) { S.news = S.news || null; }
     return S.news;
   }
-  const skLink = (k, n) => `<a href="#/${S.snap?.items?.[k] ? 's' : 'q'}/${encodeURIComponent(k)}">${esc(k)}${n && n !== k ? ' ' + esc(n) : ''}</a>`;
+  // 美股公司名去掉 Inc.／Corporation 等字尾並限制長度，避免撐破版面
+  const shortName = n => { let x = String(n || '').replace(/,?\s+(Inc\.?|Incorporated|Corporation|Corp\.?|Company|Co\.?|Holdings?|Ltd\.?|plc|N\.V\.|S\.A\.|Class [A-C]|Common Stock|Ordinary Shares)\b\.?/gi, '').replace(/\s+/g, ' ').trim(); return x.length > 14 ? x.slice(0, 13) + '…' : x; };
+  const skLink = (k, n) => { const nm = n && n !== k ? shortName(n) : ''; return `<a href="#/${S.snap?.items?.[k] ? 's' : 'q'}/${encodeURIComponent(k)}" title="${esc(n || k)}">${esc(k)}${nm ? ' ' + esc(nm) : ''}</a>`; };
   const toneDot = t => (t > 0 ? '<span class="tone up" title="偏正面">▲</span>' : t < 0 ? '<span class="tone down" title="偏負面">▼</span>' : '');
   const newsAgo = at => { if (!at) return ''; const m = Math.round((Date.now() - Date.parse(at)) / 60000); return m < 60 ? `${Math.max(m, 1)} 分鐘前` : m < 1440 ? `${Math.round(m / 60)} 小時前` : `${Math.round(m / 1440)} 天前`; };
   const impBadge = i => (i > 0 ? '<span class="imp up">利多</span>' : i < 0 ? '<span class="imp down">利空</span>' : '');

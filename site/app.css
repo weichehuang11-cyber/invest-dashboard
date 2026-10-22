@@ -436,7 +436,7 @@ td.hc-cell { background: #E4F4EC; }
 .th-hd b { font-size: 15px; }
 .theme .pill { font-size: 11px; padding: 1px 6px; border-radius: 99px; background: var(--bg, #F3F5F8); color: var(--mute, #6B7280); }
 .th-stk { display: flex; flex-wrap: wrap; gap: 6px; }
-.stk { font-size: 13px; padding: 3px 8px; border-radius: 6px; background: var(--bg, #F3F5F8); white-space: nowrap; }
+.stk { font-size: 13px; padding: 3px 8px; border-radius: 6px; background: var(--bg, #F3F5F8); max-width: 100%; overflow-wrap: anywhere; }
 .stk.w { outline: 1px solid var(--acc); }
 ul.news { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 ul.news li { font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
@@ -520,3 +520,8 @@ ul.news .tone { font-size: 10px; margin-right: 4px; }
   .row > .wide, .row > .side { flex-basis: 100%; }
   .themes.full { grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); }
 }
+
+/* 題材卡片內容一律不超出卡片 */
+.theme, .th-rows, .th-row, .th-stk { min-width: 0; max-width: 100%; }
+.th-row > * { min-width: 0; }
+.th-stk .stk { white-space: normal; }
