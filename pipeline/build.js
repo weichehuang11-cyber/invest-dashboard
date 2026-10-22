@@ -599,6 +599,7 @@ async function main() {
     if (fullUS && tpeHour >= 4 && tpeHour < 13) fullAt.us = tpeDay;
     writeJSON(path.join(STATE, 'last.json'), { verdict: { level: verdict.level, at: nowIso }, signals: { ...(last.signals || {}), ...signals }, at: nowIso, status, fullAt });
     writeJSON(path.join(STATE, 'heavy.json'), heavy);
+    writeJSON(path.join(STATE, 'conviction.json'), { at: nowIso, conviction, high: Object.values(items).filter(i => i.conv?.high?.length).map(i => ({ key: i.key, bucket: i.conv.bucket, score: i.conv.score, high: i.conv.high })) });
     writeJSON(path.join(STATE, 'predictions.json'), predictions);
     log('狀態已更新', STATE);
   }
