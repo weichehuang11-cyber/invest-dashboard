@@ -1936,6 +1936,30 @@ ${footer()}`;
     const body = `${name ? `名稱：${name}\n` : ''}\n（直接按「Submit new issue」送出即可，系統會自動${remove ? '移除' : '加入'}並在約 3～5 分鐘後更新網站。只有專案擁有者送出的才會生效。）`;
     return `https://github.com/${owner}/${repo}/issues/new?title=${encodeURIComponent(t)}&body=${encodeURIComponent(body)}`;
   }
+  /** 快速檢視走勢圖：收盤線＋20 日線、最高最低標示、起訖日期 */
+  function quickChart(ser, dates) {
+    const pts = ser.map((v, i) => ({ v, i, d: dates?.[i] })).filter(p => isNum(p.v)); if (pts.length < 6) return '';
+    const W = 600, H = 210, L = 8, R = 92, T = 28, B = 34, n = ser.length;
+    const ma = ser.map((_, i) => { if (i < 19) return null; const w = ser.slice(i - 19, i + 1); return w.every(isNum) ? w.reduce((a, b) => a + b, 0) / 20 : null; });
+    const all = [...pts.map(p => p.v), ...ma.filter(isNum)], lo = Math.min(...all), hi = Math.max(...all), pad = (hi - lo) * 0.08 || 1;
+    const x = i => L + (W - L - R) * i / (n - 1), y = v => T + (H - T - B) * (1 - (v - lo + pad) / (hi - lo + 2 * pad));
+    const path = arr => arr.map((v, i) => (isNum(v) ? `${x(i).toFixed(1)},${y(v).toFixed(1)}` : null)).filter(Boolean).join(' ');
+    const hiP = pts.reduce((a, b) => (b.v > a.v ? b : a)), loP = pts.reduce((a, b) => (b.v < a.v ? b : a)), last = pts[pts.length - 1];
+    const up = last.v >= pts[0].v, col = up ? 'var(--up)' : 'var(--down)';
+    const md = d => (d ? String(d).replace(/^(\d{4})-?(\d{2})-?(\d{2}).*/, '$2/$3') : '');
+    const lab = (p, txt, above) => { const tx = Math.min(Math.max(x(p.i), L + 40), W - R - 40); return `<circle cx="${x(p.i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="4.5" fill="${above ? 'var(--up)' : 'var(--down)'}"/><text x="${tx.toFixed(1)}" y="${(y(p.v) + (above ? -10 : 22)).toFixed(1)}" text-anchor="middle" font-size="18" fill="var(--ink2)">${txt} ${px(p.v)}</text>`; };
+    return `<svg class="qchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="近 ${pts.length} 個交易日收盤走勢，最高 ${px(hiP.v)}，最低 ${px(loP.v)}">
+      <line x1="${L}" x2="${W - R}" y1="${y(last.v).toFixed(1)}" y2="${y(last.v).toFixed(1)}" stroke="var(--line)" stroke-dasharray="4 4"/>
+      ${ma.some(isNum) ? `<polyline points="${path(ma)}" fill="none" stroke="#E0A526" stroke-width="2" stroke-dasharray="6 4"/>` : ''}
+      <polyline points="${path(ser)}" fill="none" stroke="${col}" stroke-width="3" stroke-linejoin="round"/>
+      ${lab(hiP, '最高', true)}${lab(loP, '最低', false)}
+      <circle cx="${x(last.i).toFixed(1)}" cy="${y(last.v).toFixed(1)}" r="5" fill="${col}"/>
+      <text x="${W - R + 10}" y="${(y(last.v) + 6).toFixed(1)}" font-size="20" font-weight="700" fill="${col}">${px(last.v)}</text>
+      <text x="${L}" y="${H - 8}" font-size="17" fill="var(--mute)">${md(pts[0].d)}</text>
+      <text x="${W - R}" y="${H - 8}" font-size="17" fill="var(--mute)" text-anchor="end">${md(last.d)}</text>
+    </svg>
+    <div class="legend small"><span><i class="lg" style="background:${col}"></i>收盤</span><span><i class="lg dash"></i>20 日線</span><span>近 ${pts.length} 個交易日・區間 <b class="${cls(last.v / pts[0].v - 1)}">${pct((last.v / pts[0].v - 1) * 100, 1)}</b></span></div>`;
+  }
   async function viewQuick(key) {
     const U = await loadUniverse(), u = U.list.find(x => x.k === key);
     if (!u) return `<div><a href="#/" class="small">← 回總覽</a></div><section class="card"><h2 style="margin:0">找不到 ${esc(key)}</h2>
@@ -1947,7 +1971,7 @@ ${footer()}`;
 <section class="card" aria-labelledby="qk-h">
   <div class="hd"><h1 id="qk-h" style="margin:0;font-size:22px">${esc(key)} ${esc(u.n)}</h1><span class="note">${u.x === 'TPEx' ? '上櫃' : u.x === 'TWSE' ? (/^00/.test(key) ? '上市 ETF' : '上市') : '美股'}${u.s ? '・' + esc(u.s) : ''}・快速檢視（不在觀察清單）</span></div>
   <div class="quote"><div><div style="display:flex;align-items:baseline;gap:12px"><span class="px">${px(u.c)}</span>${isNum(u.p) ? `<span class="ch ${cls(u.p)}">${pct(u.p)}</span>` : ''}</div><div class="small muted">${esc((u.x === 'TPEx' ? UNI.tpexDate : u.x === 'US' ? UNI.usDate : UNI.date) || '')} 收盤${u.mc ? `・市值 ${u.mc >= 1e5 ? fix(u.mc / 1e6, 2) + ' 兆' : fix(u.mc / 1e3, 1) + ' 十億'}美元` : ''}${u.x === 'US' && !isNum(u.c) ? '（目前只有名稱，價格要加入觀察清單後才有）' : ''}</div></div></div>
-  ${ser.filter(isNum).length > 5 ? `<div>${spark(ser, { w: 600, h: 90 })}<div class="small muted">近 ${ser.filter(isNum).length} 個交易日收盤</div></div>` : ''}
+  ${ser.filter(isNum).length > 5 ? `<div>${quickChart(ser, UNIH?.dates)}</div>` : ''}
   <dl class="facts mini">
     <div><dt>20 日線</dt><dd>${u.a20 == null ? '—' : u.a20 ? '<span class="up">站上</span>' : '<span class="down">跌破</span>'}</dd></div>
     <div><dt>60 日線</dt><dd>${u.a60 == null ? '—' : u.a60 ? '<span class="up">站上</span>' : '<span class="down">跌破</span>'}</dd></div>

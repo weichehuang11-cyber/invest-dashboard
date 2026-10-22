@@ -529,3 +529,6 @@ ul.news .tone { font-size: 10px; margin-right: 4px; }
 .brand .ver { font-size: 11px; font-weight: 500; letter-spacing: 0; margin-left: 6px; padding: 1px 6px; border-radius: 99px; background: rgba(255,255,255,.14); color: #C9CED8; vertical-align: 2px; }
 .nc a.mk.lk { text-decoration: none; border: 1px solid color-mix(in srgb, var(--acc) 30%, #fff); }
 .nc a.mk.lk:hover { background: var(--acc); color: #fff; }
+.qchart { display: block; width: 100%; height: auto; max-height: 260px; }
+.legend .lg { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+.legend .lg.dash { background: repeating-linear-gradient(90deg, #E0A526 0 5px, transparent 5px 8px); }
