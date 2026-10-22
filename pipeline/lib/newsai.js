@@ -50,7 +50,7 @@ async function themeSummaries(themes, chat, cache, { log = () => {} } = {}) {
 新聞：${t.news.slice(0, 5).map(n => n.zh || n.title).join('；')}
 相關個股：${t.stocks.slice(0, 8).map(s => `${s.key} ${s.name}${s.p != null ? `（今日 ${s.p}%${s.r20 != null ? `，20 日 ${s.r20}%` : ''}）` : ''}`).join('、') || '無'}`).join('\n\n');
   const sys = '你是台股產業分析師，用繁體中文（台灣用語）寫給個人投資人。只根據提供的新聞與數字，不要編造營收、訂單或價格；不確定時寫「新聞未說明」。';
-  const user = `${body}\n\n逐一整理上面每個題材，輸出 JSON：{"themes":[{"name":"題材名稱（照抄）","sum":"為什麼現在熱、驅動因素是什麼，2 句、70 字內","phase":"剛起漲／發酵中／過熱／降溫 四選一（依新聞量與漲幅判斷）","stocks":{"代號":"這檔和題材的關係或看點，25 字內"}}]}`;
+  const user = `${body}\n\n逐一整理上面每個題材，輸出 JSON：{"themes":[{"name":"題材名稱（照抄）","sum":"為什麼現在熱、驅動因素是什麼，2 句、70 字內","phase":"剛起漲／發酵中／過熱／降溫 四選一（依新聞量與漲幅判斷）","stocks":{"代號":"這檔和題材的關係或看點，25 字內；如果新聞看不出它和題材有關，就只寫「無直接關聯」"}}]}`;
   try {
     const txt = await chat([{ role: 'system', content: sys }, { role: 'user', content: user }], { json: true, timeout: 120000 });
     const j = JSON.parse((txt.match(/\{[\s\S]*\}/) || [txt])[0]);
@@ -71,6 +71,8 @@ function attachThemes(themes, cache) {
     const r = cache.themes?.[t.name]; if (!r) continue;
     t.sum = r.sum || undefined; t.phase = r.phase || undefined;
     for (const s of t.stocks) if (r.stocks?.[s.key]) s.why = r.stocks[s.key];
+    // AI 判斷和題材沒有實際關聯的（只是剛好出現在同一則綜合新聞）就拿掉
+    t.stocks = t.stocks.filter(s => !(s.why && /未說明|無直接關聯|無關/.test(s.why) && (s.mentions || 0) < 2));
   }
   return themes;
 }
