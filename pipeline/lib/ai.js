@@ -20,7 +20,9 @@ async function claude(messages, timeout) {
   } finally { clearTimeout(t); }
 }
 /** Google Gemini（免費額度；到 aistudio.google.com 申請 API key，設成 GEMINI_API_KEY） */
-let GEM_MODEL = null, GEM_LIST = [];
+let GEM_MODEL = null, GEM_LIST = [], GEM_LAST = 0;
+/** 免費額度每分鐘次數有限：兩次呼叫至少間隔 13 秒 */
+async function gemThrottle() { const w = GEM_LAST + 13000 - Date.now(); if (w > 0) await new Promise(r => setTimeout(r, w)); GEM_LAST = Date.now(); }
 /** 目前模型持續忙碌（503）或不存在時，改用下一個可用模型 */
 function nextGemini() { const i = GEM_LIST.indexOf(GEM_MODEL); if (i >= 0 && i + 1 < GEM_LIST.length) { GEM_MODEL = GEM_LIST[i + 1]; return true; } return false; }
 /** 找出這把金鑰能用的最新 Flash 模型（Google 會淘汰舊模型名稱，所以每次執行自動挑） */
@@ -31,9 +33,10 @@ async function geminiModel(key) {
     const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': key } });
     const j = await r.json();
     const names = (j.models || []).filter(m => (m.supportedGenerationMethods || []).includes('generateContent')).map(m => m.name.replace(/^models\//, ''))
-      .filter(n => /^gemini-[\d.]+-flash(-latest)?$|^gemini-flash-latest$/.test(n) && !/lite|image|tts|live|exp|preview|thinking/.test(n));
+      .filter(n => /^gemini-[\d.]+-flash(-lite)?(-latest)?$|^gemini-flash(-lite)?-latest$/.test(n) && !/image|tts|live|exp|preview|thinking/.test(n));
     const ver = n => parseFloat((n.match(/gemini-([\d.]+)/) || [])[1] || '0');
-    names.sort((a, b) => ver(b) - ver(a) || (a.includes('latest') ? 1 : -1));
+    // 先用一般 Flash（新到舊），額度用完或忙碌時再退到 Flash-Lite（每個模型的免費額度分開計算）
+    names.sort((a, b) => (a.includes('lite') - b.includes('lite')) || ver(b) - ver(a) || (a.includes('latest') ? 1 : -1));
     GEM_LIST = names.length ? names : ['gemini-flash-latest'];
     GEM_MODEL = GEM_LIST[0];
   } catch (_) { GEM_MODEL = 'gemini-flash-latest'; }
@@ -44,6 +47,7 @@ async function gemini(messages, json, timeout) {
   const sys = messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
   const key = process.env.GEMINI_API_KEY;
   const model = await geminiModel(key);
+  await gemThrottle();
   const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), timeout);
   try {
     const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, { method: 'POST', signal: ctl.signal,
@@ -63,6 +67,7 @@ async function grounded(prompt, sys, timeout = 120000) {
   const key = process.env.GEMINI_API_KEY; if (!key) throw new Error('沒有 GEMINI_API_KEY');
   let model = await geminiModel(key);
   for (let k = 0; k < 3; k++) {
+    await gemThrottle();
     const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), timeout);
     try {
       const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, { method: 'POST', signal: ctl.signal,
@@ -70,7 +75,7 @@ async function grounded(prompt, sys, timeout = 120000) {
         body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents: [{ role: 'user', parts: [{ text: prompt }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0.3 } }) });
       const text = await r.text();
       if (!r.ok) {
-        if (/^(500|503)$/.test(String(r.status)) && k === 1 && nextGemini()) { model = GEM_MODEL; continue; }
+        if ((r.status === 429 || (/^(500|503)$/.test(String(r.status)) && k === 1)) && nextGemini()) { model = GEM_MODEL; continue; }
         if (/^(429|500|503)$/.test(String(r.status)) && k < 2) { await new Promise(z => setTimeout(z, 8000 * (k + 1))); continue; }
         throw new Error(`${model} HTTP ${r.status} ${text.slice(0, 160)}`);
       }
@@ -84,11 +89,12 @@ async function chat(messages, { json = false, timeout = 90000 } = {}) {
   const errs = [];
   if (process.env.ANTHROPIC_API_KEY) { try { const r = await claude(messages, timeout); chat.last = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5'; return r; } catch (e) { errs.push('anthropic: ' + e.message); } }
   if (process.env.GEMINI_API_KEY) {
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < 5; k++) {
       try { const r = await gemini(messages, json, timeout); chat.last = chat.lastGem; return r; }
       catch (e) {
+        if (/HTTP 429/.test(e.message) && nextGemini()) continue;                      // 額度用完：換下一個模型（額度分開）
         if (/HTTP (500|503)/.test(e.message) && k === 1 && nextGemini()) continue;   // 第二次還忙就換下一個模型
-        if (/HTTP (429|500|503)/.test(e.message) && k < 2) { await new Promise(r => setTimeout(r, 8000 * (k + 1))); continue; }
+        if (/HTTP (429|500|503)/.test(e.message) && k < 2) { await new Promise(r => setTimeout(r, 15000 * (k + 1))); continue; }
         errs.push('gemini: ' + e.message); break;
       }
     }
