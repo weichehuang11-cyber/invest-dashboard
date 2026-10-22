@@ -1,27 +1,11 @@
 'use strict';
 /**
- * 雲端 AI 解讀（GitHub Models，用 Actions 內建的 GITHUB_TOKEN，免費額度，不需另外申請）
+ * 雲端 AI（Google Gemini 免費額度，設定 GEMINI_API_KEY；或 Anthropic，設定 ANTHROPIC_API_KEY）
  * 收盤後完整更新時產生一次：今日市場解讀＋觀察清單逐檔一句話點評。電腦沒開也看得到。
  * 只用公開的市場資料；你的持股與論點不會送出。
  */
-const MODEL = process.env.AI_MODEL || 'openai/gpt-4.1-mini';
+const MODEL = 'gemini';
 
-async function post(url, model, messages, json, token, timeout) {
-  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), timeout);
-  try {
-    const r = await fetch(url, {
-      method: 'POST', signal: ctl.signal, redirect: 'manual',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'X-GitHub-Api-Version': '2022-11-28' },
-      body: JSON.stringify({ model, messages, temperature: 0.4, ...(json ? { response_format: { type: 'json_object' } } : {}) }),
-    });
-    const text = await r.text();
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${text.slice(0, 100)}`);
-    let j; try { j = JSON.parse(text); } catch (_) { throw new Error(`回應不是 JSON（${r.status}）：${text.slice(0, 40)}`); }
-    const c = j.choices?.[0]?.message?.content;
-    if (!c) throw new Error('沒有回覆內容');
-    return c;
-  } finally { clearTimeout(t); }
-}
 /** Anthropic Claude（設定 ANTHROPIC_API_KEY 時優先使用；每天約 2 次呼叫，費用極低） */
 async function claude(messages, timeout) {
   const sys = messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
@@ -95,7 +79,7 @@ async function grounded(prompt, sys, timeout = 120000) {
   }
   throw new Error('Gemini 忙碌');
 }
-/** 依序嘗試：Anthropic → Gemini → GitHub Models（有哪個金鑰就用哪個） */
+/** 依序嘗試：Anthropic → Gemini（有哪個金鑰就用哪個） */
 async function chat(messages, { json = false, timeout = 90000 } = {}) {
   const errs = [];
   if (process.env.ANTHROPIC_API_KEY) { try { const r = await claude(messages, timeout); chat.last = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5'; return r; } catch (e) { errs.push('anthropic: ' + e.message); } }
@@ -109,8 +93,6 @@ async function chat(messages, { json = false, timeout = 90000 } = {}) {
       }
     }
   }
-  const token = process.env.GH_MODELS_TOKEN;
-  if (token && !process.env.GEMINI_API_KEY && !process.env.ANTHROPIC_API_KEY) for (const [url, model] of [['https://models.github.ai/inference/chat/completions', MODEL]]) { try { const r = await post(url, model, messages, json, token, timeout); chat.last = model; return r; } catch (e) { errs.push(`${new URL(url).host}: ${e.message}`); } }
   throw new Error(errs.join(' ｜ ') || '沒有可用的 AI（請設定 GEMINI_API_KEY 或 ANTHROPIC_API_KEY）');
 }
 

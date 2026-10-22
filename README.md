@@ -1,21 +1,32 @@
-# 訊號終端（GitHub 主站）
+# 訊號終端 v1.0.0
 
 投資 dashboard 的主站。網站放在 GitHub Pages，資料由 GitHub 雲端排程產生；NAS 負責備援與歷史資料；在自己的電腦上打開時，自動使用本機的 NPU、CPU 與語言模型。
 
 | 角色 | 放在哪裡 | 做什麼 |
 |---|---|---|
 | 主站 | GitHub Pages | 手機、電腦用同一個網址打開 |
-| 資料更新 | GitHub 雲端排程（`.github/workflows/update.yml`） | 台股、美股盤中每 30 分鐘；收盤後各一次完整更新 |
+| 資料更新 | GitHub 雲端排程（`.github/workflows/update.yml`） | 台股、美股盤中約每 20–30 分鐘；收盤後各一次完整更新；週末更新新聞 |
 | 備援＋歷史 | NAS（`nas/run-backup.sh`） | 用同一套程式獨立產生資料、永久封存每次快照、每日備份 |
 | 加速 | 你的電腦 | 自動偵測 `localhost` 的 NPU（8766）、CPU（8767）、語言模型（8768） |
 
-> 這個網站是公開的。持股、成本只存在你自己裝置的瀏覽器裡，不會上傳。
+> 這個網站是公開的。持股、成本、論點只存在你自己裝置的瀏覽器裡（可選擇加密備份到你的私密 Gist），不會出現在網站上。
 
 ## 第一次設定
 
 1. **開啟網站**：專案 **Settings → Pages → Build and deployment → Source** 選 **GitHub Actions**。
-2. **FinMind 權杖（建議）**：**Settings → Secrets and variables → Actions → New repository secret**，名稱 `FINMIND_TOKEN`，填入 FinMind 權杖。沒有也能跑，只是台股沒有法人歷史與月營收。
-3. **第一次更新**：**Actions → 更新資料並發布網站 → Run workflow**，「完整更新」填 `all`。約 2–3 分鐘後網站就有資料。
+2. **設定 Secrets**（**Settings → Secrets and variables → Actions → New repository secret**）：
+
+| 名稱 | 必要性 | 用途 |
+|---|---|---|
+| `FINMIND_TOKEN` | 建議 | 台股法人歷史、月營收、籌碼回測、個股新聞 |
+| `GEMINI_API_KEY` | 建議 | AI 解讀、全球快報、新聞逐則摘要、題材摘要（aistudio.google.com 免費申請） |
+| `NTFY_TOPIC` | 建議 | 手機推播（ntfy App 訂閱同名主題） |
+| `BACKUP_GIST_ID`、`BACKUP_PASSPHRASE` | 選用 | 推播時讀取加密備份裡的持股與論點 |
+| `FRED_API_KEY` | 選用 | 高收益債利差、金融壓力指數 |
+| `ANTHROPIC_API_KEY` | 選用 | 改用 Claude 產生 AI 內容（優先於 Gemini） |
+| `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID` | 選用 | 另一個推播管道 |
+
+3. **第一次更新**：**Actions → 更新資料並發布網站 → Run workflow**，「完整更新」填 `all`。約 3–5 分鐘後網站就有資料。
 4. 網址：`https://<你的帳號>.github.io/invest-dashboard/`
 
 ## 觀察清單
@@ -26,10 +37,13 @@
 
 | 時間 | 內容 |
 |---|---|
-| 週一至週五 09:07–13:37，每 30 分鐘 | 台股盤中更新 |
-| 週一至週五 16:47 | 台股收盤後完整更新（三大法人、FinMind、記錄當日訊號） |
-| 週一至週五 21:07–04:37，每 30 分鐘 | 美股盤中更新 |
-| 週二至週六 05:37 | 美股收盤後完整更新（基本面、財報日、記錄當日訊號） |
+| 週一至週五 09:00–13:59 | 台股盤中更新（距上次 20 分鐘以上才跑） |
+| 週一至週五 16:40 起 | 台股收盤後完整更新（三大法人、FinMind、AI 解讀、記錄當日訊號），傍晚推播全球快報 |
+| 週一至週五 21:00–04:59 | 美股盤中更新 |
+| 週二至週六 05:15 起 | 美股收盤後完整更新，早上推播全球快報（不響鈴） |
+| 週六、週日每 3 小時 | 新聞、題材與全球快報 |
+| 每週一 08:13 | 投資週報推播 |
+| 每月第一個週六 | 重新訓練 AI 模型（品質沒變好就不換） |
 
 GitHub 排程偶爾會延遲幾分鐘。預測紀錄、昨日訊號等狀態存在 `data` 分支；每次收盤後完整更新會把當天快照存到 `data` 分支的 `archive/年/日期.json`（`archive/index.json` 列出所有日期），永久保留。
 
@@ -54,6 +68,13 @@ GitHub 網站是 https，只能讀 https 網址的 NAS。
 3. NAS 上（SSH）執行：`sudo tailscale serve --bg 8765`（找不到指令時改用 `sudo /var/packages/Tailscale/target/bin/tailscale serve --bg 8765`）
 4. 網址會是 `https://<NAS 名稱>.<你的 tailnet>.ts.net`。在網站 **設定 → NAS 備援網址** 填入，按「測試連線」。
 5. 手機、電腦要安裝 Tailscale App 並登入同一個帳號，才連得到（NAS 不會暴露在公開網路上）。
+
+## 新聞、全球快報與熱門題材
+
+- **全球市場快報**（總覽與「新聞」頁）：只收路透、彭博、CNBC、華爾街日報、金融時報、中央社、經濟日報、工商時報、鉅亨等可信媒體，加上全球 22 項行情（股、債、匯、原物料、比特幣、VIX）。AI 寫成一句話總結、重點、結論與接下來要注意的事；每 3 小時與收盤後更新，早晚各推播一次。
+- **重點新聞**：同一事件多家媒體報導的排前面。每則附繁體中文標題、2～3 句摘要、重點條列、投資意義、利多／利空與相關市場；摘要依據會標示「已查證」（AI 用 Google 搜尋查證）、「依內文」或「依標題」。
+- **熱門題材**（台股）：`config/themes.json` 的關鍵字＋新聞中自動抓到的「XX概念股／族群／供應鏈」，依新聞量、相關股漲跌排序；AI 說明為什麼熱、目前階段（剛起漲／發酵中／過熱／降溫）與每檔相關個股的看點。
+- **個股新聞**：個股頁底部列出近 3 天新聞與所屬題材。
 
 ## 市場健康度、事件行事曆、組合分析
 
@@ -99,12 +120,13 @@ GitHub 網站是 https，只能讀 https 網址的 NAS。
 
 ## 本機加速
 
-在你的 Windows 電腦對專案 `invest` 裡的 `install-autostart.bat` 按兩下（只要一次），之後每次登入 Windows 都會在背景啟動 NPU 8766、CPU 8767、語言模型 8768。用同一台電腦打開網站，右上角會顯示「本機加速：NPU、CPU、語言模型」：
+Windows 電腦上的本機服務放在 `C:\Users\User\invest_deploy\local-ai`（來源：`invest` 專案）：
 
-- 機會清單與個股頁多出「本機 1 日／5 日預測」
-- 今日判斷與個股頁多出「本機 AI 解讀」
+1. 雙擊 `switch-to-new.bat`（移除舊版服務並設定開機自動啟動），之後登入 Windows 會在背景啟動 NPU 8766、CPU 8767、語言模型 8768（需 Ollama 與 `qwen2.5:7b`）。
+2. 用同一台電腦打開網站，右上角顯示「本機加速：NPU、CPU、語言模型」；**設定 → 檢查本機 NPU／CPU／語言模型**會實際跑一次預測與問答並顯示執行硬體。也可雙擊 `check-local.bat`。
+3. 目前 ONNX 模型跑在 Radeon 760M 內顯（DirectML）；XDNA NPU 需另裝 AMD Ryzen AI 軟體，對這個小模型沒有明顯好處。
 
-第一次 Chrome／Edge 可能詢問「是否允許存取區域網路上的裝置」，請按允許。手機或其他電腦打開時會自動略過，改用雲端計算的結果。
+第一次 Chrome／Edge 可能詢問「是否允許存取區域網路上的裝置」，請按允許。手機或其他電腦打開時會自動略過，改用雲端結果。
 
 ## 開發
 

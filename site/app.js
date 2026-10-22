@@ -16,6 +16,7 @@
   const cfg = Object.assign({}, DEF, LS.get('cfg', {}));
   cfg.limits = Object.assign({}, DEF.limits, cfg.limits || {});
   const saveCfg = () => LS.set('cfg', cfg);
+  const APP_VERSION = '1.0.0';
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const isNum = v => typeof v === 'number' && Number.isFinite(v);
   const isMob = () => window.innerWidth < 760;
@@ -545,7 +546,7 @@ ${footer()}`;
 
 
   function footer() {
-    return `<footer class="src">資料來源：Yahoo 財經（報價、日 K、美股財報）、臺灣證券交易所（三大法人、收盤行情、本益比、除權息、融資）、櫃買中心（上櫃行情）、臺灣期貨交易所（期貨與選擇權部位）、集保結算所（股權分散）、FinMind（法人歷史、月營收、台股財報）、Nasdaq（美股清單）、芝加哥選擇權交易所（VIX）、美國財政部（公債殖利率）、聖路易聯準會 FRED（信用利差、金融壓力）。
+    return `<footer class="src">訊號終端 v${APP_VERSION}・資料來源：Yahoo 財經（報價、日 K、美股財報）、臺灣證券交易所（三大法人、收盤行情、本益比、除權息、融資）、櫃買中心（上櫃行情）、臺灣期貨交易所（期貨與選擇權部位）、集保結算所（股權分散）、FinMind（法人歷史、月營收、台股財報）、Nasdaq（美股清單）、芝加哥選擇權交易所（VIX）、美國財政部（公債殖利率）、聖路易聯準會 FRED（信用利差、金融壓力）。
       資料${S.source === 'nas' ? '來自 NAS 備援' : '由 GitHub 排程產生'}，${esc(tpeTime(S.snap.generatedAt))}（${ago(S.snap.generatedAt)}）。</footer>`;
   }
 
