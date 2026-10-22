@@ -57,7 +57,8 @@ async function headlines(log) {
   for (const q of Q_EN) { try { all.push(...(await gnews(`${q} (${EN_SITES})`, false)).map(x => ({ ...x, lang: 'en' }))); } catch (_) {} }
   for (const [src, id] of Object.entries(CNBC)) { try { const r = parseRss(await get(`https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=${id}`, { as: 'text', timeout: 15000, retries: 1 })); all.push(...r.map(x => ({ ...x, source: x.source || 'CNBC', lang: 'en' }))); } catch (_) {} }
   const since = Date.now() - 36 * 3600000, seen = new Set();
-  const list = all.filter(x => x.title && CREDIBLE.test(x.source || '') && (!x.at || Date.parse(x.at) > since)).filter(x => { const k = x.title.toLowerCase().replace(/\W/g, '').slice(0, 50); if (seen.has(k)) return false; seen.add(k); return true; })
+  const NOISE = /速報|快訊|Market Talk|Roundup|盤中|個股|目標價|EPS預估|漲停|跌停|\(\d{4}(-TW)?\)|Podcast|Live:|LIVE|Quiz|Opinion|觀點|專欄/i;
+  const list = all.filter(x => x.title && CREDIBLE.test(x.source || '') && !NOISE.test(x.title) && (!x.at || Date.parse(x.at) > since)).filter(x => { const k = x.title.toLowerCase().replace(/\W/g, '').slice(0, 50); if (seen.has(k)) return false; seen.add(k); return true; })
     .map(x => ({ ...x, cat: catOf(x.title), tk: toks(x.title) }));
   // 同一事件多家媒體報導 → 合併成一則，報導家數越多越重要
   const clusters = [];
@@ -66,7 +67,7 @@ async function headlines(log) {
     if (c) { c.items.push(n); c.sources.add(n.source); } else clusters.push({ lang: n.lang, tk: n.tk, items: [n], sources: new Set([n.source]) });
   }
   const stories = clusters.map(c => { const h = c.items[0]; const age = h.at ? (Date.now() - Date.parse(h.at)) / 3600000 : 12;
-    return { title: h.title, link: h.link, source: h.source, at: h.at, lang: h.lang, cat: h.cat, sources: [...c.sources].slice(0, 5), n: c.items.length, score: c.sources.size * 3 + c.items.length - age / 6 }; })
+    return { title: h.title, link: h.link, source: h.source, at: h.at, lang: h.lang, cat: h.cat, sources: [...c.sources].slice(0, 5), n: c.items.length, score: c.sources.size * 4 + Math.min(c.items.length, 4) - age / 6 - (h.cat === '其他' ? 3 : 0) }; })
     .sort((a, b) => b.score - a.score);
   log && log(`全球新聞：原始 ${all.length}，可信來源 ${list.length}，事件 ${stories.length}`);
   return stories;
@@ -92,7 +93,7 @@ function ruleSummary(Q, stories) {
   const eqAvg = eq.length ? eq.reduce((a, q) => a + q.chg, 0) / eq.length : 0;
   let s = 0; s += eqAvg > 0.3 ? 2 : eqAvg < -0.3 ? -2 : 0; s += vix.chg < -3 ? 1 : vix.chg > 5 ? -1 : 0; s += gold.chg > 1 ? -1 : 0; s += dxy.chg > 0.4 ? -1 : 0; s += oil.chg > 3 ? -0.5 : 0;
   const mood = s >= 2 ? '風險偏好（Risk-on）' : s <= -2 ? '避險情緒（Risk-off）' : '方向分歧';
-  const lead = stories.filter(x => x.lang === 'zh').slice(0, 2).map(x => x.title).concat(stories.filter(x => x.lang === 'en').slice(0, 1).map(x => x.title));
+  const lead = [...stories.filter(x => x.lang === 'zh').slice(0, 2), ...stories.filter(x => x.lang === 'en').slice(0, 3)].map(x => ({ title: x.title, link: x.link, sources: x.sources }));
   const big = Q.filter(q => q.chg != null && Math.abs(q.chg) >= (q.kind === 'crypto' ? 5 : q.kind === 'vol' ? 10 : 2)).map(q => `${q.name} ${f(q.chg)}`);
   const eqAll = Q.filter(q => q.kind === 'eq' && q.chg != null).sort((a, b) => b.chg - a.chg);
   const best = eqAll[0], worst = eqAll[eqAll.length - 1];
