@@ -1666,7 +1666,7 @@ ${footer()}`;
   // ── 設定 ────────────────────────────────────────────────────
   function viewSettings() {
     return `${viewSyncSettings()}
-<section class="card" aria-labelledby="st-h"><div class="hd"><h2 id="st-h">設定</h2><span class="note">只存在這台裝置</span></div>
+<section class="card" aria-labelledby="st-h"><div class="hd"><h2 id="st-h">設定</h2><span class="note">只存在這台裝置・目前版本 v${APP_VERSION}</span></div>
   <form id="st-form" class="form" style="max-width:520px">
     <div class="field"><label for="st-colors">漲跌顏色</label><select id="st-colors"><option value="tw"${cfg.colors === 'tw' ? ' selected' : ''}>台股習慣：紅漲綠跌</option><option value="us"${cfg.colors === 'us' ? ' selected' : ''}>美股習慣：綠漲紅跌</option></select></div>
     <div class="field"><label for="st-nas">NAS 備援網址</label><input id="st-nas" type="url" value="${esc(cfg.nasUrl)}" placeholder="https://你的-nas.tailxxxx.ts.net"><span class="hint">GitHub 資料過舊或取不到時，改從這裡讀。必須是 https 開頭（例如 Tailscale 網址）。</span></div>
@@ -1988,6 +1988,7 @@ ${footer()}`;
 
   async function boot() {
     applyColors();
+    { const br = document.querySelector('.brand'); if (br && !br.querySelector('.ver')) br.insertAdjacentHTML('beforeend', `<span class="ver">v${APP_VERSION}</span>`); }
     try { await loadSnapshot(); }
     catch (e) { $('#main').innerHTML = `<section class="card"><h2 style="margin:0">無法載入資料</h2><p>${esc(e.message)}</p><div class="actions"><button class="btn primary" onclick="location.reload()">重新整理</button><a class="btn" href="#/settings">設定</a></div></section>`; if (location.hash.startsWith('#/settings')) { $('#main').innerHTML = viewSettings(); bindSettings(); } return; }
     setupSearch();
