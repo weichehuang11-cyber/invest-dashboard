@@ -253,9 +253,14 @@
   }
   function themeCard(t, full) {
     const st = t.stocks.slice(0, full ? 10 : 6);
-    return `<div class="theme"><div class="th-hd"><b>${esc(t.name)}</b>${t.auto ? '<span class="pill">新聞自動抓到</span>' : ''}<span class="small muted">${t.count} 則新聞${isNum(t.avgChg) ? `・相關股今日平均 <span class="${cls(t.avgChg)}">${pct(t.avgChg)}</span>` : ''}${t.tone ? `・語氣 ${t.tone > 0 ? '<span class="up">偏多</span>' : '<span class="down">偏空</span>'}` : ''}</span></div>
-      ${st.length ? `<div class="th-stk">${st.map(x => `<span class="stk${x.w ? ' w' : ''}">${skLink(x.key, x.name)}${isNum(x.p) ? ` <span class="${cls(x.p)}">${pct(x.p, 1)}</span>` : ''}${full && isNum(x.r20) ? ` <span class="small muted">20日 ${pct(x.r20, 0)}</span>` : ''}</span>`).join('')}</div>` : '<p class="small muted" style="margin:4px 0">新聞標題沒有點名個股</p>'}
-      ${full ? `<div class="ncl">${t.news.slice(0, 2).map(newsCard).join('')}</div>` : ''}</div>`;
+    const ph = t.phase ? `<span class="pill ph-${/過熱/.test(t.phase) ? 'hot' : /降溫/.test(t.phase) ? 'cool' : 'on'}">${esc(t.phase)}</span>` : '';
+    const stocks = !st.length ? '<p class="small muted" style="margin:4px 0">新聞沒有點名個股</p>'
+      : full && st.some(x => x.why) ? `<div class="th-rows">${st.map(x => `<div class="th-row"><span class="stk${x.w ? ' w' : ''}">${skLink(x.key, x.name)}${isNum(x.p) ? ` <span class="${cls(x.p)}">${pct(x.p, 1)}</span>` : ''}</span>${isNum(x.r20) ? `<span class="small muted">20日 ${pct(x.r20, 0)}</span>` : '<span></span>'}<span class="small">${esc(x.why || '')}</span></div>`).join('')}</div>`
+      : `<div class="th-stk">${st.map(x => `<span class="stk${x.w ? ' w' : ''}">${skLink(x.key, x.name)}${isNum(x.p) ? ` <span class="${cls(x.p)}">${pct(x.p, 1)}</span>` : ''}${full && isNum(x.r20) ? ` <span class="small muted">20日 ${pct(x.r20, 0)}</span>` : ''}</span>`).join('')}</div>`;
+    return `<div class="theme"><div class="th-hd"><b>${esc(t.name)}</b>${ph}${t.auto ? '<span class="pill">新聞自動抓到</span>' : ''}<span class="small muted">${t.count} 則新聞${isNum(t.avgChg) ? `・相關股今日平均 <span class="${cls(t.avgChg)}">${pct(t.avgChg)}</span>` : ''}</span></div>
+      ${t.sum ? `<p class="nc-s">${esc(t.sum)}</p>` : ''}
+      ${stocks}
+      ${full ? `<details class="th-news"><summary class="small">相關新聞 ${Math.min(t.news.length, 3)} 則</summary><div class="ncl">${t.news.slice(0, 3).map(newsCard).join('')}</div></details>` : ''}</div>`;
   }
   function viewThemesMini(N) {
     if (!N?.themes?.length) return `<div class="hd"><h2 id="th-h">熱門題材</h2></div><p class="empty">還沒有新聞資料，下一次更新後出現。</p>`;

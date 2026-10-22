@@ -39,3 +39,40 @@ function attach(list, cache) {
   return list;
 }
 module.exports = { summarize, attach, idOf };
+
+/** 題材摘要：為什麼熱、對誰有利，以及每檔相關個股一句話看點（全部繁體中文） */
+async function themeSummaries(themes, chat, cache, { log = () => {} } = {}) {
+  cache.themes = cache.themes || {};
+  const sig = t => idOf(t.name + '|' + t.news.slice(0, 5).map(n => n.title).join('|') + '|' + t.stocks.slice(0, 8).map(s => s.key).join(','));
+  const todo = themes.slice(0, 12).filter(t => cache.themes[t.name]?.sig !== sig(t));
+  if (!todo.length) return { added: 0 };
+  const body = todo.map((t, i) => `【${i + 1}】${t.name}（${t.count} 則新聞${t.avgChg != null ? `，相關股今日平均 ${t.avgChg}%` : ''}）
+新聞：${t.news.slice(0, 5).map(n => n.zh || n.title).join('；')}
+相關個股：${t.stocks.slice(0, 8).map(s => `${s.key} ${s.name}${s.p != null ? `（今日 ${s.p}%${s.r20 != null ? `，20 日 ${s.r20}%` : ''}）` : ''}`).join('、') || '無'}`).join('\n\n');
+  const sys = '你是台股產業分析師，用繁體中文（台灣用語）寫給個人投資人。只根據提供的新聞與數字，不要編造營收、訂單或價格；不確定時寫「新聞未說明」。';
+  const user = `${body}\n\n逐一整理上面每個題材，輸出 JSON：{"themes":[{"name":"題材名稱（照抄）","sum":"為什麼現在熱、驅動因素是什麼，2 句、70 字內","phase":"剛起漲／發酵中／過熱／降溫 四選一（依新聞量與漲幅判斷）","stocks":{"代號":"這檔和題材的關係或看點，25 字內"}}]}`;
+  try {
+    const txt = await chat([{ role: 'system', content: sys }, { role: 'user', content: user }], { json: true, timeout: 120000 });
+    const j = JSON.parse((txt.match(/\{[\s\S]*\}/) || [txt])[0]);
+    let n = 0;
+    for (const r of j.themes || []) {
+      const t = todo.find(x => x.name === String(r.name || '').trim()) || todo[(j.themes || []).indexOf(r)];
+      if (!t) continue;
+      cache.themes[t.name] = { sig: sig(t), sum: String(r.sum || '').slice(0, 200), phase: String(r.phase || '').slice(0, 6), stocks: Object.fromEntries(Object.entries(r.stocks || {}).map(([k, v]) => [String(k).toUpperCase().trim(), String(v).slice(0, 60)])), at: Date.now() };
+      n++;
+    }
+    const cut = Date.now() - 7 * 86400000;
+    for (const [k, v] of Object.entries(cache.themes)) if (v.at < cut) delete cache.themes[k];
+    return { added: n };
+  } catch (e) { log('題材摘要失敗', e.message); return { added: 0, err: e.message.slice(0, 160) }; }
+}
+function attachThemes(themes, cache) {
+  for (const t of themes || []) {
+    const r = cache.themes?.[t.name]; if (!r) continue;
+    t.sum = r.sum || undefined; t.phase = r.phase || undefined;
+    for (const s of t.stocks) if (r.stocks?.[s.key]) s.why = r.stocks[s.key];
+  }
+  return themes;
+}
+module.exports.themeSummaries = themeSummaries;
+module.exports.attachThemes = attachThemes;

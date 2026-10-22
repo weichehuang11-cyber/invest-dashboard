@@ -75,7 +75,12 @@ async function gemini(messages, json, timeout) {
 async function chat(messages, { json = false, timeout = 90000 } = {}) {
   const errs = [];
   if (process.env.ANTHROPIC_API_KEY) { try { const r = await claude(messages, timeout); chat.last = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5'; return r; } catch (e) { errs.push('anthropic: ' + e.message); } }
-  if (process.env.GEMINI_API_KEY) { try { const r = await gemini(messages, json, timeout); chat.last = chat.lastGem; return r; } catch (e) { errs.push('gemini: ' + e.message); } }
+  if (process.env.GEMINI_API_KEY) {
+    for (let k = 0; k < 3; k++) {
+      try { const r = await gemini(messages, json, timeout); chat.last = chat.lastGem; return r; }
+      catch (e) { if (/HTTP (429|500|503)/.test(e.message) && k < 2) { await new Promise(r => setTimeout(r, 8000 * (k + 1))); continue; } errs.push('gemini: ' + e.message); break; }
+    }
+  }
   const token = process.env.GH_MODELS_TOKEN;
   if (token && !process.env.GEMINI_API_KEY && !process.env.ANTHROPIC_API_KEY) for (const [url, model] of [['https://models.github.ai/inference/chat/completions', MODEL]]) { try { const r = await post(url, model, messages, json, token, timeout); chat.last = model; return r; } catch (e) { errs.push(`${new URL(url).host}: ${e.message}`); } }
   throw new Error(errs.join(' ｜ ') || '沒有可用的 AI（請設定 GEMINI_API_KEY 或 ANTHROPIC_API_KEY）');

@@ -698,14 +698,21 @@ async function main() {
       const cFile = path.join(STATE, 'newsai.json'), cache = readJSON(cFile, { map: {} });
       const groups = [news.digest?.stories || [], news.market || [], ...news.themes.map(t => t.news), ...Object.values(news.per).map(l => l.slice(0, 4))];
       const hasAI = !!(process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY);
+      let ranAI = false;
       if (hasAI && (!cache.tried || cache.lastError || Date.now() - Date.parse(cache.tried) > 55 * 60000 || FULL)) {
         const r = await NewsAI.summarize(groups.flat(), AI.chat, cache, { log });
-        cache.tried = new Date().toISOString();
+        cache.tried = new Date().toISOString(); ranAI = true;
         cache.lastError = r.errs[0] || null;
         writeJSON(cFile, cache); console.log('DIGEST_CHANGED');
         status.newsAI = `新增 ${r.added}、待處理 ${r.pending}${r.errs.length ? '、錯誤：' + r.errs[0] : ''}`;
       }
       for (const g of groups) NewsAI.attach(g, cache);
+      if (ranAI || (hasAI && !cache.themes)) {
+        const tr = await NewsAI.themeSummaries(news.themes, AI.chat, cache, { log });
+        if (tr.added) { writeJSON(cFile, cache); console.log('DIGEST_CHANGED'); }
+        status.themeAI = tr.err ? 'fail: ' + tr.err : `更新 ${tr.added} 個題材`;
+      }
+      NewsAI.attachThemes(news.themes, cache);
       news.aiSummaries = Object.keys(cache.map || {}).length;
     } catch (e) { status.newsAI = 'fail: ' + e.message.slice(0, 200); }
     writeJSON(path.join(OUT, 'news.json'), news);
