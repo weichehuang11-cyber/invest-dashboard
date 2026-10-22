@@ -232,6 +232,50 @@
   const nameOf = k => S.snap.items[k]?.name || k;
 
   // ── 總覽 ────────────────────────────────────────────────────
+  // ── 新聞與熱門題材 ──────────────────────────────────────────
+  async function loadNews() {
+    if (S.news && Date.now() - S.newsAt < 5 * 60000) return S.news;
+    try { S.news = await getJSON(S.base + 'news.json'); S.newsAt = Date.now(); } catch (_) { S.news = S.news || null; }
+    return S.news;
+  }
+  const skLink = (k, n) => `<a href="#/${S.snap?.items?.[k] ? 's' : 'q'}/${encodeURIComponent(k)}">${esc(k)}${n && n !== k ? ' ' + esc(n) : ''}</a>`;
+  const toneDot = t => (t > 0 ? '<span class="tone up" title="偏正面">▲</span>' : t < 0 ? '<span class="tone down" title="偏負面">▼</span>' : '');
+  const newsAgo = at => { if (!at) return ''; const m = Math.round((Date.now() - Date.parse(at)) / 60000); return m < 60 ? `${Math.max(m, 1)} 分鐘前` : m < 1440 ? `${Math.round(m / 60)} 小時前` : `${Math.round(m / 1440)} 天前`; };
+  const newsLi = n => `<li>${toneDot(n.tone)}<a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a> <span class="small muted">${esc(n.source || '')}${n.at ? '・' + newsAgo(n.at) : ''}</span></li>`;
+  function themeCard(t, full) {
+    const st = t.stocks.slice(0, full ? 10 : 6);
+    return `<div class="theme"><div class="th-hd"><b>${esc(t.name)}</b>${t.auto ? '<span class="pill">新聞自動抓到</span>' : ''}<span class="small muted">${t.count} 則新聞${isNum(t.avgChg) ? `・相關股今日平均 <span class="${cls(t.avgChg)}">${pct(t.avgChg)}</span>` : ''}${t.tone ? `・語氣 ${t.tone > 0 ? '<span class="up">偏多</span>' : '<span class="down">偏空</span>'}` : ''}</span></div>
+      ${st.length ? `<div class="th-stk">${st.map(x => `<span class="stk${x.w ? ' w' : ''}">${skLink(x.key, x.name)}${isNum(x.p) ? ` <span class="${cls(x.p)}">${pct(x.p, 1)}</span>` : ''}${full && isNum(x.r20) ? ` <span class="small muted">20日 ${pct(x.r20, 0)}</span>` : ''}</span>`).join('')}</div>` : '<p class="small muted" style="margin:4px 0">新聞標題沒有點名個股</p>'}
+      ${full ? `<ul class="news">${t.news.map(newsLi).join('')}</ul>` : ''}</div>`;
+  }
+  function viewThemesMini(N) {
+    if (!N?.themes?.length) return `<div class="hd"><h2 id="th-h">熱門題材</h2></div><p class="empty">還沒有新聞資料，下一次更新後出現。</p>`;
+    return `<div class="hd"><h2 id="th-h">熱門題材</h2><span class="note">新聞熱度 × 相關股漲跌・${esc(newsAgo(N.at))}更新</span><a class="act btn sm" href="#/news">全部題材與新聞</a></div>
+      <div><div class="themes">${N.themes.slice(0, isMob() ? 4 : 6).map(t => themeCard(t, false)).join('')}</div></div>`;
+  }
+  function viewNews(N) {
+    if (!N) return `<section class="card"><p class="empty">新聞資料還沒產生，等下一次自動更新。</p></section>`;
+    const tr = (N.usTrending || []).slice(0, 15), mv = N.twMovers || [];
+    return `<div><a href="#/" class="small">← 回總覽</a></div>
+<section class="card" aria-labelledby="nw-h"><div class="hd"><h1 id="nw-h" style="margin:0;font-size:20px">熱門題材與相關個股</h1><span class="note">${esc(newsAgo(N.at))}更新・題材依新聞則數、相關股今日漲跌與標題語氣排序</span></div>
+  <div class="themes full">${N.themes.map(t => themeCard(t, true)).join('') || '<p class="empty">目前沒有明顯題材</p>'}</div>
+  <p class="small muted">題材字典在 config/themes.json，可自行增減；新聞標題出現「XX概念股／XX族群／XX供應鏈」兩次以上會自動列為新題材。相關個股＝題材新聞標題裡點名的股票。</p></section>
+<section class="card" aria-labelledby="mv-h"><div class="hd"><h2 id="mv-h">台股今日強勢股（漲幅 ≥5%）</h2><span class="note">資金實際在追的股票</span></div>
+    ${mv.length ? `<div class="th-stk">${mv.map(x => `<span class="stk">${skLink(x.key, x.name)} <span class="${cls(x.p)}">${pct(x.p, 1)}</span></span>`).join('')}</div>` : '<p class="empty">今天沒有</p>'}</section>
+  <section class="card" aria-labelledby="tr-h"><div class="hd"><h2 id="tr-h">美股熱搜</h2><span class="note">Yahoo 財經</span></div>
+    ${tr.length ? `<div class="th-stk">${tr.map(k => `<span class="stk">${skLink(k)}</span>`).join('')}</div>` : '<p class="empty">暫無</p>'}</section>
+<section class="card" aria-labelledby="mn-h"><div class="hd"><h2 id="mn-h">市場新聞</h2><span class="note">Google 新聞・最新在前</span></div>
+  <ul class="news">${(N.market || []).map(newsLi).join('') || '<li class="empty">暫無</li>'}</ul></section>
+${footer()}`;
+  }
+  async function stockNews(key) {
+    const N = await loadNews(), box = $('#s-news'); if (!box || S.route !== 's/' + key) return;
+    const list = N?.per?.[key] || [], th = (N?.themes || []).filter(t => t.stocks.some(x => x.key === key));
+    box.innerHTML = `<div class="hd"><h2 id="sn-h">相關新聞</h2><span class="note">近 3 天${th.length ? '・所屬熱門題材：' + th.map(t => `<b>${esc(t.name)}</b>`).join('、') : ''}</span></div>
+      <div>${list.length ? `<ul class="news">${list.map(newsLi).join('')}</ul>` : '<p class="empty">近 3 天沒有找到新聞</p>'}</div>`;
+    box.hidden = false; setupFolds();
+  }
+
   function viewHome() {
     const s = S.snap, v = s.verdict, P = holdings();
     const holdChanges = [];
@@ -284,6 +328,8 @@
 </div>
 
 <section class="card" id="opps" aria-labelledby="opp-h">${viewOpps(isMob() ? 6 : 10)}</section>
+
+<section class="card fold all" data-fold="themes" data-def="1" id="themes" aria-labelledby="th-h">${S.news ? viewThemesMini(S.news) : '<p class="loading">載入熱門題材…</p>'}</section>
 
 <div class="row">
   <section class="card wide fold all" data-fold="sec" aria-labelledby="sec-h">${viewSectors()}</section>
@@ -1714,9 +1760,10 @@ ${footer()}`;
     const st = LS.get('folds', {});
     document.querySelectorAll('.card.fold').forEach(c => {
       const id = c.dataset.fold, hd = c.querySelector(':scope > .hd'); if (!hd || !id) return;
-      if (st[id]) c.classList.add('open'); else c.classList.remove('open');
+      const op = st[id] ?? c.dataset.def === '1';
+      if (op) c.classList.add('open'); else c.classList.remove('open');
       if (!hd.querySelector('.fold-btn')) {
-        hd.insertAdjacentHTML('beforeend', `<button type="button" class="fold-btn" aria-expanded="${!!st[id]}"><span class="sr">展開或收合</span></button>`);
+        hd.insertAdjacentHTML('beforeend', `<button type="button" class="fold-btn" aria-expanded="${!!op}"><span class="sr">展開或收合</span></button>`);
         hd.classList.add('fold-hd');
         hd.addEventListener('click', e => {
           if (e.target.closest('a,button:not(.fold-btn),select,input')) return;
@@ -1743,8 +1790,10 @@ ${footer()}`;
       const b = await loadBars(key);
       if (S.route !== 's/' + key) return;
       main.innerHTML = viewStock(key, b); document.title = `${key} ${nameOf(key)}・訊號終端`;
+      main.querySelector('footer')?.insertAdjacentHTML('beforebegin', '<section class="card fold all" data-fold="snews" data-def="1" id="s-news" aria-labelledby="sn-h" hidden></section>');
+      if (!$('#s-news')) main.insertAdjacentHTML('beforeend', '<section class="card fold all" data-fold="snews" data-def="1" id="s-news" aria-labelledby="sn-h" hidden></section>');
       bindStock(key); bindMine(key); setupFolds();
-      afterStock(key);
+      afterStock(key); stockNews(key);
     } else if (S.route.startsWith('q')) {
       const key = decodeURIComponent(h.split('/')[1] || '').toUpperCase();
       if (S.snap.items[key]) { location.replace('#/s/' + encodeURIComponent(key)); return; }
@@ -1754,11 +1803,12 @@ ${footer()}`;
     } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); bindPortfolio(); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
     else if (S.route === 'history') { main.innerHTML = '<p class="loading">載入歷史快照…</p>'; const html = await viewHistory(h.split('/')[1]); if (S.route !== 'history') return; main.innerHTML = html; const sel = $('#hs-day'); if (sel) sel.onchange = () => { location.hash = '#/history/' + sel.value; }; document.title = '歷史快照・訊號終端'; }
     else if (S.route === 'backtest') { const k = h.split('/')[1]; if (k) { BT.scope = decodeURIComponent(k).toUpperCase(); LS.set('bt', BT); } main.innerHTML = viewBacktest(); bindBacktest(); document.title = '策略回測・訊號終端'; }
+    else if (S.route === 'news') { main.innerHTML = '<p class="loading">載入新聞…</p>'; const N = await loadNews(); if (S.route !== 'news') return; main.innerHTML = viewNews(N); document.title = '熱門題材・訊號終端'; }
     else if (S.route === 'journal') { main.innerHTML = viewJournal(); document.title = '我的成績單・訊號終端'; afterJournal(); }
     else if (S.route === 'scorecard') { main.innerHTML = viewScorecard(); document.title = '模型成績・訊號終端'; }
     else if (S.route === 'settings') { main.innerHTML = viewSettings(); bindSettings(); document.title = '設定・訊號終端'; }
     else if (S.route === 'all') { main.innerHTML = `<div><a href="#/" class="small">← 回總覽</a></div><section class="card" id="opps">${viewOpps(0)}</section>${footer()}`; document.title = '全部標的・訊號終端'; }
-    else { main.innerHTML = viewHome(); document.title = '訊號終端'; afterHome(); }
+    else { main.innerHTML = viewHome(); document.title = '訊號終端'; afterHome(); loadNews().then(N => { const el = $('#themes'); if (el && S.route === 'home') { el.innerHTML = viewThemesMini(N); setupFolds(); } }); }
     setupFolds();
   }
 

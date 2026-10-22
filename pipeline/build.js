@@ -31,6 +31,7 @@ const Calendar = require('./lib/calendar');
 const Fin = require('./lib/financials');
 const AI = require('./lib/ai');
 const Conviction = require('./lib/conviction');
+const News = require('./lib/news');
 
 const ROOT = path.join(__dirname, '..');
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const [k, v] = a.replace(/^--/, '').split('='); return [k, v ?? true]; }));
@@ -636,6 +637,39 @@ async function main() {
     writeJSON(path.join(OUT, 'universe.json'), { date: H.dates?.[nD - 1] || null, tpexDate: heavy.tw.tpex?.date || null, usDate: heavy.us.universe?.date || null, usSrc: heavy.us.universe?.src || null, list: U });
     writeJSON(path.join(OUT, 'universe_hist.json'), series);
     status.universe = `${U.length} 檔`;
+  }
+  // 市場新聞、熱門題材與相關個股（每次更新都抓；失敗沿用上一次）
+  try {
+    const U = readJSON(path.join(OUT, 'universe.json'), { list: [] }).list;
+    const byKey = Object.fromEntries(U.map(u => [u.k, u]));
+    const nm = {};
+    for (const u of U) if (u.m === 'tw' && /^\d{4}$/.test(u.k) && u.n && u.n.length >= 2) nm[u.k] = u.n.replace(/\*|-KY$|-創$/g, '');
+    const usBig = U.filter(u => u.m === 'us').sort((a, b) => (b.mc || 0) - (a.mc || 0)).slice(0, 150).map(u => u.k).filter(k => k.length >= 3 || wl.us.includes(k));
+    for (const k of usBig) nm[k] = k;
+    for (const k of wl.us) nm[k] = names[k] || k;
+    const YF = require('yahoo-finance2').default;
+    const yf = typeof YF === 'function' ? new YF({ suppressNotices: ['yahooSurvey'] }) : YF;
+    const dict = readJSON(path.join(ROOT, 'config', 'themes.json'), { themes: [] });
+    const watch = [...wl.tw.map(k => ({ key: k, name: names[k] || items[k]?.name || k, market: 'tw' })), ...wl.us.map(k => ({ key: k, name: names[k] || items[k]?.name || k, market: 'us' }))];
+    const news = await News.collect({ names: nm, watch, dict, token: TOKEN, yf, log });
+    // 題材相關個股加上價格確認：今日漲跌、20 日報酬、站上月線
+    for (const t of news.themes) {
+      t.stocks = t.stocks.map(s => { const u = byKey[s.key] || {}; return { ...s, name: u.n || items[s.key]?.name || s.key, m: u.m || (/^\d/.test(s.key) ? 'tw' : 'us'), p: u.p ?? items[s.key]?.changePct ?? null, r20: u.r20 ?? null, a20: u.a20 ?? null, w: u.w || 0 }; });
+      const ps = t.stocks.map(s => s.p).filter(Number.isFinite);
+      t.avgChg = ps.length ? r2(ps.reduce((a, b) => a + b, 0) / ps.length) : null;
+      t.heat = Math.round(t.count * 10 + (t.avgChg || 0) * 5 + t.tone * 2);
+    }
+    news.themes.sort((a, b) => b.heat - a.heat);
+    try { const tr = await yf.trendingSymbols('US', { count: 15 }, { validateResult: false }); news.usTrending = (tr.quotes || []).map(q => q.symbol).filter(Boolean); } catch (_) { news.usTrending = []; }
+    // 台股成交值排行與漲幅排行（市場實際在追的股票）
+    const twU = U.filter(u => u.m === 'tw' && /^\d{4}$/.test(u.k) && Number.isFinite(u.p));
+    news.twMovers = twU.filter(u => u.p >= 5).sort((a, b) => b.p - a.p).slice(0, 20).map(u => ({ key: u.k, name: u.n, p: u.p, r20: u.r20 ?? null }));
+    writeJSON(path.join(OUT, 'news.json'), news);
+    heavy.newsLast = news;
+    status.news = `${news.status.market} 則／題材 ${news.themes.length}／個股 ${news.status.stocks}`;
+  } catch (e) {
+    status.news = 'fail: ' + e.message.slice(0, 200);
+    if (heavy.newsLast) writeJSON(path.join(OUT, 'news.json'), heavy.newsLast);
   }
   log('輸出完成', OUT);
 
