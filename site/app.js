@@ -180,7 +180,7 @@
     } catch (_) { S.remote = null; S.remoteAt = Date.now(); return null; }
   }
   const remoteEngines = d => [d.engines?.npu?.ok && 'NPU', d.engines?.cpu?.ok && 'CPU', d.engines?.llm?.ok && '語言模型'].filter(Boolean);
-  const remoteAI = (txt, d) => `<div class="ai"><b>電腦 AI 解讀</b>${esc(txt)}<span class="small" style="opacity:.7;display:block;margin-top:4px">你的電腦（${esc(d.llm?.model || '本機語言模型')}）・${agoMin((Date.now() - Date.parse(d.llm?.at || d.at)) / 60000)}</span></div>`;
+  const remoteAI = (txt, d) => `<div class="ai"><b>電腦 AI 解讀</b>${esc(txt)}<span class="small" style="opacity:.7;display:block;margin-top:4px">你的電腦（${esc(d.llm?.model || '本機語言模型')}）・${agoMin((Date.now() - Date.parse(d.llm?.at || d.at)) / 60000)}${d.llm?.basedOn && S.snap && d.llm.basedOn !== S.snap.generatedAt ? '・根據較早的資料' : ''}</span></div>`;
   function updateLocalPill() {
     const el = $('#pill-local'); if (!el) return;
     if (!S.local.checked) return;
@@ -402,7 +402,8 @@ ${footer()}`;
     <div class="k"><span>今日判斷・${esc(tpeTime(s.generatedAt))}</span>${v.trend ? `<span class="trend">${esc(v.trend)}</span>` : ''}</div>
     <h1 id="v-h">${esc(v.headline)}</h1>
     <p>${esc(v.detail)}</p>
-    <div id="ai-verdict">${s.ai?.verdict ? `<div class="ai"><b>AI 解讀</b>${esc(s.ai.verdict)}<span class="small" style="color:var(--topmute);display:block;margin-top:4px">雲端產生・${esc(tpeTime(s.ai.at))}</span></div>` : ''}</div>
+    <div id="ai-verdict">${s.ai?.verdict ? (() => { const old = (s.ai.level != null && s.ai.level !== v.level) || Date.parse(s.generatedAt) - Date.parse(s.ai.at) > 4 * 3600000;
+      return `<div class="ai${old ? ' ai-old' : ''}"><b>AI 解讀</b>${esc(s.ai.verdict)}<span class="small" style="color:var(--topmute);display:block;margin-top:4px">雲端產生・${esc(tpeTime(s.ai.at))}${old ? '・較早的解讀，與目前判斷可能不同，下次更新會重寫' : ''}</span></div>`; })() : ''}</div>
   </div>
   <div class="r">
     <div class="small" style="color:var(--topmute)">判斷依據（${v.points > 0 ? '+' : ''}${v.points} 分）</div>

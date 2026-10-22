@@ -532,3 +532,4 @@ ul.news .tone { font-size: 10px; margin-right: 4px; }
 .qchart { display: block; width: 100%; height: auto; max-height: 260px; }
 .legend .lg { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
 .legend .lg.dash { background: repeating-linear-gradient(90deg, #E0A526 0 5px, transparent 5px 8px); }
+.ai.ai-old { opacity: .72; }

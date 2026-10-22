@@ -592,8 +592,15 @@ async function main() {
     watchlist: { us: wl.us, tw: wl.tw },
   };
   // 雲端 AI 解讀：收盤後完整更新時產生，盤中沿用上一次的
-  if (FULL && (process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY)) {
-    try { heavy.ai = await AI.commentary(snapshot); status.ai = `ok（${heavy.ai.model}）`; } catch (e) { status.ai = 'fail: ' + e.message.slice(0, 300); }
+  // 收盤後完整更新、判斷等級改變，或距上次超過 3 小時，就重寫（結果存 state/ai.json，盤中也能保存）
+  {
+    const aFile = path.join(STATE, 'ai.json'), aPrev = readJSON(aFile, null) || heavy.ai || null;
+    const stale = !aPrev?.at || Date.now() - Date.parse(aPrev.at) > 3 * 3600000;
+    const changed = aPrev && aPrev.level != null && aPrev.level !== verdict.level;
+    if ((process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY) && (FULL || stale || changed)) {
+      try { heavy.ai = { ...(await AI.commentary(snapshot)), level: verdict.level, headline: verdict.headline }; writeJSON(aFile, heavy.ai); console.log('DIGEST_CHANGED'); status.ai = `ok（${heavy.ai.model}）`; }
+      catch (e) { status.ai = 'fail: ' + e.message.slice(0, 300); heavy.ai = aPrev; }
+    } else heavy.ai = aPrev;
   }
   snapshot.ai = heavy.ai || null;
   writeJSON(path.join(OUT, 'snapshot.json'), snapshot);
