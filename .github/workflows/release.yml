@@ -1,0 +1,31 @@
+name: 版本發布
+
+# package.json 的 version 改變時，自動建立同名標籤（v1.0.0）與 GitHub Release（內容取自 CHANGELOG.md）
+on:
+  push:
+    branches: [main]
+    paths: ['package.json', 'CHANGELOG.md']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 建立標籤與 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="v$(jq -r .version package.json)"
+          if git rev-parse "$V" >/dev/null 2>&1; then echo "$V 已存在，略過"; exit 0; fi
+          # 取出 CHANGELOG 中這個版本的段落
+          awk -v v="## $V" 'index($0, v)==1 {f=1; next} /^## v/ && f {exit} f' CHANGELOG.md > notes.md
+          git tag -a "$V" -m "訊號終端 $V"
+          git push origin "$V"
+          gh release create "$V" --title "訊號終端 $V" --notes-file notes.md
+          echo "已發布 $V"
