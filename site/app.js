@@ -237,6 +237,7 @@
     const holdChanges = [];
     if (P.total && P.maxPos > cfg.limits.single) holdChanges.push({ tag: '持股', title: `${P.maxRow.key} ${nameOf(P.maxRow.key)} 占 ${P.maxPos.toFixed(0)}%，超過單一持股上限 ${cfg.limits.single}%`, detail: '可考慮減碼，或調整上限（設定）', key: P.maxRow.key });
     if (P.total && P.cash / P.total * 100 < cfg.limits.cashMin) holdChanges.push({ tag: '持股', title: `現金比例 ${(P.cash / P.total * 100).toFixed(0)}%，低於下限 ${cfg.limits.cashMin}%`, detail: '' });
+    for (const r of P.rows) { if (r.it?.conv?.bucket === '強烈偏空') holdChanges.push({ tag: '持股', key: r.key, title: `${r.key} ${nameOf(r.key)} 技術面全面轉弱（信心 ${r.it.conv.score}）`, detail: '可考慮減碼或收緊停損，詳見個股頁「高信心訊號檢查」' }); }
     for (const r of P.rows) {
       const c = s.changes.find(x => x.key === r.key);
       if (c) holdChanges.push({ ...c, tag: c.tag, title: '（持有中）' + c.title });
@@ -607,9 +608,13 @@ ${footer()}`;
       <div class="cvbar" role="img" aria-label="信心分數 ${c.score}（−6 到 +6）"><div style="left:${pct6}%"></div><span>−6 偏空</span><span>0</span><span>+6 偏多</span></div>
       <p style="margin:0;font-weight:600">信心分數 ${c.score > 0 ? '+' : ''}${c.score}：${c.bucket}</p>
       <ul class="checks">${c.items.map(x => `<li class="${x.pt > 0 ? 'ok' : x.pt < 0 ? 'hit' : 'na'}"><span class="ic">${x.pt > 0 ? '＋' : x.pt < 0 ? '－' : '·'}</span><b>${esc(x.name)}</b><span class="small muted">${esc(x.txt)}</span></li>`).join('')}</ul>
+      ${c.chip ? `<p style="margin:6px 0 0;font-weight:600">籌碼分數 ${c.chip.score > 0 ? '+' : ''}${c.chip.score}：${c.chip.bucket}${c.chip.combo ? `・技術＋籌碼${c.chip.combo}` : ''}</p>
+        <ul class="checks">${c.chip.items.map(x => `<li class="${x.pt > 0 ? 'ok' : x.pt < 0 ? 'hit' : 'na'}"><span class="ic">${x.pt > 0 ? '＋' : x.pt < 0 ? '－' : '·'}</span><b>${esc(x.name)}</b><span class="small muted">${esc(x.txt)}</span></li>`).join('')}</ul>` : ''}
       <div class="fh"><b class="small">過去 5 年，${it.market === 'tw' ? '台股' : '美股'}大型股（${ev?.stocks || ''} 檔）出現「${c.bucket}」之後（驗證期）</b>${convTable(ev, c.bucket)}
+      ${c.chip && S.snap.conviction?.twChip ? `<b class="small">籌碼分數「${c.chip.bucket}」之後（${S.snap.conviction.twChip.stocks} 檔，${esc(S.snap.conviction.twChip.from)} 起）</b>${convTable(S.snap.conviction.twChip, c.chip.bucket)}` : ''}
       ${c.regime && ev?.regimes?.[c.regime] ? `<b class="small">只看大盤${c.regime === 'bull' ? '多頭（在 200 日線之上）' : '空頭（在 200 日線之下）'}的時候（現在就是這個環境）</b>${convTable(ev, c.bucket, ev.regimes[c.regime])}` : ''}
-      <p class="small muted" style="margin:0">${c.high.length ? `✅ ${c.high.map(h => `${CT[h.target]} ${h.hit}%${h.regime ? '（大盤' + (h.regime === 'bull' ? '多頭' : '空頭') + '時）' : ''}`).join('、')}：驗證期命中率達 65% 以上，建立期也穩定。` : '這個分組在驗證期沒有任何一項達到 65%，只當參考。'} 驗證期：${esc(ev?.cut || '')} 之後；每 5 個交易日取樣一次。</p></div></section>`;
+      ${c.bucket === '強烈偏空' && holdings().rows.some(r => r.key === it.key) ? `<div class="nudge">⚠️ 你持有這檔，且技術面全面轉弱（信心 ${c.score}）。過去兩年台股同類情況約 6 成多之後 20 日輸大盤（更早期約 5 成），可考慮減碼或收緊停損。</div>` : ''}
+      <p class="small muted" style="margin:0">${c.high.length ? `✅ ${c.high.map(h => `${h.src ? h.src + '：' : ''}${CT[h.target]} ${h.hit}%${h.regime ? '（大盤' + (h.regime === 'bull' ? '多頭' : '空頭') + '時）' : ''}`).join('、')}：驗證期命中率達 65% 以上，建立期也穩定。` : '這個分組在驗證期沒有任何一項達到 65%，只當參考。'} 驗證期：${esc(ev?.cut || '')} 之後；每 5 個交易日取樣一次。</p></div></section>`;
   }
 
   // ── 財報重點 ──────────────────────────────────────────────────
@@ -1525,6 +1530,10 @@ ${footer()}`;
 <section class="card" aria-labelledby="hc0"><div class="hd"><h2 id="hc0">高信心訊號：過去 5 年的實際命中率</h2><span class="note">樣本：台灣 50、標普 100 大型股＋觀察清單；依六項條件的信心分數分組，只看「驗證期」（後 40% 時間）的結果，綠底＝命中率 ≥ 65% 且穩定</span></div>
   ${['tw', 'us'].map(m => { const E = S.snap.conviction?.[m]; if (!E) return ''; return `<div><b class="small">${m === 'tw' ? '台股' : '美股'}大型股 ${E.stocks || ''} 檔（${esc(E.from)} → ${esc(E.to)}，驗證期自 ${esc(E.cut)}）・目前大盤${E.regimeNow === 'bull' ? '多頭' : E.regimeNow === 'bear' ? '空頭' : '—'}</b>${convTable(E)}
     ${E.regimes ? `<details><summary class="small">依大盤環境分開看（多頭 ${E.regShare?.bull ?? '—'}% 的時間）</summary><b class="small">大盤多頭時</b>${convTable(E, null, E.regimes.bull)}<b class="small">大盤空頭時</b>${convTable(E, null, E.regimes.bear)}</details>` : ''}</div>`; }).join('')}
+  ${S.snap.conviction?.twChip ? `<div><b class="small">台股籌碼分數（外資、投信，${S.snap.conviction.twChip.stocks} 檔，${esc(S.snap.conviction.twChip.from)} → ${esc(S.snap.conviction.twChip.to)}，驗證期自 ${esc(S.snap.conviction.twChip.cut)}）</b>${convTable(S.snap.conviction.twChip)}
+    <details><summary class="small">依大盤環境分開看</summary><b class="small">大盤多頭時</b>${convTable(S.snap.conviction.twChip, null, S.snap.conviction.twChip.regimes.bull)}<b class="small">大盤空頭時</b>${convTable(S.snap.conviction.twChip, null, S.snap.conviction.twChip.regimes.bear)}</details></div>` : `<p class="small muted" style="margin:0">台股籌碼回測：設定 FINMIND_TOKEN 後，下次台股收盤後完整更新會出現。</p>`}
+  ${S.snap.conviction?.twCombo ? `<div><b class="small">台股「技術＋籌碼同步」（技術信心 ≥ +3 且籌碼 ≥ +2＝強烈偏多；反之＝強烈偏空）</b>${convTable(S.snap.conviction.twCombo)}
+    <details><summary class="small">依大盤環境分開看</summary><b class="small">大盤多頭時</b>${convTable(S.snap.conviction.twCombo, null, S.snap.conviction.twCombo.regimes.bull)}<b class="small">大盤空頭時</b>${convTable(S.snap.conviction.twCombo, null, S.snap.conviction.twCombo.regimes.bear)}</details></div>` : ''}
   <p class="small muted" style="margin:0">「均」是每次的平均超額報酬（偏空分組以「之後輸大盤」為正）。命中率高但平均報酬低，代表贏的時候贏得少；請同時看兩者。條件固定不做最佳化，以避免用過去資料「調出」好看的數字。</p></section>
 <section class="card" aria-labelledby="sc1"><div class="hd"><h2 id="sc1">模型成績單</h2><span class="note">${esc(sc.note)}</span></div>
   <div class="grid2"><div style="display:flex;flex-direction:column;gap:12px"><b class="small">近 30 天</b>${scoreRows(sc.d30)}</div><div style="display:flex;flex-direction:column;gap:12px"><b class="small">近 90 天</b>${scoreRows(sc.d90)}</div></div>

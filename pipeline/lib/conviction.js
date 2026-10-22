@@ -115,4 +115,43 @@ function evaluate(list, step = 5) {
   return { cut, n: rows.length, from: rows[0]?.date || null, to: rows[rows.length - 1]?.date || null, table, regimes, regShare };
 }
 
-module.exports = { score, evaluate, bucketOf, BUCKETS };
+/**
+ * 籌碼分數（台股，FinMind 法人買賣超）：五項固定條件，偏多＋1、偏空−1（−5 ～ +5）
+ *   1. 外資連續買超 ≥ 3 日 ／ 連續賣超 ≥ 3 日
+ *   2. 投信連續買超 ≥ 3 日 ／ 連續賣超 ≥ 3 日
+ *   3. 外資與投信當日同步買超 ／ 同步賣超
+ *   4. 投信近 5 日淨買超 ≥ 5 日成交量的 0.5% ／ 淨賣超 ≥ 0.5%
+ *   5. 外資近 20 日累計買超 ／ 賣超
+ * hist：[{date, foreign, trust}]（張），b.volume 為股數
+ */
+function chipScore(b, hist, tech) {
+  const n = b.close.length, by = new Map(hist.map(h => [h.date, h]));
+  const out = new Array(n).fill(null);
+  let fS = 0, tS = 0; const F = [], Tq = [], V = [];
+  for (let i = 0; i < n; i++) {
+    const h = by.get(b.dates[i]);
+    if (!h) { F.push(null); Tq.push(null); V.push(b.volume?.[i] || 0); continue; }
+    fS = h.foreign > 0 ? Math.max(1, fS + 1) : h.foreign < 0 ? Math.min(-1, fS - 1) : 0;
+    tS = h.trust > 0 ? Math.max(1, tS + 1) : h.trust < 0 ? Math.min(-1, tS - 1) : 0;
+    F.push(h.foreign); Tq.push(h.trust); V.push(b.volume?.[i] || 0);
+    const okN = F.slice(-20).filter(x => x != null).length;
+    if (okN < 15) continue;
+    const t5 = Tq.slice(-5).reduce((s2, x) => s2 + (x || 0), 0) * 1000, v5 = V.slice(-5).reduce((s2, x) => s2 + x, 0);
+    const f20 = F.slice(-20).reduce((s2, x) => s2 + (x || 0), 0);
+    const items = [
+      ['外資連續', fS >= 3 ? 1 : fS <= -3 ? -1 : 0, fS > 0 ? `外資連買 ${fS} 日` : fS < 0 ? `外資連賣 ${-fS} 日` : '外資無連續'],
+      ['投信連續', tS >= 3 ? 1 : tS <= -3 ? -1 : 0, tS > 0 ? `投信連買 ${tS} 日` : tS < 0 ? `投信連賣 ${-tS} 日` : '投信無連續'],
+      ['外資投信同步', h.foreign > 0 && h.trust > 0 ? 1 : h.foreign < 0 && h.trust < 0 ? -1 : 0, h.foreign > 0 && h.trust > 0 ? '今日同步買超' : h.foreign < 0 && h.trust < 0 ? '今日同步賣超' : '方向不一致'],
+      ['投信 5 日', v5 > 0 && t5 / v5 >= 0.005 ? 1 : v5 > 0 && t5 / v5 <= -0.005 ? -1 : 0, v5 > 0 ? `投信 5 日淨${t5 >= 0 ? '買' : '賣'} ${(Math.abs(t5) / v5 * 100).toFixed(2)}% 成交量` : '無成交量'],
+      ['外資 20 日', f20 > 0 ? 1 : -1, `外資 20 日累計${f20 >= 0 ? '買' : '賣'} ${Math.round(Math.abs(f20)).toLocaleString()} 張`],
+    ];
+    out[i] = { date: b.dates[i], score: items.reduce((s2, x) => s2 + x[1], 0), items, regime: tech?.scores?.[i]?.regime ?? null };
+  }
+  return { scores: out, bc: tech.bc };
+}
+/** 技術＋籌碼同步：技術信心 ≥ +3 且籌碼 ≥ +2 → +5；技術 ≤ −3 且籌碼 ≤ −2 → −5；其他 0 */
+function comboScore(tech, chip) {
+  return { bc: tech.bc, scores: tech.scores.map((t, i) => { const c = chip.scores[i]; if (!t || !c) return null; const v = t.score >= 3 && c.score >= 2 ? 5 : t.score <= -3 && c.score <= -2 ? -5 : 0; return { date: t.date, score: v, regime: t.regime, items: [] }; }) };
+}
+
+module.exports = { score, chipScore, comboScore, evaluate, bucketOf, BUCKETS };

@@ -118,6 +118,9 @@ async function events(snap, P, notified) {
     const h = c.high[0];
     add(`conv:${it.key}:${c.bucket}`, held.has(it.key) ? 4 : 3, `🎯 ${held.has(it.key) ? '持股 ' : ''}${it.key} ${it.name} 高信心${c.dir < 0 ? '偏空' : '偏多'}（信心 ${c.score > 0 ? '+' : ''}${c.score}）：過去 5 年同樣情況 ${CT[h.target]}${c.dir < 0 ? '（反向）' : ''}命中 ${h.hit}%`);
   }
+  // 持股技術面全面轉弱（減碼提醒，每檔每週最多一次）
+  const wk = (() => { const d = new Date(Date.now() + 8 * 3600000); const j = new Date(Date.UTC(d.getUTCFullYear(), 0, 1)); return d.getUTCFullYear() + '-W' + Math.ceil(((d - j) / 86400000 + j.getUTCDay() + 1) / 7); })();
+  for (const k of held) { const it = items[k]; if (it?.conv?.bucket === '強烈偏空') add(`weak:${k}:${wk}`, 3, `⚠️ 持股 ${k} ${it.name} 技術面全面轉弱（信心 ${it.conv.score}），可考慮減碼或收緊停損`); }
   // 觀察清單訊號轉變（持股優先標示）
   for (const c of snap.changes || []) if (c.tag === '訊號') add(`sig:${c.key}:${c.title}:${day}`, held.has(c.key) ? 4 : 3, `${held.has(c.key) ? '⚠️ 持股 ' : '🔄 '}${c.title}（${c.detail}）`);
   // 市場

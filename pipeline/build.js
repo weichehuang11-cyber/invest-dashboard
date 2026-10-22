@@ -389,17 +389,33 @@ async function main() {
       const bench = benchOf(m);
       const needEval = (m === 'tw' ? fullTW : fullUS) || !heavy.convEval[m];
       if (needEval && bench) {
-        const sample = [...cur[m].map(x => ({ b: x.b, sc: x.sc }))];
+        const sample = [...cur[m].map(x => ({ key: x.it.key, b: x.b, sc: x.sc }))];
         const have = new Set(cur[m].map(x => x.it.key));
         await mapSeries((UNIV[m] || []).filter(k => !have.has(k)), async k => {
           const d = await Yahoo.daily(k, '5y').catch(() => null);
-          if (d && d.bars.close.length >= 300) sample.push({ b: d.bars, sc: Conviction.score(d.bars, bench.bars) });
+          if (d && d.bars.close.length >= 300) sample.push({ key: k, b: d.bars, sc: Conviction.score(d.bars, bench.bars) });
         }, 250);
         const ev = Conviction.evaluate(sample);
         heavy.convEval[m] = { ...ev, stocks: sample.length, at: new Date().toISOString() };
+        // 台股籌碼：FinMind 法人歷史（約 4.5 年），回測籌碼分數與「技術＋籌碼同步」
+        if (m === 'tw' && TOKEN) {
+          const chipSample = [], comboSample = [];
+          await mapSeries(sample, async x => {
+            const hist = await FinMind.institutional(x.key, TOKEN, 1700).catch(() => null);
+            if (!hist?.length) return;
+            const cs = Conviction.chipScore(x.b, hist, x.sc);
+            chipSample.push({ b: x.b, sc: cs }); comboSample.push({ b: x.b, sc: Conviction.comboScore(x.sc, cs) });
+          }, 400);
+          if (chipSample.length) {
+            heavy.convEval.twChip = { ...Conviction.evaluate(chipSample), stocks: chipSample.length, at: new Date().toISOString() };
+            heavy.convEval.twCombo = { ...Conviction.evaluate(comboSample), stocks: comboSample.length, at: new Date().toISOString() };
+          }
+          status.chipBacktest = `${chipSample.length} 檔`;
+        }
       }
       const ev = heavy.convEval[m]; if (!ev) continue;
       conviction[m] = ev;
+      if (m === 'tw') { if (heavy.convEval.twChip) conviction.twChip = heavy.convEval.twChip; if (heavy.convEval.twCombo) conviction.twCombo = heavy.convEval.twCombo; }
       const lastBench = bench?.bars?.close || [], regNow = (() => { const a = lastBench.slice(-200); return a.length === 200 ? (a[199] > a.reduce((x, y) => x + y, 0) / 200 ? 'bull' : 'bear') : null; })();
       conviction[m].regimeNow = regNow;
       for (const { it, sc } of cur[m]) {
@@ -411,9 +427,24 @@ async function main() {
           else if (row[k]?.high) highs.push({ target: k, hit: row[k].test.hit, n: row[k].test.n, avg: row[k].test.avg, regime: null });
         }
         it.conv = { score: last.score, bucket, dir: row.dir, regime: regNow, items: last.items.map(([name, pt, txt]) => ({ name, pt, txt })), high: highs };
+        // 台股：今日籌碼分數（用 FinMind 近 60 日法人資料）與技術＋籌碼同步
+        const fmHist = m === 'tw' ? heavy.tw.finmind?.[it.key]?.hist : null;
+        if (fmHist?.length >= 20 && heavy.convEval.twChip) {
+          const cs = Conviction.chipScore(daily[it.key].bars, fmHist, sc), cl = cs.scores[cs.scores.length - 1];
+          if (cl) {
+            const ce = heavy.convEval.twChip, cb = Conviction.bucketOf(cl.score), crow = ce.table[cb] || {}, crr = regNow ? ce.regimes?.[regNow]?.[cb] : null;
+            const comboV = last.score >= 3 && cl.score >= 2 ? 5 : last.score <= -3 && cl.score <= -2 ? -5 : 0;
+            const xe = heavy.convEval.twCombo, xb = Conviction.bucketOf(comboV), xrow = xe?.table?.[xb] || {}, xrr = regNow ? xe?.regimes?.[regNow]?.[xb] : null;
+            const add = (src, row2, rr, label) => { for (const k of ['ex20', 'ex5', 'up20']) { if (rr?.[k]?.high) highs.push({ target: k, hit: rr[k].test.hit, n: rr[k].test.n, avg: rr[k].test.avg, regime: regNow, src: label }); else if (row2?.[k]?.high) highs.push({ target: k, hit: row2[k].test.hit, n: row2[k].test.n, avg: row2[k].test.avg, regime: null, src: label }); } };
+            add('chip', crow, crr, '籌碼'); if (comboV) add('combo', xrow, xrr, '技術＋籌碼');
+            it.conv.chip = { score: cl.score, bucket: cb, items: cl.items.map(([name, pt, txt]) => ({ name, pt, txt })), combo: comboV ? (comboV > 0 ? '同步偏多' : '同步偏空') : null };
+            if (!it.conv.dir && highs.length) it.conv.dir = cl.score < 0 ? -1 : 1;
+          }
+        }
       }
     }
     status.conviction = Object.entries(conviction).map(([m, e]) => `${m} ${e.stocks || '?'} 檔／${e.n} 筆`).join('、') || '無';
+    if (!TOKEN) status.chipBacktest = 'no-token';
   }
 
   // ── 4b. 模型樣本外紀錄：訓練日之後每天的模型判斷（回測頁用，避免用訓練過的資料自我評分）──
