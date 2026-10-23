@@ -597,9 +597,10 @@ async function main() {
     const aFile = path.join(STATE, 'ai.json'), aPrev = readJSON(aFile, null) || heavy.ai || null;
     const stale = !aPrev?.at || Date.now() - Date.parse(aPrev.at) > 3 * 3600000;
     const changed = aPrev && aPrev.level != null && aPrev.level !== verdict.level;
-    if ((process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY) && (FULL || stale || changed)) {
+    const backoff = aPrev?.errAt && Date.now() - Date.parse(aPrev.errAt) < 60 * 60000;
+    if ((process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY) && (FULL || ((stale || changed) && !backoff))) {
       try { heavy.ai = { ...(await AI.commentary(snapshot)), level: verdict.level, headline: verdict.headline }; writeJSON(aFile, heavy.ai); console.log('DIGEST_CHANGED'); status.ai = `ok（${heavy.ai.model}）`; }
-      catch (e) { status.ai = 'fail: ' + e.message.slice(0, 300); heavy.ai = aPrev; }
+      catch (e) { status.ai = 'fail: ' + e.message.slice(0, 300); heavy.ai = aPrev; if (aPrev) { writeJSON(aFile, { ...aPrev, err: status.ai, errAt: new Date().toISOString() }); console.log('DIGEST_CHANGED'); } }
     } else heavy.ai = aPrev;
   }
   snapshot.ai = heavy.ai || null;
@@ -709,10 +710,10 @@ async function main() {
       const groups = [fullStories.slice(0, 40), news.market || [], ...news.themes.map(t => t.news), ...Object.values(news.per).map(l => l.slice(0, 4))];
       const hasAI = !!(process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY);
       let ranAI = false;
-      if (hasAI && (!cache.tried || cache.v !== 2 || (cache.lastError && Date.now() - Date.parse(cache.tried) > 30 * 60000) || Date.now() - Date.parse(cache.tried) > 55 * 60000 || FULL)) {
+      if (hasAI && (!cache.tried || cache.v !== 2 || (cache.lastError && Date.now() - Date.parse(cache.tried) > 30 * 60000) || Date.now() - Date.parse(cache.tried) > 115 * 60000 || FULL)) {
         const r = await NewsAI.summarize(groups.flat(), AI.chat, cache, { log });
         cache.tried = new Date().toISOString(); ranAI = true; cache.v = 2;
-        if (process.env.GEMINI_API_KEY) { const d = await NewsAI.deepen(fullStories, AI.grounded, cache, { log }); status.newsDeep = d.err ? 'fail: ' + d.err : `查證 ${d.added} 則`; }
+        if (process.env.GEMINI_API_KEY && (FULL || !cache.deepAt || Date.now() - Date.parse(cache.deepAt) > 170 * 60000)) { cache.deepAt = new Date().toISOString(); const d = await NewsAI.deepen(fullStories, AI.grounded, cache, { log }); status.newsDeep = d.err ? 'fail: ' + d.err : `查證 ${d.added} 則`; }
         cache.lastError = r.errs[0] || null;
         writeJSON(cFile, cache); console.log('DIGEST_CHANGED');
         status.newsAI = `新增 ${r.added}、待處理 ${r.pending}${r.errs.length ? '、錯誤：' + r.errs[0] : ''}`;

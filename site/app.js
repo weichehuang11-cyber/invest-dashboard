@@ -578,9 +578,9 @@ ${footer()}`;
     const c = S.snap.chipMarket;
     const d = c.date ? `${c.date.slice(0, 4)}/${c.date.slice(4, 6)}/${c.date.slice(6, 8)}` : '';
     const list = (title, rows, key) => `<div style="flex:1 1 300px;min-width:0"><div class="small" style="font-weight:600;margin-bottom:6px">${title}</div>
-      <table class="tbl cm" style="min-width:0"><thead><tr><th>個股</th><th class="num">金額</th><th class="num">張數</th><th class="num">當日漲跌</th></tr></thead><tbody>${rows.slice(0, 6).map(r => `<tr class="clk" data-href="${stockHref(r.id)}"><td><a href="${stockHref(r.id)}">${esc(r.id)}</a> <span class="small muted">${esc(r.name)}</span>${S.snap.items[r.id] ? ' <span class="tag buy" style="font-size:10px">觀察中</span>' : ''}</td><td class="num"><b>${fix(Math.abs(r.value) / 100, 1)}</b> 億</td><td class="num small">${int(r[key])}</td><td class="num small ${cls(r.chgPct)}">${pct(r.chgPct)}</td></tr>`).join('')}</tbody></table></div>`;
+      <table class="tbl cm" style="min-width:0"><thead><tr><th>個股</th><th class="num">金額</th><th class="num">張數</th><th class="num">當日漲跌</th></tr></thead><tbody>${rows.slice(0, 6).map(r => `<tr class="clk" data-href="${stockHref(r.id)}"><td class="cm-n"><a href="${stockHref(r.id)}">${esc(r.id)}</a>${S.snap.items[r.id] ? '<span class="wstar" title="觀察清單">★</span>' : ''} <span class="small muted">${esc(r.name)}</span></td><td class="num cm-v"><b>${fix(Math.abs(r.value) / 100, 1)}</b>億</td><td class="num small">${int(r[key])}</td><td class="num small ${cls(r.chgPct)}">${pct(r.chgPct)}</td></tr>`).join('')}</tbody></table></div>`;
     return `<div class="hd"><h2 id="cm-h">台股三大法人</h2><span class="note">${d} 收盤・外資合計約 ${int(c.foreignValueEst / 1e8)} 億（以收盤價估算）</span></div>
-      <p class="small muted" style="margin:0">依買賣<b>金額</b>（張數 × 收盤價）排序，所以高價股張數少也可能排前面；「當日漲跌」是那檔股票當天的股價漲跌，和排序無關。點任一列看個股。</p>
+      <p class="small muted" style="margin:0">依買賣<b>金額</b>（張數 × 收盤價）排序，所以高價股張數少也可能排前面；「當日漲跌」是那檔股票當天的股價漲跌，和排序無關。點任一列看個股；★＝在你的觀察清單。</p>
       <div class="row" style="gap:16px">${list('外資買超', c.topForeignBuy, 'foreign')}${list('外資賣超', c.topForeignSell, 'foreign')}${list('投信買超', c.topTrustBuy, 'trust')}</div>`;
   }
 

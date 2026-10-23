@@ -533,3 +533,11 @@ ul.news .tone { font-size: 10px; margin-right: 4px; }
 .legend .lg { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
 .legend .lg.dash { background: repeating-linear-gradient(90deg, #E0A526 0 5px, transparent 5px 8px); }
 .ai.ai-old { opacity: .72; }
+
+/* 籌碼排行表：手機不超出 */
+.tbl.cm { width: 100%; table-layout: fixed; }
+.tbl.cm th:nth-child(1), .tbl.cm td:nth-child(1) { width: 40%; }
+.tbl.cm td.cm-n { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.tbl.cm td.num, .tbl.cm th.num { white-space: nowrap; }
+.tbl.cm .wstar { color: var(--acc); font-size: 12px; margin-left: 3px; }
+@media (max-width: 640px) { .tbl.cm td, .tbl.cm th { padding-left: 4px; padding-right: 4px; font-size: 13px; } .tbl.cm td.cm-n .small { display: block; } }

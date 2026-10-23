@@ -55,7 +55,7 @@ async function gemini(messages, json, timeout) {
       body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents: messages.filter(m => m.role !== 'system').map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
         generationConfig: { temperature: 0.4, ...(json ? { responseMimeType: 'application/json' } : {}) } }) });
     const text = await r.text();
-    if (!r.ok) { if (r.status === 404) GEM_MODEL = null; throw new Error(`${model} HTTP ${r.status} ${text.slice(0, 160)}`); }
+    if (!r.ok) throw new Error(`${model} HTTP ${r.status} ${text.slice(0, 160)}`);
     const out = JSON.parse(text).candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
     if (!out) throw new Error('沒有回覆內容');
     chat.lastGem = model;
@@ -75,7 +75,7 @@ async function grounded(prompt, sys, timeout = 120000) {
         body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents: [{ role: 'user', parts: [{ text: prompt }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0.3 } }) });
       const text = await r.text();
       if (!r.ok) {
-        if ((r.status === 429 || (/^(500|503)$/.test(String(r.status)) && k === 1)) && nextGemini()) { model = GEM_MODEL; continue; }
+        if ((r.status === 404 || r.status === 429 || (/^(500|503)$/.test(String(r.status)) && k === 1)) && nextGemini()) { model = GEM_MODEL; continue; }
         if (/^(429|500|503)$/.test(String(r.status)) && k < 2) { await new Promise(z => setTimeout(z, 8000 * (k + 1))); continue; }
         throw new Error(`${model} HTTP ${r.status} ${text.slice(0, 160)}`);
       }
@@ -89,10 +89,10 @@ async function chat(messages, { json = false, timeout = 90000 } = {}) {
   const errs = [];
   if (process.env.ANTHROPIC_API_KEY) { try { const r = await claude(messages, timeout); chat.last = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5'; return r; } catch (e) { errs.push('anthropic: ' + e.message); } }
   if (process.env.GEMINI_API_KEY) {
-    for (let k = 0; k < 5; k++) {
+    for (let k = 0; k < 8; k++) {
       try { const r = await gemini(messages, json, timeout); chat.last = chat.lastGem; return r; }
       catch (e) {
-        if (/HTTP 429/.test(e.message) && nextGemini()) continue;                      // 額度用完：換下一個模型（額度分開）
+        if (/HTTP (404|429)/.test(e.message) && nextGemini()) continue;                // 模型停用或額度用完：換下一個                      // 額度用完：換下一個模型（額度分開）
         if (/HTTP (500|503)/.test(e.message) && k === 1 && nextGemini()) continue;   // 第二次還忙就換下一個模型
         if (/HTTP (429|500|503)/.test(e.message) && k < 2) { await new Promise(r => setTimeout(r, 15000 * (k + 1))); continue; }
         errs.push('gemini: ' + e.message); break;
