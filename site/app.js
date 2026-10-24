@@ -17,7 +17,7 @@
   cfg.limits = Object.assign({}, DEF.limits, cfg.limits || {});
   cfg.fees = Object.assign({}, DEF.fees, cfg.fees || {});
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.0.0';
+  const APP_VERSION = '1.1.0';
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const isNum = v => typeof v === 'number' && Number.isFinite(v);
   const isMob = () => window.innerWidth < 760;
@@ -238,8 +238,10 @@
     const us = rows.filter(r => r.it?.market === 'us').reduce((s, r) => s + (r.mv || 0), 0);
     const day = rows.reduce((s, r) => s + (r.day || 0), 0);
     const pnl = rows.reduce((s, r) => s + (r.pnl || 0), 0), cost = rows.reduce((s, r) => s + (r.cost || 0), 0);
-    const maxPos = rows.reduce((m, r) => (r.mv && total ? Math.max(m, r.mv / total * 100) : m), 0);
-    const maxRow = rows.slice().sort((a, b) => (b.mv || 0) - (a.mv || 0))[0];
+    // 單一持股上限：ETF（00 開頭）可設定不列入
+    const capRows = rows.filter(r => !(cfg.limits.etfExempt !== false && /^00/.test(r.key)));
+    const maxPos = capRows.reduce((m, r) => (r.mv && total ? Math.max(m, r.mv / total * 100) : m), 0);
+    const maxRow = capRows.slice().sort((a, b) => (b.mv || 0) - (a.mv || 0))[0] || rows.slice().sort((a, b) => (b.mv || 0) - (a.mv || 0))[0];
     return { rows, stock, cash, total, tw, us, day, dayPct: total - day > 0 ? day / (total - day) * 100 : null, pnl, pnlPct: cost > 0 ? pnl / cost * 100 : null, maxPos, maxRow, missing: rows.filter(r => !r.it) };
   }
   /** 組合 1 日風險值（歷史法 95%）：依共同交易日對齊各持股日報酬 */
@@ -565,7 +567,7 @@ ${footer()}`;
       <div style="display:flex;flex-direction:column;gap:12px">
         <div class="small" style="font-weight:500;color:var(--ink)">風險 vs 自訂上限</div>
         ${meter('1 日風險值（95%）', null, L.var95, '%', true, 'pf-var')}
-        ${meter('最大單一持股', P.total ? P.maxPos : null, L.single, '%')}
+        ${meter(cfg.limits.etfExempt !== false ? '最大單一個股（不含 ETF）' : '最大單一持股', P.total ? P.maxPos : null, L.single, '%')}
         ${meter('現金比例', P.total ? w(P.cash) : null, L.cashMin, '%', false)}
       </div>
       ${P.rows.length ? `<div class="whatif"><label for="wi" class="small" style="font-weight:500;color:var(--ink)">情境試算：如果大盤 <b id="wi-v">−5%</b></label>
@@ -1471,6 +1473,161 @@ ${footer()}`;
   }
 
   // ── 持股編輯 ────────────────────────────────────────────────
+
+  // ── 交易成本（台股）──
+  function twCost(key, amt, sell) {
+    const r = 0.001425 * (Number(cfg.fees.disc) || 10) / 10, mn = Number(cfg.fees.min) || 0;
+    const fee = amt > 0 ? Math.max(mn, Math.floor(amt * r)) : 0;
+    const tax = sell ? Math.floor(amt * (/^00\d{2,4}B$/.test(key) ? 0 : /^00/.test(key) ? 0.001 : 0.003)) : 0;
+    return { fee, tax };
+  }
+  const priceOf = k => S.snap.items[k]?.price ?? (UNI?.list || []).find(z => z.k === k)?.c ?? null;
+
+  // ── 1. 再平衡建議 ──
+  function rebalancePlan(P) {
+    const L = cfg.limits, total = P.total; if (!total || !P.rows.length) return null;
+    const exempt = k => L.etfExempt !== false && /^00/.test(k);
+    const rows = P.rows.filter(r => r.mv > 0 && r.it), sell = {};
+    for (const r of rows) { const w = r.mv / total * 100; if (!exempt(r.key) && w > L.single) sell[r.key] = r.mv - L.single / 100 * total; }
+    let freed = Object.values(sell).reduce((a, b) => a + b, 0);
+    let short = L.cashMin / 100 * total - (P.cash + freed);
+    if (short > 0) for (const r of rows.slice().sort((a, b) => (b.mv - (sell[b.key] || 0)) - (a.mv - (sell[a.key] || 0)))) {
+      if (short <= 0) break; const room = r.mv - (sell[r.key] || 0), take = Math.min(room, short); sell[r.key] = (sell[r.key] || 0) + take; short -= take;
+    }
+    const acts = Object.entries(sell).filter(([, v]) => v > 1).map(([k, v]) => {
+      const r = rows.find(x => x.key === k), fxk = r.it.market === 'us' ? fx() : 1, unit = r.it.price * fxk;
+      const shares = Math.min(r.shares, Math.ceil(v / unit)), amt = shares * unit, c = r.it.market === 'tw' ? twCost(k, amt, true) : { fee: 0, tax: 0 };
+      return { key: k, shares, amt, ...c, wBefore: r.mv / total * 100, wAfter: (r.mv - amt) / total * 100 };
+    });
+    const c = L.cashMin / 100, maxRow = rows.filter(r => !exempt(r.key)).sort((a, b) => b.mv - a.mv)[0];
+    const depCash = Math.max(0, (c * total - P.cash) / (1 - c));
+    const depSingle = maxRow && maxRow.mv / total * 100 > L.single ? Math.max(0, maxRow.mv / (L.single / 100) - total) : 0;
+    return { acts, cashAfter: P.cash + acts.reduce((a, x) => a + x.amt - x.fee - x.tax, 0), deposit: Math.max(depCash, depSingle) };
+  }
+  function viewRebalance(P) {
+    const R = rebalancePlan(P); if (!R) return '';
+    const ok = !R.acts.length;
+    return `<section class="card" aria-labelledby="rb-h"><div class="hd"><h2 id="rb-h">再平衡建議</h2><span class="note">依你設定的上限：單一持股 ${cfg.limits.single}%${cfg.limits.etfExempt !== false ? '（ETF 不受限）' : ''}、現金至少 ${cfg.limits.cashMin}%</span></div>
+      ${ok ? '<p class="empty">目前配置都在上限內，不需要調整。</p>' : `<div class="tbl-box"><table class="tbl cm"><thead><tr><th>賣出</th><th class="num">股數</th><th class="num">金額</th><th class="num">占比變化</th></tr></thead><tbody>
+      ${R.acts.map(x => `<tr><td class="cm-n"><a href="#/s/${encodeURIComponent(x.key)}">${esc(x.key)}</a> <span class="small muted">${esc(nameOf(x.key))}</span></td><td class="num">${int(x.shares)}${x.shares >= 1000 ? `<div class="small muted">${fix(x.shares / 1000, 2)} 張</div>` : ''}</td><td class="num">${int(x.amt)}<div class="small muted">費稅 ${int(x.fee + x.tax)}</div></td><td class="num small">${fix(x.wBefore, 1)}%<div>→ ${fix(x.wAfter, 1)}%</div></td></tr>`).join('')}</tbody></table></div>
+      <p class="small" style="margin:0">賣完後現金約 <b>${int(R.cashAfter)}</b> 元（${fix(R.cashAfter / P.total * 100, 1)}%）。${R.deposit > 0 ? `或者不賣，改為存入約 <b>${int(R.deposit)}</b> 元現金，也能符合上限。` : ''}</p>
+      <p class="small muted" style="margin:0">零股可以盤中或盤後零股交易；費稅依「設定」的手續費折扣估算。上限可在下方「風險上限」調整。</p>`}</section>`;
+  }
+
+  // ── 2. 已實現損益與股利 ──
+  function recordSells(oldItems, newItems) {
+    const j = J.load(), today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10), added = [];
+    for (const o of oldItems) {
+      const n = newItems.find(x => x.key === o.key), sold = o.shares - (n?.shares || 0);
+      if (sold <= 0) continue;
+      const price = priceOf(o.key); if (!isNum(price)) continue;
+      const it = S.snap.items[o.key] || (UNI?.list || []).find(z => z.k === o.key), tw = (it?.market || it?.m) !== 'us';
+      const amt = sold * price, c = tw ? twCost(o.key, amt, true) : { fee: 0, tax: 0 }, buyFee = tw && isNum(o.cost) ? twCost(o.key, sold * o.cost, false).fee : 0;
+      const x = { id: 'r' + Date.now().toString(36) + o.key, key: o.key, date: today, shares: sold, price, cost: o.cost ?? null, fee: c.fee + buyFee, tax: c.tax, cur: tw ? 'TWD' : 'USD', auto: true };
+      x.pnl = isNum(o.cost) ? amt - sold * o.cost - x.fee - x.tax : null;
+      (j.realized = j.realized || []).push(x); added.push(x);
+    }
+    if (added.length) J.save(j);
+    return added;
+  }
+  function divsFor(year, P) {
+    const today = new Date().toISOString().slice(0, 10), out = [];
+    for (const r of P.rows) {
+      const it = S.snap.items[r.key]; if (!it?.divs?.length) continue;
+      for (const d of it.divs) if (d.date.startsWith(String(year)) && d.date <= today) out.push({ key: r.key, date: d.date, ps: d.amount, shares: r.shares, amt: d.amount * r.shares, cur: it.market === 'us' ? 'USD' : 'TWD' });
+    }
+    return out.sort((a, b) => a.date.localeCompare(b.date));
+  }
+  function viewIncome(P) {
+    const j = J.load(), R = j.realized || [];
+    const years = [...new Set([new Date().getFullYear(), ...R.map(x => +x.date.slice(0, 4))])].sort((a, b) => b - a);
+    const y = +(S.incomeYear || years[0]);
+    const rz = R.filter(x => x.date.startsWith(String(y))), dv = divsFor(y, P), rate = fx();
+    const twd = (v, cur) => (cur === 'USD' ? v * rate : v);
+    const rzSum = rz.reduce((a, x) => a + twd(x.pnl || 0, x.cur), 0);
+    const twDiv = dv.filter(d => d.cur === 'TWD'), usDiv = dv.filter(d => d.cur === 'USD');
+    const twSum = twDiv.reduce((a, d) => a + d.amt, 0), usSum = usDiv.reduce((a, d) => a + d.amt * rate, 0);
+    const nhi = twDiv.filter(d => d.amt >= 20000).reduce((a, d) => a + d.amt * 0.0211, 0), credit = Math.min(twSum * 0.085, 80000);
+    return `<section class="card" aria-labelledby="inc-h"><div class="hd"><h2 id="inc-h">已實現損益與股利</h2><span class="note">報稅參考・估算值</span>
+      <select id="inc-y" aria-label="年度" style="margin-left:auto">${years.map(v => `<option${v === y ? ' selected' : ''}>${v}</option>`).join('')}</select></div>
+      <dl class="facts mini"><div><dt>已實現損益</dt><dd class="${cls(rzSum)}">${sign(rzSum)}${int(Math.abs(rzSum))}</dd></div><div><dt>台股股利（估）</dt><dd>${int(twSum)}</dd></div><div><dt>美股股利（估，台幣）</dt><dd>${int(usSum)}</dd></div><div><dt>二代健保補充保費（估）</dt><dd>${int(nhi)}</dd></div></dl>
+      <p class="small muted" style="margin:0">股利依「目前持股股數 × 每股配息」估算（只涵蓋觀察清單內的股票）。台股股利可選合併計稅（可抵減 8.5%，上限 8 萬，今年估 ${int(credit)} 元）或分開計稅 28%；單筆股利 2 萬元以上扣 2.11% 補充保費；美股股利預扣 30%。</p>
+      ${rz.length ? `<details open><summary class="small">賣出明細（${rz.length} 筆）</summary><div class="tbl-box"><table class="tbl cm"><thead><tr><th>日期／個股</th><th class="num">股數×價格</th><th class="num">損益</th><th></th></tr></thead><tbody>
+        ${rz.map(x => `<tr><td class="cm-n">${esc(x.date.slice(5))} <a href="#/s/${encodeURIComponent(x.key)}">${esc(x.key)}</a>${x.auto ? ' <span class="small muted">自動</span>' : x.src === 'csv' ? ' <span class="small muted">匯入</span>' : ''}</td><td class="num small">${int(x.shares)}×${px(x.price)}</td><td class="num ${cls(x.pnl)}">${x.pnl == null ? '—' : sign(x.pnl) + int(Math.abs(x.pnl))}</td><td class="num"><button type="button" class="btn sm" data-rzdel="${esc(x.id)}" aria-label="刪除">✕</button></td></tr>`).join('')}</tbody></table></div></details>` : '<p class="small muted" style="margin:0">今年還沒有賣出紀錄。在上方持股把股數改少並儲存，就會自動記錄一筆賣出（用當下價格估算，可刪除後改用匯入券商檔案）。</p>'}
+      ${dv.length ? `<details><summary class="small">股利明細（${dv.length} 筆）</summary><div class="tbl-box"><table class="tbl cm"><tbody>${dv.map(d => `<tr><td class="cm-n">${esc(d.date.slice(5))} ${esc(d.key)} ${esc(nameOf(d.key))}</td><td class="num small">${fix(d.ps, 3)}×${int(d.shares)}</td><td class="num">${d.cur === 'USD' ? 'US$' + fix(d.amt, 2) : int(d.amt)}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
+    </section>`;
+  }
+  function bindIncome() {
+    const sel = $('#inc-y'); if (sel) sel.onchange = () => { S.incomeYear = sel.value; render(); };
+    document.querySelectorAll('[data-rzdel]').forEach(b => b.onclick = () => { if (!confirm('刪除這筆賣出紀錄？')) return; const j = J.load(); j.realized = (j.realized || []).filter(x => x.id !== b.dataset.rzdel); j.deleted = [...(j.deleted || []), b.dataset.rzdel]; J.save(j); render(); });
+  }
+
+  // ── 3. 券商檔案匯入（CSV：成交明細或庫存）──
+  function parseCSV(text) {
+    const rows = []; let row = [], cur = '', q = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (q) { if (ch === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
+      else if (ch === '"') q = true; else if (ch === ',' || ch === '\t') { row.push(cur); cur = ''; }
+      else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(cur); rows.push(row); row = []; cur = ''; }
+      else cur += ch;
+    }
+    if (cur || row.length) { row.push(cur); rows.push(row); }
+    return rows.map(r => r.map(c => c.trim().replace(/^="?|"$/g, ''))).filter(r => r.some(Boolean));
+  }
+  const COLS = { key: ['股票代號', '證券代號', '商品代號', '股票代碼', '代號', '代碼', 'symbol'], name: ['股票名稱', '證券名稱', '商品名稱', '名稱'], side: ['買賣別', '交易類別', '交易別', '委託別', '買賣方向', '買/賣', '買賣'],
+    shares: ['成交股數', '庫存股數', '持有股數', '現股股數', '庫存數量', '成交數量', '股數', '數量'], price: ['成交均價', '成交價格', '成交價', '單價', '價格'], cost: ['成本均價', '持有成本均價', '平均成本', '成本價', '均價'],
+    date: ['成交日期', '交易日期', '成交日', '日期'], fee: ['手續費'], tax: ['證交稅', '交易稅'] };
+  function brokerImport(rows) {
+    const hi = rows.findIndex(r => r.some(c => COLS.key.some(k => c.toLowerCase().includes(k.toLowerCase())))); if (hi < 0) throw new Error('找不到「股票代號」欄位');
+    const H0 = rows[hi], col = {};
+    for (const [f, names] of Object.entries(COLS)) { const i = H0.findIndex(c => names.some(n => c.toLowerCase().includes(n.toLowerCase()))); if (i >= 0 && !Object.values(col).includes(i)) col[f] = i; }
+    const num = v => parseFloat(String(v ?? '').replace(/[,\s元股$]/g, '')), data = rows.slice(hi + 1).filter(r => r[col.key]);
+    const keyOf = v => String(v).trim().toUpperCase().replace(/\.TWO?$/, '').replace(/^(\d{4,6}[A-Z]?)\s.*$/, '$1');
+    if (col.side != null && col.price != null && col.shares != null) {
+      const tx = data.map(r => ({ key: keyOf(r[col.key]), date: col.date != null ? String(r[col.date]).replace(/\//g, '-').replace(/^(\d{3})-/, (m, y) => (+y + 1911) + '-') : '', sell: /賣|sell/i.test(r[col.side]), shares: Math.abs(num(r[col.shares])), price: num(r[col.price]), fee: col.fee != null ? num(r[col.fee]) || 0 : null, tax: col.tax != null ? num(r[col.tax]) || 0 : null }))
+        .filter(t => t.key && t.shares > 0 && t.price > 0).sort((a, b) => a.date.localeCompare(b.date));
+      const pos = {}, realized = [];
+      for (const t of tx) {
+        const p = pos[t.key] = pos[t.key] || { shares: 0, cost: 0 }, amt = t.shares * t.price, tw = /^\d/.test(t.key);
+        const c = tw ? twCost(t.key, amt, t.sell) : { fee: 0, tax: 0 }, fee = t.fee ?? c.fee, tax = t.tax ?? c.tax;
+        if (!t.sell) { p.shares += t.shares; p.cost += amt + fee; }
+        else { const avg = p.shares ? p.cost / p.shares : null, n = Math.min(t.shares, p.shares);
+          realized.push({ id: 'c' + t.date + t.key + t.shares + t.price, key: t.key, date: t.date || new Date().toISOString().slice(0, 10), shares: t.shares, price: t.price, cost: avg, fee, tax, cur: tw ? 'TWD' : 'USD', src: 'csv', pnl: avg != null ? amt - fee - tax - avg * t.shares : null });
+          p.cost -= (avg || 0) * n; p.shares -= n; }
+      }
+      const items = Object.entries(pos).filter(([, p]) => p.shares > 0).map(([key, p]) => ({ key, shares: p.shares, cost: +(p.cost / p.shares).toFixed(4) }));
+      return { type: '成交明細', n: tx.length, items, realized };
+    }
+    if (col.shares != null) {
+      const items = data.map(r => ({ key: keyOf(r[col.key]), shares: num(r[col.shares]), cost: col.cost != null ? num(r[col.cost]) : null })).filter(x => x.key && x.shares > 0);
+      return { type: '庫存', n: items.length, items, realized: [] };
+    }
+    throw new Error('看不懂這個檔案的欄位（需要股票代號與股數）');
+  }
+  async function readTextAuto(file) {
+    const buf = await file.arrayBuffer();
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch (_) { return new TextDecoder('big5').decode(buf); }
+  }
+  function bindBrokerImport() {
+    const b = $('#imp-csv'); if (!b) return;
+    b.onclick = () => { const i = document.createElement('input'); i.type = 'file'; i.accept = '.csv,.txt,text/csv'; i.onchange = async () => {
+      const box = $('#imp-preview');
+      try {
+        const R = brokerImport(parseCSV(await readTextAuto(i.files[0])));
+        box.innerHTML = `<div class="expbox"><b class="small">讀到 ${R.type} ${R.n} 筆 → 持股 ${R.items.length} 檔${R.realized.length ? `、賣出紀錄 ${R.realized.length} 筆` : ''}</b>
+          <div class="small">${R.items.map(x => `${esc(x.key)} ${int(x.shares)} 股${isNum(x.cost) ? ` @${fix(x.cost, 2)}` : ''}`).join('、') || '（沒有剩餘持股）'}</div>
+          <div class="actions"><button type="button" class="btn primary sm" id="imp-apply">套用（取代目前持股）</button><button type="button" class="btn sm" id="imp-cancel">取消</button></div>
+          <p class="small muted" style="margin:0">成交明細的成本已含買進手續費；目前的持股會先存進變動紀錄，可以還原。</p></div>`;
+        $('#imp-cancel').onclick = () => { box.innerHTML = ''; };
+        $('#imp-apply').onclick = () => {
+          const old = H.load(); H.save({ items: R.items, cash: old.cash || 0, log: [...(old.log || []), { at: new Date().toISOString(), items: old.items, cash: old.cash }].slice(-100) });
+          if (R.realized.length) { const j = J.load(), ids = new Set((j.realized || []).map(x => x.id)); j.realized = [...(j.realized || []).filter(x => !x.auto || !R.realized.some(r => r.key === x.key && r.date === x.date)), ...R.realized.filter(x => !ids.has(x.id))]; J.save(j); }
+          toast(`已匯入 ${R.items.length} 檔持股`); render();
+        };
+      } catch (e) { box.innerHTML = `<p class="small bad-text">${esc(e.message)}</p>`; }
+    }; i.click(); };
+  }
   function viewPortfolio() {
     const h = H.load(), opts = Object.keys(S.snap.items).map(k => `<option value="${esc(k)}">${esc(k)} ${esc(nameOf(k))}</option>`).join('');
     const rowHtml = (x, i) => `<div class="hrow" data-i="${i}"><input aria-label="代號" list="hold-list" value="${esc(x.key || '')}" placeholder="代號，如 2330、NVDA"><input aria-label="股數" type="number" inputmode="decimal" value="${x.shares ?? ''}" placeholder="股數"><input aria-label="平均成本" type="number" inputmode="decimal" step="any" value="${x.cost ?? ''}" placeholder="成本（原幣）"><button type="button" class="iconbtn" aria-label="刪除這一列" data-del="${i}">✕</button></div>`;
@@ -1483,7 +1640,9 @@ ${footer()}`;
     <div id="hold-rows" class="form">${(h.items.length ? h.items : [{}]).map(rowHtml).join('')}</div>
     <div class="actions"><button type="button" class="btn" id="add-row">＋ 新增一列</button></div>
     <div class="field" style="max-width:280px"><label for="cash">現金（新台幣）</label><input id="cash" type="number" inputmode="decimal" value="${h.cash || ''}" placeholder="0"></div>
-    <div class="actions"><button class="btn primary" type="submit">儲存</button><button type="button" class="btn" id="exp">匯出</button><button type="button" class="btn" id="imp">匯入</button><button type="button" class="btn danger" id="clr">全部清除</button></div>
+    <div class="actions"><button class="btn primary" type="submit">儲存</button><button type="button" class="btn" id="imp-csv">匯入券商檔案</button><button type="button" class="btn" id="exp">匯出</button><button type="button" class="btn" id="imp">匯入</button><button type="button" class="btn danger" id="clr">全部清除</button></div>
+    <div id="imp-preview"></div>
+    <p class="small muted" style="margin:0">「匯入券商檔案」：券商 App 或網站下載的成交明細、庫存 CSV（Big5／UTF-8 都可），自動算出持股、含手續費的成本與已實現損益。</p>
     <p id="pf-msg" class="small" role="status"></p>
   </form>
 </section>
@@ -1494,6 +1653,7 @@ ${(h.log || []).length ? `<section class="card" aria-labelledby="hl2-h"><div cla
   <form id="lm-form" class="form" style="max-width:420px">
     <div class="field"><label for="l-var">1 日風險值上限（%）</label><input id="l-var" type="number" step="0.1" value="${cfg.limits.var95}"></div>
     <div class="field"><label for="l-single">單一持股上限（% 總資產）</label><input id="l-single" type="number" step="1" value="${cfg.limits.single}"></div>
+    <div class="field"><label><input id="l-etf" type="checkbox"${cfg.limits.etfExempt !== false ? ' checked' : ''}> ETF（00 開頭）不受單一持股上限</label><span class="hint">0050 這類指數 ETF 本身已分散，通常不需要和個股用同一個上限。</span></div>
     <div class="field"><label for="l-cash">現金比例下限（%）</label><input id="l-cash" type="number" step="1" value="${cfg.limits.cashMin}"></div>
     <div class="field"><label for="l-risk">單筆交易風險（% 總資產，部位建議用）</label><input id="l-risk" type="number" step="0.1" value="${cfg.limits.riskPct ?? 1}"></div>
     <div class="actions"><button class="btn primary" type="submit">儲存上限</button></div>
@@ -1505,12 +1665,12 @@ ${(h.log || []).length ? `<section class="card" aria-labelledby="hl2-h"><div cla
     const read = () => [...rows.querySelectorAll('.hrow')].map(r => { const [k, s, c] = r.querySelectorAll('input'); return { key: k.value.trim().toUpperCase().replace(/\.TWO?$/, ''), shares: parseFloat(s.value), cost: c.value === '' ? null : parseFloat(c.value) }; }).filter(x => x.key && x.shares > 0);
     $('#add-row').onclick = () => { const i = rows.children.length; rows.insertAdjacentHTML('beforeend', `<div class="hrow" data-i="${i}"><input aria-label="代號" list="hold-list" placeholder="代號，如 2330、NVDA"><input aria-label="股數" type="number" inputmode="decimal" placeholder="股數"><input aria-label="平均成本" type="number" inputmode="decimal" step="any" placeholder="成本（原幣）"><button type="button" class="iconbtn" aria-label="刪除這一列">✕</button></div>`); rows.lastElementChild.querySelector('input').focus(); };
     rows.addEventListener('click', e => { const b = e.target.closest('.iconbtn'); if (b) b.closest('.hrow').remove(); });
-    $('#pf-form').onsubmit = e => { e.preventDefault(); const items = read(), old = H.load(); const log = JSON.stringify(old.items) !== JSON.stringify(items) || old.cash !== (parseFloat($('#cash').value) || 0) ? [...(old.log || []), { at: new Date().toISOString(), items: old.items, cash: old.cash }].slice(-100) : (old.log || []); H.save({ items, cash: parseFloat($('#cash').value) || 0, log }); msg.className = 'small ok-text'; msg.textContent = `已儲存 ${items.length} 檔持股。`; };
+    $('#pf-form').onsubmit = e => { e.preventDefault(); const items = read(), old = H.load(); const sold = recordSells(old.items || [], items); const log = JSON.stringify(old.items) !== JSON.stringify(items) || old.cash !== (parseFloat($('#cash').value) || 0) ? [...(old.log || []), { at: new Date().toISOString(), items: old.items, cash: old.cash }].slice(-100) : (old.log || []); H.save({ items, cash: parseFloat($('#cash').value) || 0, log }); msg.className = 'small ok-text'; msg.textContent = `已儲存 ${items.length} 檔持股。${sold.length ? `已記錄 ${sold.length} 筆賣出（已實現損益，見下方）。` : ''}`; if (sold.length) setTimeout(render, 1200); };
     document.querySelectorAll('[data-restore]').forEach(b => b.onclick = () => { const h0 = H.load(), v = h0.log[+b.dataset.restore]; if (!v || !confirm('把持股還原成這一版？（目前的版本會先存進紀錄）')) return; H.save({ items: v.items, cash: v.cash, log: [...h0.log, { at: new Date().toISOString(), items: h0.items, cash: h0.cash }].slice(-100) }); toast('已還原'); render(); });
     $('#clr').onclick = () => { if (confirm('確定清除持股？（目前的版本會先存進變動紀錄）')) { const h0 = H.load(); H.save({ items: [], cash: 0, log: [...(h0.log || []), { at: new Date().toISOString(), items: h0.items, cash: h0.cash }].slice(-100) }); render(); } };
     $('#exp').onclick = () => { const blob = new Blob([JSON.stringify({ ...H.load(), journal: J.load(), stars: stars(), alerts: alerts() }, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'signal-terminal-mine.json'; a.click(); URL.revokeObjectURL(a.href); };
     $('#imp').onclick = () => { const i = document.createElement('input'); i.type = 'file'; i.accept = 'application/json'; i.onchange = async () => { try { const d = JSON.parse(await i.files[0].text()); if (!Array.isArray(d.items)) throw 0; H.save({ items: d.items, cash: d.cash || 0 }); if (d.journal) J.save(d.journal); if (d.stars) LS.set('stars', d.stars); if (d.alerts) LS.set('alerts', d.alerts); render(); } catch (_) { msg.className = 'small bad-text'; msg.textContent = '檔案格式不正確。'; } }; i.click(); };
-    $('#lm-form').onsubmit = e => { e.preventDefault(); cfg.limits = { var95: +$('#l-var').value || DEF.limits.var95, single: +$('#l-single').value || DEF.limits.single, cashMin: +$('#l-cash').value || 0, riskPct: +$('#l-risk').value || 1 }; saveCfg(); stamp('limits'); scheduleSync(); msg.className = 'small ok-text'; msg.textContent = '風險上限已儲存。'; };
+    $('#lm-form').onsubmit = e => { e.preventDefault(); cfg.limits = Object.assign({}, cfg.limits, { var95: +$('#l-var').value || DEF.limits.var95, single: +$('#l-single').value || DEF.limits.single, cashMin: +$('#l-cash').value || 0, riskPct: +$('#l-risk').value || 1, etfExempt: $('#l-etf').checked }); saveCfg(); stamp('limits'); scheduleSync(); msg.className = 'small ok-text'; msg.textContent = '風險上限已儲存。'; };
   }
 
   // ── 部位建議（依停損距離與風險預算）──────────────────────────
@@ -1789,6 +1949,8 @@ ${footer()}`;
     return `${viewSyncSettings()}
 <section class="card" aria-labelledby="st-h"><div class="hd"><h2 id="st-h">設定</h2><span class="note">只存在這台裝置・目前版本 v${APP_VERSION}</span></div>
   <form id="st-form" class="form" style="max-width:520px">
+    <div class="field"><label><input id="st-quiet" type="checkbox"${cfg.limits.quietOn !== false ? ' checked' : ''}> 推播勿擾時段</label><span class="hint">時段內只送重大警訊，其他的先存起來，時段結束後一次送出（早上的全球快報不受影響，本來就不響鈴）。需要已設定 BACKUP_GIST_ID 與 BACKUP_PASSPHRASE。</span>
+      <div style="display:flex;gap:8px;align-items:center"><input id="st-qs" type="number" min="0" max="23" value="${cfg.limits.quietStart ?? 23}" style="width:80px" aria-label="開始（時）"> 點到 <input id="st-qe" type="number" min="0" max="23" value="${cfg.limits.quietEnd ?? 7}" style="width:80px" aria-label="結束（時）"> 點</div></div>
     <div class="field"><label><input id="st-broker" type="checkbox"${cfg.fees.broker ? ' checked' : ''}> 持股損益用券商算法（台股）</label><span class="hint">和券商 App 的「庫存損益」一致：現值扣除賣出時的手續費與證交稅（股票 0.3%、ETF 0.1%），成本加上買進手續費。關掉就用單純的「股價 × 股數」。</span></div>
     <div class="field"><label for="st-disc">手續費折扣（折）</label><input id="st-disc" type="number" step="0.1" min="0.1" max="10" value="${esc(cfg.fees.disc)}"><span class="hint">例如 2.8 折填 2.8、沒有折扣填 10。看券商 App 的成交明細或對帳單。</span></div>
     <div class="field"><label for="st-feemin">手續費最低（元）</label><input id="st-feemin" type="number" step="1" min="0" value="${esc(cfg.fees.min)}"><span class="hint">電子下單多為 1 元，臨櫃多為 20 元。</span></div>
@@ -1837,7 +1999,7 @@ ${footer()}`;
     const lt = $('#lt-run'); if (lt) lt.onclick = localDiag;
     bindSyncSettings();
     const msg = $('#st-msg');
-    const readForm = () => { cfg.fees = { broker: $('#st-broker').checked, disc: Math.min(10, Math.max(0.1, parseFloat($('#st-disc').value) || 10)), min: Math.max(0, parseFloat($('#st-feemin').value) || 0) }; cfg.colors = $('#st-colors').value; cfg.nasUrl = $('#st-nas').value.trim(); cfg.localEnabled = $('#st-local').checked; cfg.localHost = $('#st-host').value.trim() || 'localhost'; };
+    const readForm = () => { const q = { quietOn: $('#st-quiet').checked, quietStart: Math.min(23, Math.max(0, parseInt($('#st-qs').value) || 0)), quietEnd: Math.min(23, Math.max(0, parseInt($('#st-qe').value) || 0)) }; if (JSON.stringify(q) !== JSON.stringify({ quietOn: cfg.limits.quietOn !== false, quietStart: cfg.limits.quietStart ?? 23, quietEnd: cfg.limits.quietEnd ?? 7 })) { cfg.limits = Object.assign({}, cfg.limits, q); stamp('limits'); scheduleSync(); } cfg.fees = { broker: $('#st-broker').checked, disc: Math.min(10, Math.max(0.1, parseFloat($('#st-disc').value) || 10)), min: Math.max(0, parseFloat($('#st-feemin').value) || 0) }; cfg.colors = $('#st-colors').value; cfg.nasUrl = $('#st-nas').value.trim(); cfg.localEnabled = $('#st-local').checked; cfg.localHost = $('#st-host').value.trim() || 'localhost'; };
     $('#st-form').onsubmit = async e => { e.preventDefault(); readForm(); saveCfg(); applyColors(); msg.className = 'small ok-text'; msg.textContent = '已儲存。'; await probeLocal(); };
     $('#st-test').onclick = async () => {
       readForm(); msg.className = 'small'; msg.textContent = '測試中…';
@@ -1882,11 +2044,12 @@ ${footer()}`;
     const byId = new Map(); for (const d of [...(a.decisions || []), ...(b.decisions || [])]) if (!dead.has(d.id)) byId.set(d.id, d);
     const moodKey = m => m.market + m.at.slice(0, 10), moods = new Map();
     for (const m of [...(a.moods || []), ...(b.moods || [])]) { const k = moodKey(m), o = moods.get(k); if (!o || o.at < m.at) moods.set(k, m); }
+    const rz = new Map(); for (const x of [...(a.realized || []), ...(b.realized || [])]) if (!dead.has(x.id)) rz.set(x.id, x);
     const theses = { ...(a.theses || {}) };
     for (const [k, t] of Object.entries(b.theses || {})) if (!theses[k] || (t.updated || '') > (theses[k].updated || '')) theses[k] = t;
     const arch = new Map(); for (const x of [...(a.archived || []), ...(b.archived || [])]) arch.set(x.key + x.closed, x);
     for (const x of arch.values()) if (theses[x.key] && (theses[x.key].updated || '') <= x.closed) delete theses[x.key];
-    localStorage.setItem('journal', JSON.stringify({ ...a, theses, archived: [...arch.values()].sort((x, y) => x.closed.localeCompare(y.closed)), decisions: [...byId.values()].sort((x, y) => x.at.localeCompare(y.at)), moods: [...moods.values()].sort((x, y) => x.at.localeCompare(y.at)), deleted: [...dead] }));
+    localStorage.setItem('journal', JSON.stringify({ ...a, realized: [...rz.values()].sort((x, y) => (x.date || '').localeCompare(y.date || '')), deleted: [...dead], theses, archived: [...arch.values()].sort((x, y) => x.closed.localeCompare(y.closed)), decisions: [...byId.values()].sort((x, y) => x.at.localeCompare(y.at)), moods: [...moods.values()].sort((x, y) => x.at.localeCompare(y.at)), deleted: [...dead] }));
     lt.journal = Math.max(lt.journal || 0, rt.journal || 0); LS.set('ts', lt);
   }
   async function gh(path, opt = {}) {
@@ -2030,7 +2193,7 @@ ${footer()}`;
       main.innerHTML = '<p class="loading">載入中…</p>';
       const html = await viewQuick(key); if (!location.hash.includes('/q/')) return;
       main.innerHTML = html; document.title = `${key}・訊號終端`;
-    } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); bindPortfolio(); if (SY.get().token) loadRemote().then(pcThesis).then(D => { if (S.route !== 'portfolio' || !D || $('#pth-h')) return; const h = viewPcThesis(D); if (h) { main.insertAdjacentHTML('beforeend', h); setupFolds(); } }); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
+    } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); bindPortfolio(); bindBrokerImport(); { const P0 = holdings(), anchor = main.querySelector('[aria-labelledby="pe-h"]'); if (anchor && P0.rows.length) { anchor.insertAdjacentHTML('beforebegin', viewRebalance(P0) + viewIncome(P0)); bindIncome(); } } if (SY.get().token) loadRemote().then(pcThesis).then(D => { if (S.route !== 'portfolio' || !D || $('#pth-h')) return; const h = viewPcThesis(D); if (h) { main.insertAdjacentHTML('beforeend', h); setupFolds(); } }); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
     else if (S.route === 'history') { main.innerHTML = '<p class="loading">載入歷史快照…</p>'; const html = await viewHistory(h.split('/')[1]); if (S.route !== 'history') return; main.innerHTML = html; const sel = $('#hs-day'); if (sel) sel.onchange = () => { location.hash = '#/history/' + sel.value; }; document.title = '歷史快照・訊號終端'; }
     else if (S.route === 'backtest') { const k = h.split('/')[1]; if (k) { BT.scope = decodeURIComponent(k).toUpperCase(); LS.set('bt', BT); } main.innerHTML = viewBacktest(); bindBacktest(); document.title = '策略回測・訊號終端'; }
     else if (S.route === 'news') { main.innerHTML = '<p class="loading">載入新聞…</p>'; const [N] = await Promise.all([loadNews(), loadUniverse()]); if (S.route !== 'news') return; main.innerHTML = viewNews(N); { const ev = viewPcEvents(); if (ev) main.querySelector('#dgs-h')?.closest('section')?.insertAdjacentHTML('afterend', ev); } bindDigest(); setupFolds(); document.title = '新聞・訊號終端'; }

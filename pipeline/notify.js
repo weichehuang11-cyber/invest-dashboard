@@ -172,7 +172,72 @@ function weekly(snap, P, barsDir) {
   return L;
 }
 
-module.exports = { send, decrypt };
+
+// ── 勿擾時段 ──────────────────────────────────────────────────
+function inQuiet(start, end) {
+  const h = new Date(Date.now() + 8 * 3600000).getUTCHours();
+  return start === end ? false : start < end ? h >= start && h < end : h >= start || h < end;
+}
+
+// ── 系統健康：同一個問題連續 3 次更新都發生才通知，恢復時也通知 ──
+const HEALTH = {
+  yahoo: ['報價（Yahoo）', v => { const m = String(v).match(/^(\d+)\/(\d+)/); return m ? +m[1] / +m[2] >= 0.8 : !/fail/.test(v); }],
+  finmind: ['台股籌碼（FinMind）', v => !/fail|0\//.test(String(v))],
+  news: ['新聞', v => !/fail/.test(String(v))],
+  digest: ['全球快報', v => !/fail/.test(String(v))],
+  ai: ['雲端 AI 解讀', v => !/fail/.test(String(v))],
+  digestAI: ['全球快報 AI 摘要', v => !/fail/.test(String(v))],
+  newsAI: ['新聞 AI 摘要', v => !/錯誤|fail/.test(String(v))],
+  universe: ['全市場清單', v => !/fail/.test(String(v))],
+};
+function healthEvents(st, snap, notified) {
+  const out = [], H = notified._health || {};
+  if (!st?.status) return out;
+  for (const [k, [label, ok]] of Object.entries(HEALTH)) {
+    if (!(k in st.status)) continue;
+    const v = String(st.status[k]), good = ok(v), h = H[k] || { n: 0, alerted: false };
+    if (!good) {
+      h.n++;
+      if (h.n >= 3 && !h.alerted) { out.push({ id: `health:${k}:${tpeDay()}`, prio: 3, text: `⚙️ 系統：${label}連續 ${h.n} 次更新失敗（${v.slice(0, 80)}）` }); h.alerted = true; }
+    } else {
+      if (h.alerted) out.push({ id: `healthok:${k}:${Date.now()}`, prio: 2, text: `✅ 系統：${label}已恢復正常` });
+      h.n = 0; h.alerted = false;
+    }
+    if (JSON.stringify(H[k]) !== JSON.stringify(h)) notified._healthChanged = true;
+    H[k] = h;
+  }
+  notified._health = H; notified._healthChanged = notified._healthChanged || out.length > 0;
+  return out;
+}
+
+// ── 持股／觀察清單的新聞：持股出現利空或多家媒體報導的重大新聞、觀察清單利空且當天大跌 ──
+function newsEvents(N, snap, P, notified) {
+  const out = []; if (!N) return out;
+  const held = new Set((P?.holdings?.items || []).map(x => x.key));
+  const idOf = t => { let h = 5381; const s = String(t).replace(/\s+/g, '').toLowerCase(); for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(36); };
+  const nameOf = k => snap.items[k]?.name || k;
+  for (const [k, list] of Object.entries(N.per || {})) {
+    const it = snap.items[k]; if (!it) continue;
+    for (const n of (list || []).slice(0, 6)) {
+      if (!n.at || Date.now() - Date.parse(n.at) > 24 * 3600000) continue;
+      const id = 'news:' + idOf(n.title); if (notified[id]) continue;
+      const t = n.zh || n.title, neg = n.imp === -1 || n.tone === -1;
+      if (held.has(k) && neg) out.push({ id, prio: 3, text: `📰 持股利空 ${k} ${nameOf(k)}：${t}${n.sum ? `｜${n.sum.slice(0, 60)}` : ''}` });
+      else if (!held.has(k) && neg && (it.changePct ?? 0) <= -3) out.push({ id, prio: 2, text: `📰 觀察清單 ${k} ${nameOf(k)}（${pct(it.changePct)}）：${t}` });
+    }
+  }
+  // 全球重點新聞點名到持股，且有 3 家以上媒體報導
+  for (const n of N.digest?.stories || []) {
+    if ((n.n || 0) < 3) continue;
+    const hit = (n.mk || []).map(m => [...held].find(k => m.includes(k) || m.includes(nameOf(k)))).find(Boolean);
+    if (!hit) continue;
+    const id = 'news:' + idOf(n.title); if (notified[id]) continue;
+    out.push({ id, prio: 3, text: `📰 重大新聞（${n.n} 家報導）涉及持股 ${hit}：${n.zh || n.title}` });
+  }
+  return out.slice(0, 6);
+}
+
+module.exports = { send, decrypt, inQuiet, healthEvents, newsEvents };
 if (require.main === module) (async () => {
   const snap = readJSON(String(args.snap || 'out/data/snapshot.json'), null);
   if (!snap) { console.log('沒有快照，略過通知'); return; }
@@ -193,16 +258,21 @@ if (require.main === module) (async () => {
       }
     }
   }
-  const ev = (await events(snap, P, notified)).sort((a, b) => b.prio - a.prio);
-  if (!ev.length) { console.log('沒有新事件'); return; }
-  const top = ev[0].prio >= 4 ? 4 : 3;
-  const sent = await send(ev.length === 1 ? '訊號終端' : `訊號終端：${ev.length} 則新消息`, ev.map(e => e.text), { priority: top, tags: top >= 4 ? ['warning'] : [] });
-  if (sent) {
-    const day = tpeDay(), cut = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
-    for (const e of ev) notified[e.id] = day;
-    for (const [k, v] of Object.entries(notified)) if (v < cut) delete notified[k];
-    fs.mkdirSync(path.dirname(stFile), { recursive: true });
-    fs.writeFileSync(stFile, JSON.stringify(notified));
-    console.log('NOTIFIED_CHANGED');
-  }
+  const dataDir = path.dirname(String(args.snap || 'out/data/snapshot.json'));
+  const ev = [...await events(snap, P, notified), ...healthEvents(readJSON(path.join(dataDir, 'status.json'), null), snap, notified), ...newsEvents(readJSON(path.join(dataDir, 'news.json'), null), snap, P, notified)].sort((a, b) => b.prio - a.prio);
+  const save = () => { const cut = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10); for (const [k, v] of Object.entries(notified)) if (!k.startsWith('_') && v < cut) delete notified[k]; fs.mkdirSync(path.dirname(stFile), { recursive: true }); fs.writeFileSync(stFile, JSON.stringify(notified)); console.log('NOTIFIED_CHANGED'); };
+  // 勿擾時段：只送重大（優先 4 以上），其他先存起來，時段結束後一次送出
+  const L = P?.limits || {}, quiet = L.quietOn !== false && inQuiet(L.quietStart ?? 23, L.quietEnd ?? 7);
+  let changed = notified._healthChanged; delete notified._healthChanged;
+  const queue = notified._queue || [];
+  const now = quiet ? ev.filter(e => e.prio >= 4) : ev, later = quiet ? ev.filter(e => e.prio < 4) : [];
+  if (later.length) { for (const e of later) { queue.push(e.text); notified[e.id] = tpeDay(); } notified._queue = queue.slice(-40); changed = true; console.log(`勿擾時段：先存 ${later.length} 則`); }
+  const flush = !quiet && queue.length ? queue : [];
+  if (now.length || flush.length) {
+    const top = now.some(e => e.prio >= 4) ? 4 : 3;
+    const lines = [...now.map(e => e.text), ...(flush.length ? [`── 勿擾時段累積 ${flush.length} 則 ──`, ...flush] : [])];
+    const sent = await send(lines.length === 1 ? '訊號終端' : `訊號終端：${now.length + flush.length} 則新消息`, lines, { priority: top, tags: top >= 4 ? ['warning'] : [] });
+    if (sent) { for (const e of now) notified[e.id] = tpeDay(); if (flush.length) delete notified._queue; changed = true; }
+  } else console.log('沒有新事件');
+  if (changed) save();
 })();

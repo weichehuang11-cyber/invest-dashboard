@@ -76,12 +76,15 @@ function toRaw(r) {
 async function fetchOne(s, range) {
   const days = { '1mo': 31, '1y': 366, '2y': 731, '5y': 1827, '10y': 3653 }[range] || 731;
   try {
-    const r = await yf().chart(s, { period1: new Date(Date.now() - days * 86400000), interval: '1d' }, { validateResult: false });
+    const r = await yf().chart(s, { period1: new Date(Date.now() - days * 86400000), interval: '1d', events: 'div' }, { validateResult: false });
     const d = parseDaily(toRaw(r));
+    if (d) d.divs = (r.events?.dividends || []).map(x => ({ date: new Date(x.date).toISOString().slice(0, 10), amount: +(+x.amount).toFixed(4) })).filter(x => x.amount > 0);
     if (d && d.bars.close.length) return d;
   } catch (_) { /* 改用直接呼叫 */ }
-  const j = await get(`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(s)}?interval=1d&range=${range}&includePrePost=false`, { retries: 1 });
-  return parseDaily(j);
+  const j = await get(`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(s)}?interval=1d&range=${range}&includePrePost=false&events=div`, { retries: 1 });
+  const d = parseDaily(j);
+  if (d) d.divs = Object.values(j?.chart?.result?.[0]?.events?.dividends || {}).map(x => ({ date: new Date(x.date * 1000).toISOString().slice(0, 10), amount: +(+x.amount).toFixed(4) })).filter(x => x.amount > 0).sort((a, b) => a.date.localeCompare(b.date));
+  return d;
 }
 
 /** 台股自動試 .TW（上市）→ .TWO（上櫃） */

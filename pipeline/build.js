@@ -366,6 +366,7 @@ async function main() {
     if (finA && Math.abs(finA.score) >= 2) sig.evidence.fund = finA.score > 0 ? 'pos' : 'neg';
     items[key] = {
       key, market, name: names[key] || d.name || key, currency: d.currency,
+      divs: (d.divs || []).filter(x => x.date >= new Date(Date.now() - 3 * 366 * 86400000).toISOString().slice(0, 10)),
       price: r2(d.price, 4), prevClose: r2(d.prevClose, 4), changePct: r2(d.changePct), marketDate: d.marketDate, marketTime: d.marketTime,
       ta: ta && Object.fromEntries(Object.entries(ta).map(([k, v]) => [k, typeof v === 'number' ? r2(v, 4) : v])),
       chip, fund, ml, signal: { ...sig, stop: ta?.stopLong ? r2(ta.stopLong, 2) : null },
@@ -736,6 +737,8 @@ async function main() {
     status.news = 'fail: ' + e.message.slice(0, 200);
     if (heavy.newsLast) writeJSON(path.join(OUT, 'news.json'), heavy.newsLast);
   }
+  // 本次更新各資料來源的狀態（推播用來偵測連續失敗）
+  writeJSON(path.join(OUT, 'status.json'), { at: nowIso, mode: FULL ? `full:${FULL}` : 'intraday', status });
   log('輸出完成', OUT);
 
   // 狀態只在收盤後完整更新時寫入（盤中更新只讀取）
