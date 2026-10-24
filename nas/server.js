@@ -18,6 +18,7 @@ const { spawn } = require('child_process');
 const DIR = path.resolve(__dirname, '..');
 const BASE = process.env.INVEST_BACKUP_BASE || path.resolve(DIR, '..', 'invest-backup');
 const SITE = path.join(BASE, 'site');
+const ARCH = path.join(BASE, 'archive');
 const PORT = +(process.env.PORT || 8765);
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 const state = { started: new Date().toISOString(), running: null, last: null, history: [], watch: { checkedAt: null, ageMin: null, lastAlert: null, lastDispatch: null, note: null } };
@@ -95,6 +96,14 @@ http.createServer((req, res) => {
   const url = decodeURIComponent((req.url || '/').split('?')[0]);
   if (url === '/' ) { res.writeHead(302, { Location: '/backup/' }); return res.end(); }
   if (url === '/backup/status.json' || url === '/health') { res.writeHead(200, { 'Content-Type': TYPES['.json'], 'Cache-Control': 'no-store' }); return res.end(JSON.stringify({ status: 'ok', ...state })); }
+  // 歷史封存：盤中每次更新的快照（網站「歷史快照」頁可選時間查詢）
+  if (url === '/backup/archive/index.json') {
+    let days = [];
+    try { days = fs.readdirSync(path.join(ARCH, 'snapshots')).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().map(d => ({ d, t: fs.readdirSync(path.join(ARCH, 'snapshots', d)).filter(f => /^\d{4}\.json$/.test(f)).map(f => f.slice(0, 4)).sort() })); } catch (_) {}
+    res.writeHead(200, { 'Content-Type': TYPES['.json'], 'Cache-Control': 'no-store' }); return res.end(JSON.stringify({ days }));
+  }
+  const am = url.match(/^\/backup\/archive\/(snapshots\/\d{4}-\d{2}-\d{2}\/\d{4}|daily\/\d{4}-\d{2}-\d{2})\.json$/);
+  if (am) return fs.readFile(path.join(ARCH, am[1] + '.json'), (err, buf) => { if (err) { res.writeHead(404); return res.end('not found'); } res.writeHead(200, { 'Content-Type': TYPES['.json'], 'Cache-Control': 'public, max-age=86400' }); res.end(buf); });
   if (!url.startsWith('/backup/')) { res.writeHead(404); return res.end('not found'); }
   let f = path.normalize(path.join(SITE, url.slice('/backup/'.length)));
   if (!f.startsWith(SITE)) { res.writeHead(403); return res.end(); }

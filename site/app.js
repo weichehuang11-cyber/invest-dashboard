@@ -1727,23 +1727,40 @@ ${(h.log || []).length ? `<section class="card" aria-labelledby="hl2-h"><div cla
   // ── 歷史快照查詢 ────────────────────────────────────────────
   const rawBase = () => { const { owner, repo } = repoInfo(); return `https://raw.githubusercontent.com/${owner}/${repo}/data/archive/`; };
   let HIST_IDX = null;
-  async function viewHistory(day) {
+  let NAS_IDX = null, NAS_IDX_AT = 0;
+  async function nasArchive() {
+    if (!nasBase() || !/^https:\/\//.test(nasBase())) return null;
+    if (NAS_IDX && Date.now() - NAS_IDX_AT < 5 * 60000) return NAS_IDX;
+    try { NAS_IDX = await getJSON(nasBase() + '/backup/archive/index.json', 6000); NAS_IDX_AT = Date.now(); } catch (_) { NAS_IDX = null; }
+    return NAS_IDX;
+  }
+  async function viewHistory(day, hm) {
     if (!HIST_IDX) { try { HIST_IDX = await getJSON(rawBase() + 'index.json'); } catch (_) { HIST_IDX = { days: [] }; } }
-    const days = (HIST_IDX.days || []).slice().reverse();
-    if (!days.length) return `<div><a href="#/scorecard" class="small">← 系統成績</a></div><section class="card"><div class="hd"><h2>歷史快照</h2></div><p class="empty" style="margin:0">還沒有封存資料。每次收盤後完整更新都會存一份，明天起就能查詢。</p></section>`;
+    const NI = await nasArchive(), nasDays = Object.fromEntries((NI?.days || []).map(x => [x.d, x.t]));
+    const ghDays = new Set(HIST_IDX.days || []);
+    const days = [...new Set([...(HIST_IDX.days || []), ...Object.keys(nasDays)])].sort().reverse();
+    if (!days.length) return `<div><a href="#/scorecard" class="small">← 系統成績</a></div><section class="card"><div class="hd"><h2>歷史快照</h2></div><p class="empty" style="margin:0">還沒有封存資料。每次收盤後完整更新都會存一份。</p></section>`;
     day = day && days.includes(day) ? day : days[0];
-    let snap = null; try { snap = await getJSON(rawBase() + `${day.slice(0, 4)}/${day}.json`); } catch (_) {}
-    const now = S.snap;
+    const times = nasDays[day] || [];
+    if (hm && !times.includes(hm)) hm = null;
+    if (!hm && !ghDays.has(day) && times.length) hm = times[times.length - 1];   // GitHub 沒有這天就用 NAS 最後一份
+    let snap = null, src = '', file = '';
+    if (hm) { file = `${nasBase()}/backup/archive/snapshots/${day}/${hm}.json`; try { snap = await getJSON(file, 10000); src = `NAS 盤中快照 ${hm.slice(0, 2)}:${hm.slice(2)}`; } catch (_) {} }
+    else { file = rawBase() + `${day.slice(0, 4)}/${day}.json`; try { snap = await getJSON(file); src = '收盤後（GitHub）'; } catch (_) {} }
     const head = `<div><a href="#/scorecard" class="small">← 系統成績</a></div>
-<section class="card" aria-labelledby="hs-h"><div class="hd"><h2 id="hs-h">歷史快照</h2><span class="note">每天收盤後的完整紀錄，永久保存在 GitHub</span></div>
-  <div class="field" style="max-width:260px"><label for="hs-day">日期</label><select id="hs-day">${days.map(d => `<option${d === day ? ' selected' : ''}>${d}</option>`).join('')}</select></div></section>`;
-    if (!snap) return head + '<section class="card"><p class="empty">這一天的資料讀取失敗。</p></section>';
+<section class="card" aria-labelledby="hs-h"><div class="hd"><h2 id="hs-h">歷史快照</h2><span class="note">收盤後的紀錄永久保存在 GitHub${NI ? '；盤中每次更新的快照存在 NAS，可選時間查詢' : nasBase() ? '；NAS 連不到（確認 Tailscale），只能看收盤快照' : '；在「設定」填入 NAS 備援網址，就能查盤中快照'}</span></div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap">
+    <div class="field" style="max-width:220px"><label for="hs-day">日期</label><select id="hs-day">${days.map(d => `<option${d === day ? ' selected' : ''}>${d}</option>`).join('')}</select></div>
+    ${times.length ? `<div class="field" style="max-width:220px"><label for="hs-t">時間</label><select id="hs-t">${ghDays.has(day) ? `<option value=""${!hm ? ' selected' : ''}>收盤後（GitHub）</option>` : ''}${times.slice().reverse().map(t => `<option value="${t}"${t === hm ? ' selected' : ''}>${t.slice(0, 2)}:${t.slice(2)}（NAS）</option>`).join('')}</select></div>` : ''}
+  </div></section>`;
+    if (!snap) return head + '<section class="card"><p class="empty">這個時間點的資料讀取失敗。</p></section>';
+    const now = S.snap;
     const v = snap.verdict;
     const rows = (snap.ranking || []).map(k => { const a = snap.items[k], b = now.items[k]; return { k, name: a.name, sig: a.signal.sig, score: a.signal.score, px: a.price, nowPx: b?.price, nowSig: b?.signal.sig, chg: b && a.price ? (b.price / a.price - 1) * 100 : null }; });
     const hitBuy = rows.filter(r => r.sig === 'BUY' && isNum(r.chg)), hitSell = rows.filter(r => r.sig === 'SELL' && isNum(r.chg));
     const avg = a => (a.length ? a.reduce((s, r) => s + r.chg, 0) / a.length : null);
     return head + `
-<section class="card"><div class="hd"><h2>當天的判斷</h2><span class="note">${esc(tpeTime(snap.generatedAt))}</span></div>
+<section class="card"><div class="hd"><h2>當時的判斷</h2><span class="note">${esc(tpeTime(snap.generatedAt))}・${esc(src)}</span></div>
   <p style="margin:0;font-size:17px;font-weight:600">${esc(v.headline)}</p><p style="margin:0" class="muted">${esc(v.detail)}</p>
   <div class="env" style="margin-top:4px">${snap.env.map(e => { const n = now.env.find(x => x.key === e.key); return `<div class="tile"><div class="lb">${esc(e.label)}</div><div class="v"><b>${num(e.value, e.value >= 1000 ? 0 : 2)}</b></div><div class="m">現在 ${n ? num(n.value, n.value >= 1000 ? 0 : 2) : '—'}</div></div>`; }).join('')}</div>
   ${(snap.health?.signals || []).length ? `<ul class="tcom">${snap.health.signals.map(x => `<li class="${x.tone}"><i></i>${esc(x.text)}</li>`).join('')}</ul>` : ''}
@@ -1752,7 +1769,7 @@ ${(h.log || []).length ? `<section class="card" aria-labelledby="hl2-h"><div cla
   <p style="margin:0">當天買進訊號 ${hitBuy.length} 檔，到現在平均 <b class="${cls(avg(hitBuy))}">${pct(avg(hitBuy), 1)}</b>；賣出訊號 ${hitSell.length} 檔，平均 <b class="${cls(avg(hitSell))}">${pct(avg(hitSell), 1)}</b>；全部平均 ${pct(avg(rows.filter(r => isNum(r.chg))), 1)}。</p>
   <div class="tbl-box"><table class="tbl rtbl"><thead><tr><th>標的</th><th>當天</th><th class="num">分數</th><th class="num">當天價</th><th class="num">現價</th><th class="num">至今</th><th>現在</th></tr></thead><tbody>
   ${rows.map(r => `<tr class="clk" data-href="${stockHref(r.k)}"><td><a href="${stockHref(r.k)}">${esc(r.k)}</a> <span class="small muted">${esc(r.name)}</span></td><td>${sigTag(r.sig)}</td><td class="num">${r.score}</td><td class="num">${px(r.px)}</td><td class="num">${px(r.nowPx)}</td><td class="num ${cls(r.chg)}">${pct(r.chg, 1)}</td><td>${r.nowSig ? sigTag(r.nowSig) : '—'}</td></tr>`).join('')}</tbody></table></div>
-  <p class="small muted" style="margin:0">原始檔：<a href="${rawBase()}${day.slice(0, 4)}/${day}.json" target="_blank" rel="noopener">${day}.json</a></p>
+  <p class="small muted" style="margin:0">原始檔：<a href="${esc(file)}" target="_blank" rel="noopener">${esc(file.split('/').slice(-2).join('/'))}</a></p>
 </section>${footer()}`;
   }
 
@@ -2196,7 +2213,7 @@ ${footer()}`;
       const html = await viewQuick(key); if (!location.hash.includes('/q/')) return;
       main.innerHTML = html; document.title = `${key}・訊號終端`;
     } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); bindPortfolio(); bindBrokerImport(); { const P0 = holdings(), anchor = main.querySelector('[aria-labelledby="pe-h"]'); if (anchor && P0.rows.length) { anchor.insertAdjacentHTML('beforebegin', viewRebalance(P0) + viewIncome(P0)); bindIncome(); } } if (SY.get().token) loadRemote().then(pcThesis).then(D => { if (S.route !== 'portfolio' || !D || $('#pth-h')) return; const h = viewPcThesis(D); if (h) { main.insertAdjacentHTML('beforeend', h); setupFolds(); } }); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
-    else if (S.route === 'history') { main.innerHTML = '<p class="loading">載入歷史快照…</p>'; const html = await viewHistory(h.split('/')[1]); if (S.route !== 'history') return; main.innerHTML = html; const sel = $('#hs-day'); if (sel) sel.onchange = () => { location.hash = '#/history/' + sel.value; }; document.title = '歷史快照・訊號終端'; }
+    else if (S.route === 'history') { main.innerHTML = '<p class="loading">載入歷史快照…</p>'; const html = await viewHistory(h.split('/')[1], h.split('/')[2]); if (S.route !== 'history') return; main.innerHTML = html; const sel = $('#hs-day'); if (sel) sel.onchange = () => { location.hash = '#/history/' + sel.value; }; const st = $('#hs-t'); if (st) st.onchange = () => { location.hash = '#/history/' + sel.value + (st.value ? '/' + st.value : ''); }; document.title = '歷史快照・訊號終端'; }
     else if (S.route === 'backtest') { const k = h.split('/')[1]; if (k) { BT.scope = decodeURIComponent(k).toUpperCase(); LS.set('bt', BT); } main.innerHTML = viewBacktest(); bindBacktest(); document.title = '策略回測・訊號終端'; }
     else if (S.route === 'news') { main.innerHTML = '<p class="loading">載入新聞…</p>'; const [N] = await Promise.all([loadNews(), loadUniverse()]); if (S.route !== 'news') return; main.innerHTML = viewNews(N); { const ev = viewPcEvents(); if (ev) main.querySelector('#dgs-h')?.closest('section')?.insertAdjacentHTML('afterend', ev); } bindDigest(); setupFolds(); document.title = '新聞・訊號終端'; }
     else if (S.route === 'journal') { main.innerHTML = viewJournal(); document.title = '我的成績單・訊號終端'; afterJournal(); }
