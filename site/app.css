@@ -535,7 +535,7 @@ ul.news .tone { font-size: 10px; margin-right: 4px; }
 .ai.ai-old { opacity: .72; }
 
 /* 籌碼排行表：手機不超出 */
-.tbl.cm { width: 100%; table-layout: fixed; }
+.tbl.cm { width: 100%; table-layout: fixed; min-width: 0; }
 .tbl.cm th:nth-child(1), .tbl.cm td:nth-child(1) { width: 40%; }
 .tbl.cm td.cm-n { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
 .tbl.cm td.num, .tbl.cm th.num { white-space: nowrap; }

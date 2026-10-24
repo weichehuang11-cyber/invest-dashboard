@@ -323,16 +323,35 @@
       <div class="thc">${list.map(x => `<div class="thi"><div class="th-hd"><a href="#/s/${encodeURIComponent(x.key)}"><b>${esc(x.key)} ${esc(x.name || '')}</b></a><span class="pill th-${TH_CLS[x.status] || 'warn'}">${esc(x.status)}</span>${x.hasThesis ? '' : '<span class="small muted">（沒寫論點，依持股檢查）</span>'}</div>
         <div class="small"><b>理由</b>　${esc(x.reason)}</div><div class="small"><b>反方</b>　${esc(x.counter)}</div><div class="small"><b>要盯</b>　${esc(x.check)}</div></div>`).join('')}</div></section>`;
   }
+  function viewPcScan() {
+    const M = S.remote?.mscan; if (!pcFresh() || !M?.top?.length) return '';
+    const row = r => `<tr class="clk" data-href="${stockHref(r.k)}"><td style="white-space:normal"><a href="${stockHref(r.k)}">${esc(r.k)}</a> <span class="small muted">${esc(r.n)}</span></td><td class="num ${cls(r.p)}">${pct(r.p, 1)}</td><td class="num ${cls(r.r20)}">${pct(r.r20, 1)}</td><td class="num ${cls(r.d5)}">${pct(r.d5, 1)}</td></tr>`;
+    return `<section class="card fold all" data-fold="mscan" aria-labelledby="ms-h"><div class="hd"><h2 id="ms-h">電腦全市場掃描</h2><span class="note">上市 ${M.n} 檔・NPU 模型 5 日預測＋20 日動能＋月線・${esc(M.date || '')}</span></div>
+      <div class="tbl-box"><table class="tbl cm"><thead><tr><th>前 20 名</th><th class="num">今日</th><th class="num">20 日</th><th class="num">預測 5 日</th></tr></thead><tbody>${M.top.map(row).join('')}</tbody></table></div>
+      <details><summary class="small">最弱 10 檔</summary><div class="tbl-box"><table class="tbl cm"><tbody>${(M.bottom || []).map(row).join('')}</tbody></table></div></details>
+      <p class="small muted" style="margin:0">這是篩選清單，不是買賣訊號：模型 5 日預測的方向命中率見「系統 → 電腦預測成績」。點任一列看個股。</p></section>`;
+  }
+  function viewPcEvents() {
+    const E = S.remote?.events; if (!pcFresh() || !E) return '';
+    return `<section class="card fold all" data-fold="pcev" aria-labelledby="ev-h"><div class="hd"><h2 id="ev-h">歷史上類似的新聞</h2><span class="note">電腦比對過去的新聞資料庫（${E.archive} 則，自 ${esc(E.since || '')} 起累積），看之後大盤怎麼走</span></div>
+      ${E.items?.length ? `<div class="ncl">${E.items.map(x => `<div class="nc neu"><div class="nc-t">${esc(x.t)}</div><div class="small">過去 ${x.n} 次類似新聞之後，${esc(x.index)}：5 日平均 <b class="${cls(x.avg5)}">${pct(x.avg5, 2)}</b>（上漲 ${x.up5 ?? '—'}%）${x.avg20 != null ? `，20 日平均 <b class="${cls(x.avg20)}">${pct(x.avg20, 2)}</b>` : ''}</div>
+        <div class="small muted">${x.past.map(p => `${esc(p.d)}「${esc(p.t)}」5 日 ${pct(p.r5, 1)}`).join('；')}</div></div>`).join('')}</div>` : '<p class="empty">資料庫還在累積，找到過去有相似的新聞後就會出現（通常需要幾週）。</p>'}</section>`;
+  }
+  function viewPcTrain() {
+    const T = S.remote?.train; if (!T) return '';
+    if (T.error) return `<p class="small muted">電腦模型重訓：${esc(T.error)}</p>`;
+    return `<div class="small"><b>電腦每週重訓模型</b>（${agoMin((Date.now() - Date.parse(T.at)) / 60000)}，${T.symbols} 檔、${int(T.samples)} 筆，時間軸後 20% 驗證）：新模型 5 日方向命中 <b>${T.new.hit5}%</b>、舊模型 ${T.old?.hit5 ?? '—'}%、一直猜漲 ${T.base.hit5}% → ${T.replaced ? '<b class="ok-text">已換成新模型</b>' : '保留舊模型（新的沒有更準）'}</div>`;
+  }
   function viewPcScore() {
     const R = S.remote; if (!R?.score && !R?.scan) return '';
     const st = R.score?.stats || {}, row = (lab, k) => { const a = st[k] || {}; return `<tr><td>${lab}</td>${['d1', 'd5'].map(h => `<td class="num">${a[h]?.n ? `${a[h].rate}%<span class="small muted">（${a[h].n}）</span>` : '—'}</td>`).join('')}</tr>`; };
     const sc = R.scan, pr = x => `${x.ma} 日線${x.rsi ? `＋RSI≤${x.rsi}` : ''}${x.stop ? `＋${x.stop}×ATR 停損` : ''}`;
     return `<section class="card" aria-labelledby="pcs-h"><div class="hd"><h2 id="pcs-h">電腦預測成績</h2><span class="note">電腦每天的預測，事後對照實際收盤的方向命中率・已累積 ${R.score?.days || 0} 個交易日</span></div>
-      <div class="tbl-box"><table class="tbl"><thead><tr><th>來源</th><th class="num">隔日方向</th><th class="num">5 日方向</th></tr></thead><tbody>${row('電腦 NPU 模型', 'npu')}${row('電腦 CPU 模型', 'cpu')}${row('一直猜漲（對照）', 'base')}</tbody></table></div>
-      <p class="small muted" style="margin:0">括號內是樣本數。命中率要明顯高於「一直猜漲」才代表模型有用；剛開始累積時樣本少，數字會跳動。</p></section>
+      <div class="tbl-box"><table class="tbl cm"><thead><tr><th>來源</th><th class="num">隔日方向</th><th class="num">5 日方向</th></tr></thead><tbody>${row('電腦 NPU 模型', 'npu')}${row('電腦 CPU 模型', 'cpu')}${row('一直猜漲（對照）', 'base')}</tbody></table></div>
+      <p class="small muted" style="margin:0">括號內是樣本數。命中率要明顯高於「一直猜漲」才代表模型有用；剛開始累積時樣本少，數字會跳動。</p>${viewPcTrain()}</section>
     ${sc ? `<section class="card" aria-labelledby="pcn-h"><div class="hd"><h2 id="pcn-h">電腦策略參數掃描</h2><span class="note">5 年日 K・前 60% 挑參數、後 40% 驗證・含交易成本・${agoMin((Date.now() - Date.parse(sc.at)) / 60000)}</span></div>
       ${sc.common?.length ? `<div class="small"><b>整體最穩的設定：</b>${sc.common.map(x => `${pr(x)}（驗證期 ${x.beatShare}% 的股票贏過一直持有，平均超額 ${pct(x.avgExcess, 1)}）`).join('；')}</div>` : ''}
-      <div class="tbl-box"><table class="tbl"><thead><tr><th>個股／建立期最佳設定</th><th class="num">驗證期<br>策略／持有</th><th class="num">交易<br>勝率</th></tr></thead><tbody>
+      <div class="tbl-box"><table class="tbl cm"><thead><tr><th>個股／建立期最佳設定</th><th class="num">驗證期<br>策略／持有</th><th class="num">交易<br>勝率</th></tr></thead><tbody>
       ${(sc.items || []).sort((a, b) => (b.test - b.bh) - (a.test - a.bh)).map(x => `<tr><td style="white-space:normal"><a href="#/s/${encodeURIComponent(x.key)}">${esc(x.key)}</a> <span class="small muted">${esc(nameOf(x.key))}</span>${x.beats ? ' <span class="wstar" title="驗證期贏過一直持有">★</span>' : ''}<div class="small muted">${pr(x)}</div></td><td class="num"><b class="${cls(x.test)}">${pct(x.test, 1)}</b><div class="small muted">${pct(x.bh, 1)}</div></td><td class="num small">${x.trades} 次<div class="muted">${x.win ?? '—'}%</div></td></tr>`).join('')}</tbody></table></div>
       <p class="small muted" style="margin:0">策略：收盤站上均線（可加 RSI 回檔條件）隔天開盤買進，跌破均線、觸及停損或持有 60 天出場。★＝驗證期也贏過一直持有，只有這類設定才值得參考。</p></section>` : ''}`;
   }
@@ -2008,12 +2027,12 @@ ${footer()}`;
     } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); bindPortfolio(); if (SY.get().token) loadRemote().then(pcThesis).then(D => { if (S.route !== 'portfolio' || !D || $('#pth-h')) return; const h = viewPcThesis(D); if (h) { main.insertAdjacentHTML('beforeend', h); setupFolds(); } }); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
     else if (S.route === 'history') { main.innerHTML = '<p class="loading">載入歷史快照…</p>'; const html = await viewHistory(h.split('/')[1]); if (S.route !== 'history') return; main.innerHTML = html; const sel = $('#hs-day'); if (sel) sel.onchange = () => { location.hash = '#/history/' + sel.value; }; document.title = '歷史快照・訊號終端'; }
     else if (S.route === 'backtest') { const k = h.split('/')[1]; if (k) { BT.scope = decodeURIComponent(k).toUpperCase(); LS.set('bt', BT); } main.innerHTML = viewBacktest(); bindBacktest(); document.title = '策略回測・訊號終端'; }
-    else if (S.route === 'news') { main.innerHTML = '<p class="loading">載入新聞…</p>'; const [N] = await Promise.all([loadNews(), loadUniverse()]); if (S.route !== 'news') return; main.innerHTML = viewNews(N); bindDigest(); setupFolds(); document.title = '新聞・訊號終端'; }
+    else if (S.route === 'news') { main.innerHTML = '<p class="loading">載入新聞…</p>'; const [N] = await Promise.all([loadNews(), loadUniverse()]); if (S.route !== 'news') return; main.innerHTML = viewNews(N); { const ev = viewPcEvents(); if (ev) main.querySelector('#dgs-h')?.closest('section')?.insertAdjacentHTML('afterend', ev); } bindDigest(); setupFolds(); document.title = '新聞・訊號終端'; }
     else if (S.route === 'journal') { main.innerHTML = viewJournal(); document.title = '我的成績單・訊號終端'; afterJournal(); }
     else if (S.route === 'scorecard') { main.innerHTML = viewScorecard(); document.title = '模型成績・訊號終端'; if (SY.get().token) loadRemote().then(() => { if (S.route !== 'scorecard' || $('#pcs-h')) return; const h = viewPcScore(); if (h) main.querySelector('footer')?.insertAdjacentHTML('beforebegin', h); }); }
     else if (S.route === 'settings') { main.innerHTML = viewSettings(); bindSettings(); document.title = '設定・訊號終端'; }
     else if (S.route === 'all') { main.innerHTML = `<div><a href="#/" class="small">← 回總覽</a></div><section class="card" id="opps">${viewOpps(0)}</section>${footer()}`; document.title = '全部標的・訊號終端'; }
-    else { main.innerHTML = viewHome(); document.title = '訊號終端'; afterHome(); if (SY.get().token) loadRemote().then(() => { if (S.route !== 'home' || $('#pck-h')) return; const h = viewPcChecks(); if (h) { $('#opps')?.insertAdjacentHTML('beforebegin', h); setupFolds(); } }); loadNews().then(N => { if (S.route !== 'home') return; const el = $('#themes'); if (el) el.innerHTML = viewThemesMini(N); const d = $('#digest'); if (d) d.innerHTML = viewDigestMini(N); setupFolds(); }); }
+    else { main.innerHTML = viewHome(); document.title = '訊號終端'; afterHome(); if (SY.get().token) loadRemote().then(() => { if (S.route !== 'home' || $('#pck-h') || $('#ms-h')) return; const h = viewPcChecks(), h2 = viewPcScan(); if (h) $('#opps')?.insertAdjacentHTML('beforebegin', h); if (h2) $('#opps')?.insertAdjacentHTML('afterend', h2); if (h || h2) setupFolds(); }); loadNews().then(N => { if (S.route !== 'home') return; const el = $('#themes'); if (el) el.innerHTML = viewThemesMini(N); const d = $('#digest'); if (d) d.innerHTML = viewDigestMini(N); setupFolds(); }); }
     setupFolds();
   }
 
