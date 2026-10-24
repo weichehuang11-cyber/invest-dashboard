@@ -12,9 +12,10 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (_) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} },
   };
-  const DEF = { colors: 'tw', nasUrl: '', localHost: 'localhost', localEnabled: true, limits: { var95: 2.5, single: 20, cashMin: 10, riskPct: 1 } };
+  const DEF = { colors: 'tw', nasUrl: '', localHost: 'localhost', localEnabled: true, limits: { var95: 2.5, single: 20, cashMin: 10, riskPct: 1 }, fees: { broker: true, disc: 2.8, min: 1 } };
   const cfg = Object.assign({}, DEF, LS.get('cfg', {}));
   cfg.limits = Object.assign({}, DEF.limits, cfg.limits || {});
+  cfg.fees = Object.assign({}, DEF.fees, cfg.fees || {});
   const saveCfg = () => LS.set('cfg', cfg);
   const APP_VERSION = '1.0.0';
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -219,8 +220,16 @@
       let it = S.snap.items[x.key];
       if (!it && UNI) { const u = UNI.list.find(z => z.k === x.key); if (u && isNum(u.c)) it = { key: u.k, name: u.n, market: u.m, price: u.c, prevClose: isNum(u.p) ? u.c / (1 + u.p / 100) : u.c, changePct: u.p, quick: true, ta: {}, signal: { evidence: {} } }; }
       const k = it?.market === 'us' ? rate : 1;
-      const mv = it && isNum(it.price) ? it.price * x.shares * k : null;
-      const cost = isNum(x.cost) ? x.cost * x.shares * k : null;
+      let mv = it && isNum(it.price) ? it.price * x.shares * k : null;
+      let cost = isNum(x.cost) ? x.cost * x.shares * k : null;
+      // 券商算法（台股）：現值扣除賣出手續費與證交稅、成本加上買進手續費，與券商 App 的庫存損益一致
+      if (cfg.fees.broker && it?.market === 'tw') {
+        const r = 0.001425 * (Number(cfg.fees.disc) || 10) / 10, mn = Number(cfg.fees.min) || 0;
+        const fee = amt => (amt > 0 ? Math.max(mn, Math.floor(amt * r)) : 0);
+        const tax = /^00\d{2,4}B$/.test(x.key) ? 0 : /^00/.test(x.key) ? 0.001 : 0.003;   // 債券 ETF 免證交稅、一般 ETF 0.1%、股票 0.3%
+        if (mv != null) mv = mv - fee(mv) - Math.floor(mv * tax);
+        if (cost != null) cost = cost + fee(cost);
+      }
       return { ...x, it, mv, cost, pnl: mv != null && cost != null ? mv - cost : null, day: it && isNum(it.prevClose) ? (it.price - it.prevClose) * x.shares * k : null };
     });
     const stock = rows.reduce((s, r) => s + (r.mv || 0), 0);
@@ -475,7 +484,7 @@ ${footer()}`;
       return `<div class="limit"${id ? ` id="${id}"` : ''}><div>${label}</div><div class="meter" role="img" aria-label="${label} ${val == null ? '計算中' : val.toFixed(1) + unit}，${higherBad ? '上限' : '下限'} ${limit}${unit}"><div style="width:${val == null ? 0 : Math.min(100, val / scale * 100)}%;background:${color}"></div><i style="left:${limit / scale * 100}%"></i></div><div class="mono" style="text-align:right"><b style="color:${color}">${val == null ? '…' : val.toFixed(1) + unit}</b> / ${limit}${unit}</div></div>`;
     };
     return `
-      <div class="hd"><h2 id="pf-h">我的部位</h2><span class="note">新台幣計價・美股以美元兌台幣 ${num(fx(), 2)} 換算・只存在本機</span><a class="act" href="#/portfolio">編輯</a></div>
+      <div class="hd"><h2 id="pf-h">我的部位</h2><span class="note">新台幣計價・美股以美元兌台幣 ${num(fx(), 2)} 換算${cfg.fees.broker ? `・台股依券商算法（扣賣出手續費與證交稅，手續費 ${cfg.fees.disc} 折）` : ''}・只存在本機</span><a class="act" href="#/portfolio">編輯</a></div>
       <div class="kpis">
         <div class="kpi"><div class="lb">總市值</div><div class="v">${int(P.total)}</div></div>
         <div class="kpi"><div class="lb">今日損益</div><div class="v ${cls(P.day)}">${sign(P.day)}${int(Math.abs(P.day))}</div><div class="small ${cls(P.day)}">${pct(P.dayPct)}</div></div>
@@ -1713,6 +1722,9 @@ ${footer()}`;
     return `${viewSyncSettings()}
 <section class="card" aria-labelledby="st-h"><div class="hd"><h2 id="st-h">設定</h2><span class="note">只存在這台裝置・目前版本 v${APP_VERSION}</span></div>
   <form id="st-form" class="form" style="max-width:520px">
+    <div class="field"><label><input id="st-broker" type="checkbox"${cfg.fees.broker ? ' checked' : ''}> 持股損益用券商算法（台股）</label><span class="hint">和券商 App 的「庫存損益」一致：現值扣除賣出時的手續費與證交稅（股票 0.3%、ETF 0.1%），成本加上買進手續費。關掉就用單純的「股價 × 股數」。</span></div>
+    <div class="field"><label for="st-disc">手續費折扣（折）</label><input id="st-disc" type="number" step="0.1" min="0.1" max="10" value="${esc(cfg.fees.disc)}"><span class="hint">例如 2.8 折填 2.8、沒有折扣填 10。看券商 App 的成交明細或對帳單。</span></div>
+    <div class="field"><label for="st-feemin">手續費最低（元）</label><input id="st-feemin" type="number" step="1" min="0" value="${esc(cfg.fees.min)}"><span class="hint">電子下單多為 1 元，臨櫃多為 20 元。</span></div>
     <div class="field"><label for="st-colors">漲跌顏色</label><select id="st-colors"><option value="tw"${cfg.colors === 'tw' ? ' selected' : ''}>台股習慣：紅漲綠跌</option><option value="us"${cfg.colors === 'us' ? ' selected' : ''}>美股習慣：綠漲紅跌</option></select></div>
     <div class="field"><label for="st-nas">NAS 備援網址</label><input id="st-nas" type="url" value="${esc(cfg.nasUrl)}" placeholder="https://你的-nas.tailxxxx.ts.net"><span class="hint">GitHub 資料過舊或取不到時，改從這裡讀。必須是 https 開頭（例如 Tailscale 網址）。</span></div>
     <div class="field"><label><input id="st-local" type="checkbox"${cfg.localEnabled ? ' checked' : ''}> 啟用本機加速（自動偵測 NPU／CPU／語言模型）</label><span class="hint">在你的電腦上打開時，會連到本機的推論服務。第一次瀏覽器可能會詢問是否允許存取區域網路，請按允許。</span></div>
@@ -1758,7 +1770,7 @@ ${footer()}`;
     const lt = $('#lt-run'); if (lt) lt.onclick = localDiag;
     bindSyncSettings();
     const msg = $('#st-msg');
-    const readForm = () => { cfg.colors = $('#st-colors').value; cfg.nasUrl = $('#st-nas').value.trim(); cfg.localEnabled = $('#st-local').checked; cfg.localHost = $('#st-host').value.trim() || 'localhost'; };
+    const readForm = () => { cfg.fees = { broker: $('#st-broker').checked, disc: Math.min(10, Math.max(0.1, parseFloat($('#st-disc').value) || 10)), min: Math.max(0, parseFloat($('#st-feemin').value) || 0) }; cfg.colors = $('#st-colors').value; cfg.nasUrl = $('#st-nas').value.trim(); cfg.localEnabled = $('#st-local').checked; cfg.localHost = $('#st-host').value.trim() || 'localhost'; };
     $('#st-form').onsubmit = async e => { e.preventDefault(); readForm(); saveCfg(); applyColors(); msg.className = 'small ok-text'; msg.textContent = '已儲存。'; await probeLocal(); };
     $('#st-test').onclick = async () => {
       readForm(); msg.className = 'small'; msg.textContent = '測試中…';
