@@ -270,10 +270,19 @@
 
   // ── 總覽 ────────────────────────────────────────────────────
   // ── 新聞與熱門題材 ──────────────────────────────────────────
+  const newsIdOf = t => { let h = 5381; const s = String(t).replace(/\s+/g, '').toLowerCase(); for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(36); };
+  /** 雲端沒摘要的新聞，用電腦（本機語言模型）補上的摘要 */
+  function mergeLocalNews(N) {
+    const M = S.remote?.newsSum; if (!N || !M) return N;
+    const fill = l => (l || []).forEach(n => { if (n.sum || !n.title) return; const r = M[newsIdOf(n.title)]; if (r) { n.zh = r.t; n.sum = r.s; n.imp = r.i; n.mk = r.m?.length ? r.m : undefined; n.ss = 'local'; } });
+    fill(N.digest?.stories); fill(N.market); (N.themes || []).forEach(t => fill(t.news)); Object.values(N.per || {}).forEach(fill);
+    return N;
+  }
   async function loadNews() {
-    if (S.news && Date.now() - S.newsAt < 5 * 60000) return S.news;
+    if (S.news && Date.now() - S.newsAt < 5 * 60000) return mergeLocalNews(S.news);
     try { S.news = await getJSON(S.base + 'news.json'); S.newsAt = Date.now(); } catch (_) { S.news = S.news || null; }
-    return S.news;
+    if (SY.get().token && !localAny()) await loadRemote();
+    return mergeLocalNews(S.news);
   }
   // 美股公司名去掉 Inc.／Corporation 等字尾並限制長度，避免撐破版面
   const shortName = n => { let x = String(n || '').replace(/,?\s+(Inc\.?|Incorporated|Corporation|Corp\.?|Company|Co\.?|Holdings?|Ltd\.?|plc|N\.V\.|S\.A\.|Class [A-C]|Common Stock|Ordinary Shares)\b\.?/gi, '').replace(/\s+/g, ' ').trim(); return x.length > 14 ? x.slice(0, 13) + '…' : x; };
@@ -294,11 +303,44 @@
   }
   const mkChip = m => { const k = mkKey(m); const label = String(m).replace(/[（(]\s*([A-Z]{1,5}|\d{4})\s*[）)]/, '').trim() || m;
     return k ? `<a class="mk lk" href="#/${S.snap?.items?.[k] ? 's' : 'q'}/${encodeURIComponent(k)}">${esc(label)} ›</a>` : `<span class="mk">${esc(label)}</span>`; };
+  // ── 電腦運算結果：一致性檢查、論點健檢、預測成績、參數掃描 ──
+  const pcFresh = () => S.remote && S.remote.age < 24 * 60;
+  function viewPcChecks() {
+    const C = S.remote?.checks; if (!pcFresh() || !C) return '';
+    const items = C.items || [];
+    return `<section class="card fold all" data-fold="pcchk" data-def="1" aria-labelledby="pck-h"><div class="hd"><h2 id="pck-h">電腦邏輯檢查</h2><span class="note">規則判斷、AI 解讀、全球快報、個股訊號是否互相矛盾・${agoMin((Date.now() - Date.parse(C.at)) / 60000)}</span></div>
+      ${items.length ? `<ol class="list">${items.map(x => `<li><span class="tag t-論點">${x.scope === '市場' ? '市場' : '個股'}</span><div>${x.scope !== '市場' ? `<a class="t" href="#/s/${encodeURIComponent(x.scope)}">${esc(x.title)}</a>` : `<div class="t">${esc(x.title)}</div>`}<div class="d small">${esc(x.a)}<br>${esc(x.b)}</div>${x.note ? `<div class="small" style="margin-top:4px"><b>電腦判讀：</b>${esc(x.note)}</div>` : ''}</div></li>`).join('')}</ol>` : '<p class="empty">目前各項判斷方向一致，沒有發現矛盾。</p>'}</section>`;
+  }
+  async function pcThesis() {
+    const env = S.remote?.private, pass = SY.get().pass; if (!pcFresh() || !env || !pass) return null;
+    if (S.pcThesis?.env === env.ct) return S.pcThesis.data;
+    try { const data = await decryptJSON(env, pass); S.pcThesis = { env: env.ct, data }; return data; } catch (_) { return null; }
+  }
+  const TH_CLS = { 仍成立: 'ok', 動搖: 'warn', 不成立: 'bad' };
+  function viewPcThesis(D, only) {
+    const list = (D?.theses || []).filter(x => !only || x.key === only); if (!list.length) return '';
+    return `<section class="card fold all" data-fold="pcth" data-def="1" aria-labelledby="pth-h"><div class="hd"><h2 id="pth-h">${only ? '電腦論點健檢' : '持股論點健檢（電腦 AI）'}</h2><span class="note">本機語言模型檢查論點是否仍成立並提出反方意見・加密同步・${agoMin((Date.now() - Date.parse(D.at)) / 60000)}</span></div>
+      <div class="thc">${list.map(x => `<div class="thi"><div class="th-hd"><a href="#/s/${encodeURIComponent(x.key)}"><b>${esc(x.key)} ${esc(x.name || '')}</b></a><span class="pill th-${TH_CLS[x.status] || 'warn'}">${esc(x.status)}</span>${x.hasThesis ? '' : '<span class="small muted">（沒寫論點，依持股檢查）</span>'}</div>
+        <div class="small"><b>理由</b>　${esc(x.reason)}</div><div class="small"><b>反方</b>　${esc(x.counter)}</div><div class="small"><b>要盯</b>　${esc(x.check)}</div></div>`).join('')}</div></section>`;
+  }
+  function viewPcScore() {
+    const R = S.remote; if (!R?.score && !R?.scan) return '';
+    const st = R.score?.stats || {}, row = (lab, k) => { const a = st[k] || {}; return `<tr><td>${lab}</td>${['d1', 'd5'].map(h => `<td class="num">${a[h]?.n ? `${a[h].rate}%<span class="small muted">（${a[h].n}）</span>` : '—'}</td>`).join('')}</tr>`; };
+    const sc = R.scan, pr = x => `${x.ma} 日線${x.rsi ? `＋RSI≤${x.rsi}` : ''}${x.stop ? `＋${x.stop}×ATR 停損` : ''}`;
+    return `<section class="card" aria-labelledby="pcs-h"><div class="hd"><h2 id="pcs-h">電腦預測成績</h2><span class="note">電腦每天的預測，事後對照實際收盤的方向命中率・已累積 ${R.score?.days || 0} 個交易日</span></div>
+      <div class="tbl-box"><table class="tbl"><thead><tr><th>來源</th><th class="num">隔日方向</th><th class="num">5 日方向</th></tr></thead><tbody>${row('電腦 NPU 模型', 'npu')}${row('電腦 CPU 模型', 'cpu')}${row('一直猜漲（對照）', 'base')}</tbody></table></div>
+      <p class="small muted" style="margin:0">括號內是樣本數。命中率要明顯高於「一直猜漲」才代表模型有用；剛開始累積時樣本少，數字會跳動。</p></section>
+    ${sc ? `<section class="card" aria-labelledby="pcn-h"><div class="hd"><h2 id="pcn-h">電腦策略參數掃描</h2><span class="note">5 年日 K・前 60% 挑參數、後 40% 驗證・含交易成本・${agoMin((Date.now() - Date.parse(sc.at)) / 60000)}</span></div>
+      ${sc.common?.length ? `<div class="small"><b>整體最穩的設定：</b>${sc.common.map(x => `${pr(x)}（驗證期 ${x.beatShare}% 的股票贏過一直持有，平均超額 ${pct(x.avgExcess, 1)}）`).join('；')}</div>` : ''}
+      <div class="tbl-box"><table class="tbl"><thead><tr><th>個股／建立期最佳設定</th><th class="num">驗證期<br>策略／持有</th><th class="num">交易<br>勝率</th></tr></thead><tbody>
+      ${(sc.items || []).sort((a, b) => (b.test - b.bh) - (a.test - a.bh)).map(x => `<tr><td style="white-space:normal"><a href="#/s/${encodeURIComponent(x.key)}">${esc(x.key)}</a> <span class="small muted">${esc(nameOf(x.key))}</span>${x.beats ? ' <span class="wstar" title="驗證期贏過一直持有">★</span>' : ''}<div class="small muted">${pr(x)}</div></td><td class="num"><b class="${cls(x.test)}">${pct(x.test, 1)}</b><div class="small muted">${pct(x.bh, 1)}</div></td><td class="num small">${x.trades} 次<div class="muted">${x.win ?? '—'}%</div></td></tr>`).join('')}</tbody></table></div>
+      <p class="small muted" style="margin:0">策略：收盤站上均線（可加 RSI 回檔條件）隔天開盤買進，跌破均線、觸及停損或持有 60 天出場。★＝驗證期也贏過一直持有，只有這類設定才值得參考。</p></section>` : ''}`;
+  }
   function newsCard(n, opt = {}) {
     const t = n.zh || n.title, en = !n.zh && /^[\x00-\x7F]+$/.test(n.title);
     const src = n.sources?.length ? n.sources : n.source ? [n.source] : [];
     const srcTxt = src.length > 2 ? `${src.slice(0, 2).join('、')} 等 ${n.n || src.length} 家` : src.join('、') + (n.n > 1 && src.length < n.n ? ` 等 ${n.n} 則` : '');
-    const basis = n.ss === 'search' ? '已查證' : n.ss === 'body' ? '依內文' : n.ss === 'title' ? '依標題' : '';
+    const basis = n.ss === 'search' ? '已查證' : n.ss === 'body' ? '依內文' : n.ss === 'title' ? '依標題' : n.ss === 'local' ? '電腦 AI 摘要' : '';
     const impCls = n.imp > 0 ? 'pos' : n.imp < 0 ? 'neg' : 'neu';
     return `<article class="nc ${impCls}">
       <div class="nc-top">${n.cat && !opt.noCat ? `<span class="nc-cat">${esc(n.cat)}</span>` : ''}${impBadge(n.imp ?? 0)}<span class="nc-time">${n.at ? newsAgo(n.at) : ''}</span></div>
@@ -1956,21 +1998,22 @@ ${footer()}`;
       if (!$('#s-news')) main.insertAdjacentHTML('beforeend', '<section class="card fold all" data-fold="snews" data-def="1" id="s-news" aria-labelledby="sn-h" hidden></section>');
       bindStock(key); bindMine(key); setupFolds();
       afterStock(key); stockNews(key);
+      if (SY.get().token) loadRemote().then(pcThesis).then(D => { if (S.route !== 's/' + key || !D || $('#pth-h')) return; const h = viewPcThesis(D, key); if (h) { $('#s-news')?.insertAdjacentHTML('beforebegin', h); setupFolds(); } });
     } else if (S.route.startsWith('q')) {
       const key = decodeURIComponent(h.split('/')[1] || '').toUpperCase();
       if (S.snap.items[key]) { location.replace('#/s/' + encodeURIComponent(key)); return; }
       main.innerHTML = '<p class="loading">載入中…</p>';
       const html = await viewQuick(key); if (!location.hash.includes('/q/')) return;
       main.innerHTML = html; document.title = `${key}・訊號終端`;
-    } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); bindPortfolio(); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
+    } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); bindPortfolio(); if (SY.get().token) loadRemote().then(pcThesis).then(D => { if (S.route !== 'portfolio' || !D || $('#pth-h')) return; const h = viewPcThesis(D); if (h) { main.insertAdjacentHTML('beforeend', h); setupFolds(); } }); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
     else if (S.route === 'history') { main.innerHTML = '<p class="loading">載入歷史快照…</p>'; const html = await viewHistory(h.split('/')[1]); if (S.route !== 'history') return; main.innerHTML = html; const sel = $('#hs-day'); if (sel) sel.onchange = () => { location.hash = '#/history/' + sel.value; }; document.title = '歷史快照・訊號終端'; }
     else if (S.route === 'backtest') { const k = h.split('/')[1]; if (k) { BT.scope = decodeURIComponent(k).toUpperCase(); LS.set('bt', BT); } main.innerHTML = viewBacktest(); bindBacktest(); document.title = '策略回測・訊號終端'; }
     else if (S.route === 'news') { main.innerHTML = '<p class="loading">載入新聞…</p>'; const [N] = await Promise.all([loadNews(), loadUniverse()]); if (S.route !== 'news') return; main.innerHTML = viewNews(N); bindDigest(); setupFolds(); document.title = '新聞・訊號終端'; }
     else if (S.route === 'journal') { main.innerHTML = viewJournal(); document.title = '我的成績單・訊號終端'; afterJournal(); }
-    else if (S.route === 'scorecard') { main.innerHTML = viewScorecard(); document.title = '模型成績・訊號終端'; }
+    else if (S.route === 'scorecard') { main.innerHTML = viewScorecard(); document.title = '模型成績・訊號終端'; if (SY.get().token) loadRemote().then(() => { if (S.route !== 'scorecard' || $('#pcs-h')) return; const h = viewPcScore(); if (h) main.querySelector('footer')?.insertAdjacentHTML('beforebegin', h); }); }
     else if (S.route === 'settings') { main.innerHTML = viewSettings(); bindSettings(); document.title = '設定・訊號終端'; }
     else if (S.route === 'all') { main.innerHTML = `<div><a href="#/" class="small">← 回總覽</a></div><section class="card" id="opps">${viewOpps(0)}</section>${footer()}`; document.title = '全部標的・訊號終端'; }
-    else { main.innerHTML = viewHome(); document.title = '訊號終端'; afterHome(); loadNews().then(N => { if (S.route !== 'home') return; const el = $('#themes'); if (el) el.innerHTML = viewThemesMini(N); const d = $('#digest'); if (d) d.innerHTML = viewDigestMini(N); setupFolds(); }); }
+    else { main.innerHTML = viewHome(); document.title = '訊號終端'; afterHome(); if (SY.get().token) loadRemote().then(() => { if (S.route !== 'home' || $('#pck-h')) return; const h = viewPcChecks(); if (h) { $('#opps')?.insertAdjacentHTML('beforebegin', h); setupFolds(); } }); loadNews().then(N => { if (S.route !== 'home') return; const el = $('#themes'); if (el) el.innerHTML = viewThemesMini(N); const d = $('#digest'); if (d) d.innerHTML = viewDigestMini(N); setupFolds(); }); }
     setupFolds();
   }
 

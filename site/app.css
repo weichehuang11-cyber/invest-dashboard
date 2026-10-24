@@ -541,3 +541,10 @@ ul.news .tone { font-size: 10px; margin-right: 4px; }
 .tbl.cm td.num, .tbl.cm th.num { white-space: nowrap; }
 .tbl.cm .wstar { color: var(--acc); font-size: 12px; margin-left: 3px; }
 @media (max-width: 640px) { .tbl.cm td, .tbl.cm th { padding-left: 4px; padding-right: 4px; font-size: 13px; } .tbl.cm td.cm-n .small { display: block; } }
+
+.thc { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+.thi { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.thi .small b { color: var(--ink); }
+.pill.th-ok { background: #E3F5EA; color: #16794A; } .pill.th-warn { background: #FFF1D6; color: #9A5B00; } .pill.th-bad { background: #FDE4E4; color: #B42318; }
+.thi .pill { font-size: 11px; padding: 1px 8px; }
+@media (max-width: 640px) { .thc { grid-template-columns: 1fr; } }
