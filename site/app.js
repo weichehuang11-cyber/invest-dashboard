@@ -12,10 +12,12 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (_) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} },
   };
-  const DEF = { colors: 'tw', nasUrl: '', localHost: 'localhost', localEnabled: true, limits: { var95: 2.5, single: 20, cashMin: 10, riskPct: 1 }, fees: { broker: true, disc: 2.8, min: 1 } };
+  const DEF = { colors: 'tw', nasUrl: '', localHost: '127.0.0.1', localEnabled: true, limits: { var95: 2.5, single: 20, cashMin: 10, riskPct: 1 }, fees: { broker: true, disc: 2.8, min: 1 } };
   const cfg = Object.assign({}, DEF, LS.get('cfg', {}));
   cfg.limits = Object.assign({}, DEF.limits, cfg.limits || {});
   cfg.fees = Object.assign({}, DEF.fees, cfg.fees || {});
+  // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
+  if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
   const APP_VERSION = '1.2.0';
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -145,13 +147,13 @@
 
   // ── 本機加速 ────────────────────────────────────────────────
   const LOCAL = { npu: { port: 8766, label: 'NPU' }, cpu: { port: 8767, label: 'CPU' }, llm: { port: 8768, label: '語言模型' } };
-  const localUrl = (k, p) => `http://${cfg.localHost || 'localhost'}:${LOCAL[k].port}${p}`;
+  const localUrl = (k, p) => `http://${cfg.localHost || '127.0.0.1'}:${LOCAL[k].port}${p}`;
 
   async function probeLocal() {
     if (!cfg.localEnabled) { S.local = { checked: true, off: true }; updateLocalPill(); return; }
     const r = { checked: true };
     await Promise.all(Object.keys(LOCAL).map(async k => {
-      try { const j = await getJSON(localUrl(k, '/health'), 1500); r[k] = j.status === 'ok'; } catch (_) { r[k] = false; }
+      try { const j = await getJSON(localUrl(k, '/health'), 3000); r[k] = j.status === 'ok'; } catch (_) { r[k] = false; }
     }));
     S.local = r; updateLocalPill();
   }
@@ -1958,7 +1960,7 @@ ${footer()}`;
     <div class="field"><label for="st-nas">NAS 備援網址</label><input id="st-nas" type="url" value="${esc(cfg.nasUrl)}" placeholder="https://你的-nas.tailxxxx.ts.net"><span class="hint">GitHub 資料過舊或取不到時，改從這裡讀。必須是 https 開頭（例如 Tailscale 網址）。</span></div>
     <div class="field"><label><input id="st-local" type="checkbox"${cfg.localEnabled ? ' checked' : ''}> 啟用本機加速（自動偵測 NPU／CPU／語言模型）</label><span class="hint">在你的電腦上打開時，會連到本機的推論服務。第一次瀏覽器可能會詢問是否允許存取區域網路，請按允許。</span></div>
     <div class="field"><button type="button" class="btn sm" id="lt-run">檢查本機 NPU／CPU／語言模型</button><span class="hint">要在裝了本機服務的那台電腦上按。會實際跑一次預測與一次語言模型問答，顯示是哪個硬體在跑。</span><div id="lt-out"></div></div>
-    <div class="field"><label for="st-host">本機服務位址</label><input id="st-host" value="${esc(cfg.localHost)}" placeholder="localhost"><span class="hint">通常是 localhost；在家中其他裝置使用時可填那台電腦的區網 IP（例如 192.168.1.100）。</span></div>
+    <div class="field"><label for="st-host">本機服務位址</label><input id="st-host" value="${esc(cfg.localHost)}" placeholder="127.0.0.1"><span class="hint">通常是 localhost；在家中其他裝置使用時可填那台電腦的區網 IP（例如 192.168.1.100）。</span></div>
     <div class="actions"><button class="btn primary" type="submit">儲存</button><button type="button" class="btn" id="st-test">測試連線</button></div>
     <p id="st-msg" class="small" role="status"></p>
   </form></section>
@@ -1999,7 +2001,7 @@ ${footer()}`;
     const lt = $('#lt-run'); if (lt) lt.onclick = localDiag;
     bindSyncSettings();
     const msg = $('#st-msg');
-    const readForm = () => { const q = { quietOn: $('#st-quiet').checked, quietStart: Math.min(23, Math.max(0, parseInt($('#st-qs').value) || 0)), quietEnd: Math.min(23, Math.max(0, parseInt($('#st-qe').value) || 0)) }; if (JSON.stringify(q) !== JSON.stringify({ quietOn: cfg.limits.quietOn !== false, quietStart: cfg.limits.quietStart ?? 23, quietEnd: cfg.limits.quietEnd ?? 7 })) { cfg.limits = Object.assign({}, cfg.limits, q); stamp('limits'); scheduleSync(); } cfg.fees = { broker: $('#st-broker').checked, disc: Math.min(10, Math.max(0.1, parseFloat($('#st-disc').value) || 10)), min: Math.max(0, parseFloat($('#st-feemin').value) || 0) }; cfg.colors = $('#st-colors').value; cfg.nasUrl = $('#st-nas').value.trim(); cfg.localEnabled = $('#st-local').checked; cfg.localHost = $('#st-host').value.trim() || 'localhost'; };
+    const readForm = () => { const q = { quietOn: $('#st-quiet').checked, quietStart: Math.min(23, Math.max(0, parseInt($('#st-qs').value) || 0)), quietEnd: Math.min(23, Math.max(0, parseInt($('#st-qe').value) || 0)) }; if (JSON.stringify(q) !== JSON.stringify({ quietOn: cfg.limits.quietOn !== false, quietStart: cfg.limits.quietStart ?? 23, quietEnd: cfg.limits.quietEnd ?? 7 })) { cfg.limits = Object.assign({}, cfg.limits, q); stamp('limits'); scheduleSync(); } cfg.fees = { broker: $('#st-broker').checked, disc: Math.min(10, Math.max(0.1, parseFloat($('#st-disc').value) || 10)), min: Math.max(0, parseFloat($('#st-feemin').value) || 0) }; cfg.colors = $('#st-colors').value; cfg.nasUrl = $('#st-nas').value.trim(); cfg.localEnabled = $('#st-local').checked; cfg.localHost = $('#st-host').value.trim() || '127.0.0.1'; };
     $('#st-form').onsubmit = async e => { e.preventDefault(); readForm(); saveCfg(); applyColors(); msg.className = 'small ok-text'; msg.textContent = '已儲存。'; await probeLocal(); };
     $('#st-test').onclick = async () => {
       readForm(); msg.className = 'small'; msg.textContent = '測試中…';
