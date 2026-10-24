@@ -198,7 +198,7 @@ function healthEvents(st, snap, notified) {
     const v = String(st.status[k]), good = ok(v), h = H[k] || { n: 0, alerted: false };
     if (!good) {
       h.n++;
-      if (h.n >= 3 && !h.alerted) { out.push({ id: `health:${k}:${tpeDay()}`, prio: 3, text: `⚙️ 系統：${label}連續 ${h.n} 次更新失敗（${v.slice(0, 80)}）` }); h.alerted = true; }
+      if (h.n >= (/AI$|^ai$/.test(k) ? 4 : 3) && !h.alerted) { out.push({ id: `health:${k}:${tpeDay()}`, prio: 3, text: `⚙️ 系統：${label}連續 ${h.n} 次更新失敗（${v.slice(0, 80)}）` }); h.alerted = true; }
     } else {
       if (h.alerted) out.push({ id: `healthok:${k}:${Date.now()}`, prio: 2, text: `✅ 系統：${label}已恢復正常` });
       h.n = 0; h.alerted = false;

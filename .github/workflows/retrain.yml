@@ -3,7 +3,7 @@ name: 每月重新訓練模型
 # 每月第一個星期六 09:23（台北）用最新約 3 年日 K 重新訓練；新模型驗證成績較差就保留舊模型。
 on:
   schedule:
-    - cron: '23 1 1-7 * 6'
+    - cron: '23 1 * * 6'   # 每週六觸發，下面只讓「每月第一個星期六」真的執行（cron 的日期與星期是「或」的關係）
   workflow_dispatch:
 
 permissions:
@@ -14,7 +14,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.g.outputs.go }}
+    steps:
+      - id: g
+        run: |
+          D=$(TZ=Asia/Taipei date +%-d)
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "$D" -le 7 ]; then echo "go=1" >> "$GITHUB_OUTPUT"; else echo "go=0" >> "$GITHUB_OUTPUT"; echo "不是本月第一個星期六，略過"; fi
   train:
+    needs: gate
+    if: needs.gate.outputs.go == '1'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
