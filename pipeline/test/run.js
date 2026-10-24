@@ -9,7 +9,7 @@ run([]);
 const s = JSON.parse(fs.readFileSync(`${tmp}/out/snapshot.json`, 'utf8'));
 assert(s.verdict && s.verdict.headline, '缺少今日判斷');
 assert(s.env.length >= 6, '市場環境不足');
-assert(Object.keys(s.items).length === 20, '個股數量不對');
+{ const w = JSON.parse(fs.readFileSync(require('path').join(__dirname, '../../config/watchlist.json'), 'utf8')); assert(Object.keys(s.items).length === w.us.length + w.tw.length, '個股數量不對'); }
 for (const it of Object.values(s.items)) {
   assert(['BUY', 'SELL', 'HOLD'].includes(it.signal.sig), it.key + ' 訊號錯誤');
   assert(Number.isFinite(it.price) && Number.isFinite(it.changePct), it.key + ' 報價錯誤');
