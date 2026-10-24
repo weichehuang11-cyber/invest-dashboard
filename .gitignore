@@ -4,3 +4,5 @@ state/
 archive/
 *.log
 .DS_Store
+
+nas/.env

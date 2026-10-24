@@ -17,7 +17,7 @@
   cfg.limits = Object.assign({}, DEF.limits, cfg.limits || {});
   cfg.fees = Object.assign({}, DEF.fees, cfg.fees || {});
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.1.0';
+  const APP_VERSION = '1.2.0';
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const isNum = v => typeof v === 'number' && Number.isFinite(v);
   const isMob = () => window.innerWidth < 760;

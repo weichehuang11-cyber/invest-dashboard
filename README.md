@@ -1,4 +1,4 @@
-# 訊號終端 v1.1.0
+# 訊號終端 v1.2.0
 
 投資 dashboard 的主站。網站放在 GitHub Pages，資料由 GitHub 雲端排程產生；NAS 負責備援與歷史資料；在自己的電腦上打開時，自動使用本機的 NPU、CPU 與語言模型。
 
@@ -58,6 +58,17 @@ curl -fsSL https://raw.githubusercontent.com/weichehuang11-cyber/invest-dashboar
 它會下載程式、安裝套件、第一次完整產生資料，並用 pm2 常駐 `nas/server.js`：在 `http://NAS:8765/backup/` 提供備援網站，並內建排程（盤中每 30 分鐘、台股 16:55、美股 05:45）。不需要再設 DSM 任務排程表。之後要更新程式，再執行一次同一行即可。
 
 產出在 `/volume2/homes/invest-backup/`：`site/`（備援網站）、`archive/snapshots/`（每次快照）、`archive/daily/`、`archive/backup/`（舊 invest 資料每日打包，保留 60 天）。狀態：`http://NAS:8765/backup/status.json`。
+
+### NAS 監看 GitHub 排程（選用）
+
+GitHub 免費排程偶爾會延遲或略過。在 NAS 建立 `/volume2/homes/invest-dashboard/nas/.env`：
+
+```
+NTFY_TOPIC=你的 ntfy 主題
+GH_TOKEN=github_pat_…（Fine-grained token：只選 invest-dashboard，Repository permissions → Actions：Read and write）
+```
+
+再執行一次上面的安裝指令（會重新啟動 NAS 伺服器）。盤中網站資料超過 60 分鐘沒更新，NAS 會推播並自動觸發更新。
 
 ### 讓 GitHub 網站能讀到 NAS（Tailscale）
 

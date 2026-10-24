@@ -173,6 +173,47 @@ function weekly(snap, P, barsDir) {
 }
 
 
+// ── 每月成績報告（每月 1 日早上）────────────────────────────────
+async function loadLocal() {
+  const id = process.env.LOCAL_GIST_ID; if (!id) return null;
+  try {
+    const g = await (await fetch(`https://api.github.com/gists/${id}`, { headers: { Accept: 'application/vnd.github+json' } })).json();
+    const f = g.files?.['signal-local.json']; let c = f?.content; if (f?.truncated && f.raw_url) c = await (await fetch(f.raw_url)).text();
+    return JSON.parse(c);
+  } catch (e) { console.log('電腦運算結果讀取失敗：', e.message); return null; }
+}
+function monthly(snap, P, barsDir, PC) {
+  const L = [], N = 21;
+  const tw = barsRet(barsDir, '^TWII', N), sp = barsRet(barsDir, '^GSPC', N), b50 = barsRet(barsDir, '0050', N);
+  L.push(`【市場】近一個月：加權 ${pct(tw)}、標普 500 ${pct(sp)}、0050 ${pct(b50)}`);
+  if (P) {
+    const H = P.holdings?.items || [], fx = snap.env?.find(e => e.key === 'twd')?.value || 32;
+    let mv = 0, gain = 0, cover = 0;
+    for (const h of H) { const it = snap.items[h.key]; if (!it) continue; const v = it.price * h.shares * (it.market === 'us' ? fx : 1); mv += v; const r = barsRet(barsDir, h.key, N); if (isNum(r)) { gain += v - v / (1 + r / 100); cover += v; } }
+    if (cover) { const r = gain / (cover - gain) * 100; L.push('', '【我的部位】', `持股近一個月 ${pct(r)}（約 ${gain >= 0 ? '+' : ''}${Math.round(gain).toLocaleString()} 元），${isNum(b50) ? `${r >= b50 ? '贏' : '輸'} 0050 ${Math.abs(r - b50).toFixed(1)} 個百分點` : ''}`); }
+    const J = P.journal || {}, m0 = new Date(Date.now() - 31 * 86400000).toISOString().slice(0, 10);
+    const rz = (J.realized || []).filter(x => x.date >= m0), rzSum = rz.reduce((a, x) => a + (x.pnl || 0) * (x.cur === 'USD' ? fx : 1), 0);
+    if (rz.length) L.push(`本月已實現損益 ${rzSum >= 0 ? '+' : ''}${Math.round(rzSum).toLocaleString()} 元（${rz.length} 筆賣出）`);
+    const dec = (J.decisions || []).filter(d => d.action !== 'hold');
+    const res = dec.map(d => { const b = readJSON(path.join(barsDir, `${d.key.replace(/[^A-Za-z0-9_.-]/g, '_')}.json`), null); if (!b) return null; const i = b.dates.findIndex(x => x >= d.at.slice(0, 10)); if (i < 0 || i + 5 >= b.close.length) return null; return { at: d.at, r: (b.close[i + 5] / d.price - 1) * 100 * (d.action === 'sell' ? -1 : 1) }; }).filter(Boolean);
+    const recent = res.filter(x => x.at.slice(0, 10) >= new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10));
+    const wr = a => (a.length ? `${(a.filter(x => x.r > 0.5).length / a.length * 100).toFixed(0)}%（${a.length} 筆，平均 ${pct(a.reduce((s, x) => s + x.r, 0) / a.length, 2)}）` : '尚無已結算');
+    L.push('', '【我的決策】', `近一個月 5 日勝率：${wr(recent)}`, `累計 5 日勝率：${wr(res)}`);
+    const moods = (J.moods || []).filter(m => m.at >= m0); if (moods.length) L.push(`本月記錄市場感覺 ${moods.length} 天`);
+  }
+  const sc = snap.scorecard;
+  if (sc) L.push('', '【系統訊號】', `近 30 天：隔日命中 ${sc.d30?.h1?.rate ?? '—'}%（${sc.d30?.h1?.n || 0}）、5 日 ${sc.d30?.h5?.rate ?? '—'}%（${sc.d30?.h5?.n || 0}）、20 日 ${sc.d30?.h20?.rate ?? '—'}%（${sc.d30?.h20?.n || 0}）`);
+  if (PC) {
+    const st = PC.score?.stats || {}, f = (e, h) => (st[e]?.[h]?.n ? `${st[e][h].rate}%` : '—');
+    L.push('', '【電腦模型】', `5 日方向命中：NPU ${f('npu', 'd5')}、CPU ${f('cpu', 'd5')}、一直猜漲 ${f('base', 'd5')}（累積 ${PC.score?.days || 0} 個交易日）`);
+    if (PC.train?.new) L.push(`最近一次重訓：新模型 ${PC.train.new.hit5}%、舊模型 ${PC.train.old?.hit5 ?? '—'}%，${PC.train.replaced ? '已換新' : '保留舊模型'}`);
+    const c = PC.scan?.common?.[0]; if (c) L.push(`參數掃描最穩設定：${c.ma} 日線${c.rsi ? `＋RSI≤${c.rsi}` : ''}${c.stop ? `＋${c.stop}×ATR 停損` : ''}（驗證期 ${c.beatShare}% 股票贏過一直持有）`);
+  }
+  const day = tpeDay(), next = (snap.calendar || []).filter(e => (Date.parse(e.date) - Date.parse(day)) / 86400000 <= 31 && e.importance >= 2);
+  if (next.length) { L.push('', '【本月重要事件】'); L.push(...next.slice(0, 8).map(e => `${e.date.slice(5).replace('-', '/')} ${e.title}`)); }
+  return L;
+}
+
 // ── 勿擾時段 ──────────────────────────────────────────────────
 function inQuiet(start, end) {
   const h = new Date(Date.now() + 8 * 3600000).getUTCHours();
@@ -237,12 +278,13 @@ function newsEvents(N, snap, P, notified) {
   return out.slice(0, 6);
 }
 
-module.exports = { send, decrypt, inQuiet, healthEvents, newsEvents };
+module.exports = { send, decrypt, inQuiet, healthEvents, newsEvents, monthly };
 if (require.main === module) (async () => {
   const snap = readJSON(String(args.snap || 'out/data/snapshot.json'), null);
   if (!snap) { console.log('沒有快照，略過通知'); return; }
   const P = await loadPersonal();
   if (args.weekly) { await send(`訊號終端週報 ${tpeDay()}`, weekly(snap, P, String(args.bars || 'out/data/bars'))); return; }
+  if (args.monthly) { await send(`訊號終端月報 ${tpeDay().slice(0, 7)}`, monthly(snap, P, String(args.bars || 'out/data/bars'), await loadLocal())); return; }
   const stFile = path.join(String(args.state || 'state'), 'notified.json');
   const notified = readJSON(stFile, {});
   // 全球市場快報：早上（美股收盤後 05–10 點，低優先、不響鈴）與傍晚（台股收盤後 16–21 點）各推一次

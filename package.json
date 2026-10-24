@@ -1,6 +1,6 @@
 {
   "name": "invest-dashboard",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "投資終端：GitHub Pages 主站 + 雲端排程資料管線（NAS 備援、本機加速）",
   "scripts": {
