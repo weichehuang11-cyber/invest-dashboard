@@ -189,7 +189,7 @@
     const on = Object.keys(LOCAL).filter(k => S.local[k]).map(k => LOCAL[k].label);
     const R = !on.length && S.remote && S.remote.age < 240 ? S.remote : null;
     el.className = 'pill ' + (on.length || R?.fresh ? 'ok' : R ? 'warn' : '');
-    el.querySelector('.t').textContent = on.length ? `本機加速：${on.join('、')}` : R ? (R.fresh ? `電腦運算：${remoteEngines(R).join('、')}・${agoMin(R.age)}` : `電腦已離線・最後同步 ${agoMin(R.age)}`) : '雲端模式';
+    el.querySelector('.t').textContent = on.length ? `本機加速：${on.join('、')}` : R ? (R.fresh ? `電腦運算：${remoteEngines(R).join('、')}・${R.mode === 'idle' ? '閒置全速' : R.mode === 'active' ? '使用中輕量' : ''}・${agoMin(R.age)}`.replace('・・', '・') : `電腦已離線・最後同步 ${agoMin(R.age)}`) : '雲端模式';
   }
 
   async function localPredict(keys) {
@@ -322,6 +322,12 @@
     return `<section class="card fold all" data-fold="pcth" data-def="1" aria-labelledby="pth-h"><div class="hd"><h2 id="pth-h">${only ? '電腦論點健檢' : '持股論點健檢（電腦 AI）'}</h2><span class="note">本機語言模型檢查論點是否仍成立並提出反方意見・加密同步・${agoMin((Date.now() - Date.parse(D.at)) / 60000)}</span></div>
       <div class="thc">${list.map(x => `<div class="thi"><div class="th-hd"><a href="#/s/${encodeURIComponent(x.key)}"><b>${esc(x.key)} ${esc(x.name || '')}</b></a><span class="pill th-${TH_CLS[x.status] || 'warn'}">${esc(x.status)}</span>${x.hasThesis ? '' : '<span class="small muted">（沒寫論點，依持股檢查）</span>'}</div>
         <div class="small"><b>理由</b>　${esc(x.reason)}</div><div class="small"><b>反方</b>　${esc(x.counter)}</div><div class="small"><b>要盯</b>　${esc(x.check)}</div></div>`).join('')}</div></section>`;
+  }
+  function viewPcReview() {
+    const V = S.remote?.review; if (!pcFresh() || !V) return '';
+    const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+    return `<section class="card fold all" data-fold="pcrv" data-def="1" aria-labelledby="rv-h"><div class="hd"><h2 id="rv-h">電腦今日復盤</h2><span class="note">${V.day === today ? '今天' : esc(V.day)}收盤後・電腦閒置時由本機 AI 撰寫</span></div>
+      <dl class="rv">${['重點', '觀察清單', '明天要盯', '心法'].filter(k => V[k]).map(k => `<div><dt>${k}</dt><dd>${esc(V[k])}</dd></div>`).join('')}</dl></section>`;
   }
   function viewPcScan() {
     const M = S.remote?.mscan; if (!pcFresh() || !M?.top?.length) return '';
@@ -1822,7 +1828,7 @@ ${footer()}`;
       R.push(row(!!a?.answer && !a.error, '語言模型（埠 8768）', `模型 ${esc(a?.model || lh.default)}（已安裝：${esc(lh.models.join('、'))}）・回答花 ${(ms / 1000).toFixed(1)} 秒${a?.answer ? `<br>「${esc(a.answer.slice(0, 120))}」` : '・沒有回答'}`));
     }
     const rd = await loadRemote(true, true);
-    const rr = rd ? row(rd.fresh, '電腦運算同步（手機用）', `最後上傳 ${agoMin(rd.age)}・${remoteEngines(rd).join('、') || '無'}・預測 ${Object.keys(rd.preds || {}).length} 檔・AI 解讀 ${Object.keys(rd.llm?.stocks || {}).length} 檔${rd.fresh ? '' : '（超過 16 分鐘沒更新：電腦已關機或睡眠）'}`)
+    const rr = rd ? row(rd.fresh, '電腦運算同步（手機用）', `最後上傳 ${agoMin(rd.age)}・${rd.mode === 'idle' ? `閒置中（${rd.idleMin} 分鐘沒操作，長工作全速進行）` : rd.mode === 'active' ? '使用中（只做輕量工作）' : ''}・${remoteEngines(rd).join('、') || '無'}・預測 ${Object.keys(rd.preds || {}).length} 檔・AI 解讀 ${Object.keys(rd.llm?.stocks || {}).length} 檔${rd.fresh ? '' : '（超過 16 分鐘沒更新：電腦已關機或睡眠）'}`)
       : row(false, '電腦運算同步（手機用）', SY.get().token ? '還沒有電腦上傳的結果：在電腦的 local-ai 資料夾執行 setup-phone.bat' : '這台裝置還沒設定 GitHub 權杖（上方「加密備份與同步」）');
     out.innerHTML = R.join('') + rr + `<p class="small muted">在電腦上：前三項打勾＝本機加速有在運作。在手機上：前三項會打叉是正常的，看最後一項「電腦運算同步」即可。</p>`;
     probeLocal();
@@ -2032,7 +2038,7 @@ ${footer()}`;
     else if (S.route === 'scorecard') { main.innerHTML = viewScorecard(); document.title = '模型成績・訊號終端'; if (SY.get().token) loadRemote().then(() => { if (S.route !== 'scorecard' || $('#pcs-h')) return; const h = viewPcScore(); if (h) main.querySelector('footer')?.insertAdjacentHTML('beforebegin', h); }); }
     else if (S.route === 'settings') { main.innerHTML = viewSettings(); bindSettings(); document.title = '設定・訊號終端'; }
     else if (S.route === 'all') { main.innerHTML = `<div><a href="#/" class="small">← 回總覽</a></div><section class="card" id="opps">${viewOpps(0)}</section>${footer()}`; document.title = '全部標的・訊號終端'; }
-    else { main.innerHTML = viewHome(); document.title = '訊號終端'; afterHome(); if (SY.get().token) loadRemote().then(() => { if (S.route !== 'home' || $('#pck-h') || $('#ms-h')) return; const h = viewPcChecks(), h2 = viewPcScan(); if (h) $('#opps')?.insertAdjacentHTML('beforebegin', h); if (h2) $('#opps')?.insertAdjacentHTML('afterend', h2); if (h || h2) setupFolds(); }); loadNews().then(N => { if (S.route !== 'home') return; const el = $('#themes'); if (el) el.innerHTML = viewThemesMini(N); const d = $('#digest'); if (d) d.innerHTML = viewDigestMini(N); setupFolds(); }); }
+    else { main.innerHTML = viewHome(); document.title = '訊號終端'; afterHome(); if (SY.get().token) loadRemote().then(() => { if (S.route !== 'home' || $('#pck-h') || $('#ms-h')) return; const h = viewPcReview() + viewPcChecks(), h2 = viewPcScan(); if (h) $('#opps')?.insertAdjacentHTML('beforebegin', h); if (h2) $('#opps')?.insertAdjacentHTML('afterend', h2); if (h || h2) setupFolds(); }); loadNews().then(N => { if (S.route !== 'home') return; const el = $('#themes'); if (el) el.innerHTML = viewThemesMini(N); const d = $('#digest'); if (d) d.innerHTML = viewDigestMini(N); setupFolds(); }); }
     setupFolds();
   }
 

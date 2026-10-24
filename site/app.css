@@ -548,3 +548,7 @@ ul.news .tone { font-size: 10px; margin-right: 4px; }
 .pill.th-ok { background: #E3F5EA; color: #16794A; } .pill.th-warn { background: #FFF1D6; color: #9A5B00; } .pill.th-bad { background: #FDE4E4; color: #B42318; }
 .thi .pill { font-size: 11px; padding: 1px 8px; }
 @media (max-width: 640px) { .thc { grid-template-columns: 1fr; } }
+.rv { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.rv div { display: grid; grid-template-columns: 76px 1fr; gap: 8px; font-size: 14px; line-height: 1.55; }
+.rv dt { color: var(--mute); font-weight: 600; }
+.rv dd { margin: 0; }
