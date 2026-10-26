@@ -49,10 +49,11 @@ jobs:
           RUN=1
           if [ "$EVENT" = "schedule" ]; then
             FULL=""
+            DOW=$(date -u +%u)   # 1=週一 … 7=週日（UTC）；週末的排程只做快速更新（新聞與全球快報），不跑完整更新
             # 台股收盤後：UTC 08:40–10:59（三大法人約 15:00–16:30 公布）
-            if [ $UTC_HM -ge 520 ] && [ $UTC_HM -lt 660 ] && [ "$(echo "$LAST" | jq -r '.fullAt.tw // ""')" != "$TPE_DAY" ]; then FULL=tw; fi
+            if [ $DOW -le 5 ] && [ $UTC_HM -ge 520 ] && [ $UTC_HM -lt 660 ] && [ "$(echo "$LAST" | jq -r '.fullAt.tw // ""')" != "$TPE_DAY" ]; then FULL=tw; fi
             # 美股收盤後：UTC 21:15–23:59
-            if [ $UTC_HM -ge 1275 ] && [ "$(echo "$LAST" | jq -r '.fullAt.us // ""')" != "$TPE_DAY" ]; then FULL=us; fi
+            if [ $DOW -le 5 ] && [ $UTC_HM -ge 1275 ] && [ "$(echo "$LAST" | jq -r '.fullAt.us // ""')" != "$TPE_DAY" ]; then FULL=us; fi
             if [ -z "$FULL" ]; then
               AGE=999
               [ -n "$GEN" ] && AGE=$(( ( $(date +%s) - $(date -d "$GEN" +%s) ) / 60 ))

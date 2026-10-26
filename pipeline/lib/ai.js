@@ -21,83 +21,101 @@ async function claude(messages, timeout) {
 }
 /** Google Gemini（免費額度；到 aistudio.google.com 申請 API key，設成 GEMINI_API_KEY） */
 let GEM_MODEL = null, GEM_LIST = [], GEM_LAST = 0;
+/** 整次排程花在 Gemini 的總時間上限（含重試；完整更新本身就要 10–15 分鐘，工作流程上限 20 分鐘） */
+const GEM_TOTAL = +process.env.GEMINI_TOTAL_BUDGET_MS || 6 * 60000;
+let GEM_SPENT = 0;
+const sleep = ms => new Promise(r => setTimeout(r, Math.max(0, ms)));
 /** 免費額度每分鐘次數有限：兩次呼叫至少間隔 13 秒 */
-async function gemThrottle() { const w = GEM_LAST + 13000 - Date.now(); if (w > 0) await new Promise(r => setTimeout(r, w)); GEM_LAST = Date.now(); }
-/** 目前模型持續忙碌（503）或不存在時，改用下一個可用模型 */
-function nextGemini() { const i = GEM_LIST.indexOf(GEM_MODEL); if (i >= 0 && i + 1 < GEM_LIST.length) { GEM_MODEL = GEM_LIST[i + 1]; return true; } return false; }
-/** 找出這把金鑰能用的最新 Flash 模型（Google 會淘汰舊模型名稱，所以每次執行自動挑） */
+async function gemThrottle() { const w = GEM_LAST + 13000 - Date.now(); if (w > 0) await sleep(w); GEM_LAST = Date.now(); }
+/** 找出這把金鑰能用的 Flash 模型清單（Google 會淘汰舊模型名稱，所以每次執行自動挑）；有設 GEMINI_MODEL 就排第一個 */
 async function geminiModel(key) {
-  if (process.env.GEMINI_MODEL) return process.env.GEMINI_MODEL;
   if (GEM_MODEL) return GEM_MODEL;
+  let names = [];
   try {
     const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': key } });
     const j = await r.json();
-    const names = (j.models || []).filter(m => (m.supportedGenerationMethods || []).includes('generateContent')).map(m => m.name.replace(/^models\//, ''))
+    names = (j.models || []).filter(m => (m.supportedGenerationMethods || []).includes('generateContent')).map(m => m.name.replace(/^models\//, ''))
       .filter(n => /^gemini-[\d.]+-flash(-lite)?(-latest)?$|^gemini-flash(-lite)?-latest$/.test(n) && !/image|tts|live|exp|preview|thinking/.test(n));
     const ver = n => parseFloat((n.match(/gemini-([\d.]+)/) || [])[1] || '0');
-    // 先用一般 Flash（新到舊），額度用完或忙碌時再退到 Flash-Lite（每個模型的免費額度分開計算）
+    // 先用一般 Flash（新到舊），忙碌、逾時或額度用完時再往舊版與 Flash-Lite 退（每個模型的免費額度與負載分開）
     names.sort((a, b) => (a.includes('lite') - b.includes('lite')) || ver(b) - ver(a) || (a.includes('latest') ? 1 : -1));
-    GEM_LIST = names.length ? names : ['gemini-flash-latest'];
-    GEM_MODEL = GEM_LIST[0];
-  } catch (_) { GEM_MODEL = 'gemini-flash-latest'; }
+  } catch (_) {}
+  if (!names.length) names = ['gemini-flash-latest'];
+  const pin = process.env.GEMINI_MODEL;
+  GEM_LIST = pin ? [pin, ...names.filter(n => n !== pin)] : names;
+  GEM_MODEL = GEM_LIST[0];
   return GEM_MODEL;
 }
-/** Google Gemini（免費額度；到 aistudio.google.com 申請 API key，設成 GEMINI_API_KEY） */
-async function gemini(messages, json, timeout) {
-  const sys = messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
-  const key = process.env.GEMINI_API_KEY;
-  const model = await geminiModel(key);
-  await gemThrottle();
-  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), timeout);
-  try {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, { method: 'POST', signal: ctl.signal,
-      headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
-      body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents: messages.filter(m => m.role !== 'system').map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
-        generationConfig: { temperature: 0.4, ...(json ? { responseMimeType: 'application/json' } : {}) } }) });
-    const text = await r.text();
-    if (!r.ok) throw new Error(`${model} HTTP ${r.status} ${text.slice(0, 160)}`);
-    const out = JSON.parse(text).candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
-    if (!out) throw new Error('沒有回覆內容');
-    chat.lastGem = model;
-    return out;
-  } finally { clearTimeout(t); }
-}
-/** Gemini＋Google 搜尋（讓 AI 自己查證新聞內容再摘要）；只回傳文字 */
-async function grounded(prompt, sys, timeout = 120000) {
+/** 這次呼叫還沒試過的下一個模型（照清單順序）；全部試過就回傳 null */
+function nextGemini(tried) { const n = GEM_LIST.find(m => !tried.has(m)); if (n) GEM_MODEL = n; return n || null; }
+/** 可以重試的錯誤：忙碌（5xx）、額度（429）、模型停用（404）、逾時、連線中斷、空回覆 */
+const RETRYABLE = /HTTP (404|408|429|500|502|503|504)\b|逾時|aborted|fetch failed|ECONNRESET|ETIMEDOUT|socket|沒有回覆內容/i;
+/** 這幾種代表「這個模型現在不行」，不用在同一個模型上等，直接換下一個 */
+const SWITCH_NOW = /HTTP (404|429)\b|逾時|aborted/i;
+/**
+ * 共用的 Gemini 重試流程：同一模型忙碌時退避重試一次（8 秒），再忙、逾時或額度用完就換下一個模型；
+ * 整體有時間上限（budget），避免拖垮整個排程（工作流程上限 20 分鐘）。
+ * once(model, timeoutMs) 只負責送一次請求，回傳文字或丟出錯誤。
+ */
+async function withGemini(once, { timeout, budget }) {
   const key = process.env.GEMINI_API_KEY; if (!key) throw new Error('沒有 GEMINI_API_KEY');
   let model = await geminiModel(key);
-  for (let k = 0; k < 3; k++) {
+  const t0 = Date.now(), tried = new Set([model]), deadline = t0 + Math.min(budget, GEM_TOTAL - GEM_SPENT), errs = [];
+  let sameTries = 0;
+  try {
+  for (let k = 0; k < 12; k++) {
+    const left = deadline - Date.now();
+    if (left < 15000) { errs.push(GEM_SPENT + (Date.now() - t0) >= GEM_TOTAL - 15000 ? '本次排程的 AI 時間額度已用完' : '超過重試時間上限'); break; }
     await gemThrottle();
-    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), timeout);
-    try {
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, { method: 'POST', signal: ctl.signal,
-        headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
-        body: JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents: [{ role: 'user', parts: [{ text: prompt }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0.3 } }) });
-      const text = await r.text();
-      if (!r.ok) {
-        if ((r.status === 404 || r.status === 429 || (/^(500|503)$/.test(String(r.status)) && k === 1)) && nextGemini()) { model = GEM_MODEL; continue; }
-        if (/^(429|500|503)$/.test(String(r.status)) && k < 2) { await new Promise(z => setTimeout(z, 8000 * (k + 1))); continue; }
-        throw new Error(`${model} HTTP ${r.status} ${text.slice(0, 160)}`);
+    const ms = Math.min(timeout, left);
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms);
+    try { return { text: await once(model, ctl.signal), model }; }
+    catch (e) {
+      const msg = e.name === 'AbortError' ? `${model} 逾時（${Math.round(ms / 1000)} 秒）` : e.message;
+      errs.push(msg.slice(0, 160));
+      if (!RETRYABLE.test(msg)) break;
+      if (SWITCH_NOW.test(msg) || sameTries >= 1) {
+        const n = nextGemini(tried);
+        if (n) { model = n; tried.add(n); sameTries = 0; continue; }
+        if (sameTries >= 2) break;                       // 所有模型都試過、目前這個也重試過了
       }
-      return JSON.parse(text).candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+      sameTries++;
+      await sleep(Math.min(8000 * 2 ** (sameTries - 1), deadline - Date.now() - 15000));
     } finally { clearTimeout(t); }
   }
-  throw new Error('Gemini 忙碌');
+  } finally { GEM_SPENT += Date.now() - t0; }
+  // 只回報第一個與最後一個錯誤，狀態欄位才看得懂
+  throw new Error(errs.length > 1 ? `${errs[0]} …（共試 ${errs.length} 次，最後：${errs[errs.length - 1]}）` : errs[0] || 'Gemini 忙碌');
+}
+const gemBody = (sys, contents, extra) => JSON.stringify({ systemInstruction: { parts: [{ text: sys }] }, contents, ...extra });
+async function gemPost(model, signal, body) {
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, { method: 'POST', signal,
+    headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY, 'content-type': 'application/json' }, body });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`${model} HTTP ${r.status} ${text.slice(0, 160)}`);
+  return JSON.parse(text).candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+}
+/** Google Gemini 一般對話 */
+async function gemini(messages, json, timeout, budget) {
+  const sys = messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
+  const body = gemBody(sys, messages.filter(m => m.role !== 'system').map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
+    { generationConfig: { temperature: 0.4, ...(json ? { responseMimeType: 'application/json' } : {}) } });
+  const r = await withGemini(async (model, signal) => { const out = await gemPost(model, signal, body); if (!out) throw new Error(`${model} 沒有回覆內容`); return out; }, { timeout, budget });
+  chat.lastGem = r.model;
+  return r.text;
+}
+/** Gemini＋Google 搜尋（讓 AI 自己查證新聞內容再摘要）；只回傳文字 */
+async function grounded(prompt, sys, timeout = 120000, budget = 3 * 60000) {
+  const body = gemBody(sys, [{ role: 'user', parts: [{ text: prompt }] }], { tools: [{ google_search: {} }], generationConfig: { temperature: 0.3 } });
+  return (await withGemini((model, signal) => gemPost(model, signal, body), { timeout, budget })).text;
 }
 /** 依序嘗試：Anthropic → Gemini（有哪個金鑰就用哪個） */
-async function chat(messages, { json = false, timeout = 90000 } = {}) {
+async function chat(messages, { json = false, timeout = 90000, budget = 3 * 60000 } = {}) {
   const errs = [];
   if (process.env.ANTHROPIC_API_KEY) { try { const r = await claude(messages, timeout); chat.last = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5'; return r; } catch (e) { errs.push('anthropic: ' + e.message); } }
   if (process.env.GEMINI_API_KEY) {
-    for (let k = 0; k < 8; k++) {
-      try { const r = await gemini(messages, json, timeout); chat.last = chat.lastGem; return r; }
-      catch (e) {
-        if (/HTTP (404|429)/.test(e.message) && nextGemini()) continue;                // 模型停用或額度用完：換下一個                      // 額度用完：換下一個模型（額度分開）
-        if (/HTTP (500|503)/.test(e.message) && k === 1 && nextGemini()) continue;   // 第二次還忙就換下一個模型
-        if (/HTTP (429|500|503)/.test(e.message) && k < 2) { await new Promise(r => setTimeout(r, 15000 * (k + 1))); continue; }
-        errs.push('gemini: ' + e.message); break;
-      }
-    }
+    try { const r = await gemini(messages, json, timeout, budget); chat.last = chat.lastGem; return r; }
+    catch (e) { errs.push('gemini: ' + e.message); }
   }
   throw new Error(errs.join(' ｜ ') || '沒有可用的 AI（請設定 GEMINI_API_KEY 或 ANTHROPIC_API_KEY）');
 }

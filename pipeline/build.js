@@ -268,11 +268,13 @@ async function main() {
     try {
       const YF = require('yahoo-finance2').default;
       const yf = typeof YF === 'function' ? new YF({ suppressNotices: ['yahooSurvey'] }) : YF;
-      const q = await yf.quoteSummary('SPY', { modules: ['summaryDetail'] }, { validateResult: false });
+      const q = await yf.quoteSummary('SPY', { modules: ['summaryDetail', 'price'] }, { validateResult: false });
       const pe = q.summaryDetail?.trailingPE;
       if (pe > 0) {
-        const today0 = new Date().toISOString().slice(0, 10);
-        heavy.us.valHist = [...(heavy.us.valHist || []).filter(x => x.date !== today0), { date: today0, pe: r2(pe), y10: tsy?.y10 ?? null }].slice(-1500);
+        // 用 SPY 最後成交時間（紐約日期）當資料日期：週末、假日補跑時不會多出一筆和前一天一樣的假資料
+        const mt = q.price?.regularMarketTime, mtMs = mt instanceof Date ? mt.getTime() : typeof mt === 'number' ? (mt < 1e12 ? mt * 1000 : mt) : Date.parse(mt || '');
+        const day0 = Number.isFinite(mtMs) ? new Date(mtMs).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) : new Date().toISOString().slice(0, 10);
+        heavy.us.valHist = [...(heavy.us.valHist || []).filter(x => x.date !== day0), { date: day0, pe: r2(pe), y10: tsy?.y10 ?? null }].slice(-1500);
         status.usValuation = 'ok';
       } else status.usValuation = 'fail';
     } catch (e) { status.usValuation = 'fail: ' + e.message; }
@@ -679,6 +681,8 @@ async function main() {
     let fullStories = [];
     try {
       const Q = await Digest.quotes(yf).catch(e => { log('全球行情失敗', e.message); return []; });
+      // Yahoo 偶爾某一檔回空值（例如週末的美元兌台幣）：沿用上一次的報價（t 保留原本的成交時間，網站看得出是舊值）
+      { const prevQ = Object.fromEntries((heavy.newsLast?.digest?.quotes || []).filter(q => q.price != null).map(q => [q.sym, q])); for (let i = 0; i < Q.length; i++) if (Q[i].price == null && prevQ[Q[i].sym]) Q[i] = { ...prevQ[Q[i].sym], stale: true }; }
       const stories = await Digest.headlines(log); fullStories = stories;
       const rule = Digest.ruleSummary(Q, stories);
       const dFile = path.join(STATE, 'digest.json');
@@ -750,7 +754,10 @@ async function main() {
     const tpeHour = new Date(Date.now() + 8 * 3600000).getUTCHours();
     if (fullTW && tpeHour >= 16) fullAt.tw = tpeDay;
     if (fullUS && tpeHour >= 4 && tpeHour < 13) fullAt.us = tpeDay;
-    writeJSON(path.join(STATE, 'last.json'), { verdict: { level: verdict.level, at: nowIso }, signals: { ...(last.signals || {}), ...signals }, at: nowIso, status, fullAt });
+    // fullAt 是排程用的「台北日期今天已完成」標記（不能改）；tradeDate 另外記資料實際對應的交易日，方便檢查有沒有斷更
+    const twLast = (heavy.tw.hist?.dates || []).slice(-1)[0];
+    const tradeDate = { ...(last.tradeDate || {}), ...(twLast ? { tw: `${twLast.slice(0, 4)}-${twLast.slice(4, 6)}-${twLast.slice(6, 8)}` } : {}), ...((heavy.us.valHist || []).length ? { us: heavy.us.valHist[heavy.us.valHist.length - 1].date } : {}) };
+    writeJSON(path.join(STATE, 'last.json'), { verdict: { level: verdict.level, at: nowIso }, signals: { ...(last.signals || {}), ...signals }, at: nowIso, status, fullAt, tradeDate });
     writeJSON(path.join(STATE, 'heavy.json'), heavy);
     writeJSON(path.join(STATE, 'conviction.json'), { at: nowIso, conviction, high: Object.values(items).filter(i => i.conv?.high?.length).map(i => ({ key: i.key, bucket: i.conv.bucket, score: i.conv.score, high: i.conv.high })) });
     writeJSON(path.join(STATE, 'predictions.json'), predictions);

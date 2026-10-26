@@ -30,21 +30,23 @@ async function fetchBodies(items, { max = 15 } = {}) {
   }));
 }
 
-async function summarize(items, chat, cache, { max = 80, batch = 40, log = () => {} } = {}) {
+// 每批 20 則（40 則一批時回覆太長，常逾時或被 503 打斷）；每次最多 60 則，其餘留到下一輪
+async function summarize(items, chat, cache, { max = 60, batch = 20, log = () => {} } = {}) {
   cache.map = cache.map || {};
   const todo = [], seen = new Set();
   for (const it of items) { const id = idOf(it.title); if (seen.has(id)) continue; seen.add(id); const c = cache.map[id]; if (!c || (c.v !== 2 && (it.body || it.alt))) todo.push({ id, ...it }); }
   const queue = todo.slice(0, max);
   await fetchBodies(queue);
-  let added = 0; const errs = [];
+  let added = 0, fails = 0; const errs = [];
   for (let i = 0; i < queue.length; i += batch) {
     const part = queue.slice(i, i + batch);
     const list = part.map(x => `${x.id}｜${x.source || ''}｜${x.title}${ctxOf(x) ? '｜' + ctxOf(x) : ''}`).join('\n');
     const user = `逐則整理以下新聞（格式：編號｜媒體｜標題｜補充內容）。補充內容越多，摘要要越具體（寫出數字、公司、原因）；只有標題時就簡短說明，不要硬湊：\n${list}\n\n輸出 JSON：{"items":[${FORMAT}]}，每一則都要有。`;
     try {
-      const j = parseJ(await chat([{ role: 'system', content: SYS }, { role: 'user', content: user }], { json: true, timeout: 150000 }));
+      const j = parseJ(await chat([{ role: 'system', content: SYS }, { role: 'user', content: user }], { json: true, timeout: 120000 }));
       for (const r of j.items || []) { const id = String(r.id || '').trim(); if (part.some(x => x.id === id)) { save(cache, id, r, { src: part.find(x => x.id === id).body ? 'body' : 'title' }); added++; } }
-    } catch (e) { errs.push(e.message.slice(0, 160)); log('新聞摘要失敗', e.message); break; }
+      fails = 0;
+    } catch (e) { errs.push(e.message.slice(0, 160)); log('新聞摘要失敗', e.message); if (++fails >= 2) break; }  // 單批失敗就換下一批，連續兩批失敗才停
   }
   const cut = Date.now() - 4 * 86400000;
   for (const [k, v] of Object.entries(cache.map)) if (v.at < cut) delete cache.map[k];
