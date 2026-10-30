@@ -33,12 +33,21 @@ jobs:
             gh api -X POST "repos/$REPO/actions/workflows/update.yml/dispatches" --input - <<< "$BODY" && echo "$(TZ=Asia/Taipei date +%H:%M) 觸發更新 ${1:-盤中}"
             LAST_KICK=$(date +%s)
           }
+          PM_DONE=""
+          pre() {   # 盤前資訊：每一場只觸發一次（premarket.yml 自己也會略過重複）
+            [ "$PM_DONE" = "$DAY-$1" ] && return
+            gh api -X POST "repos/$REPO/actions/workflows/premarket.yml/dispatches" -f ref=main && echo "$(TZ=Asia/Taipei date +%H:%M) 觸發盤前資訊 $1"
+            PM_DONE="$DAY-$1"
+          }
           while [ $(( $(date +%s) - START )) -lt $((340 * 60)) ]; do
             DOW=$(TZ=Asia/Taipei date +%u); HM=$((10#$(TZ=Asia/Taipei date +%H) * 60 + 10#$(TZ=Asia/Taipei date +%M))); DAY=$(TZ=Asia/Taipei date +%F)
             GEN=$(curl -fsS "$SITE/data/snapshot.json?t=$(date +%s)" | jq -r '.generatedAt // empty' 2>/dev/null || true)
             AGE=999; [ -n "$GEN" ] && AGE=$(( ( $(date +%s) - $(date -d "$GEN" +%s) ) / 60 ))
             LAST=$(curl -fsS "https://raw.githubusercontent.com/$REPO/data/last.json?t=$(date +%s)" 2>/dev/null || echo '{}')
             SINCE=$(( ( $(date +%s) - LAST_KICK ) / 60 ))
+            # 盤前資訊：台股 08:10、美股 20:50（週一～五）
+            if [ $DOW -le 5 ] && [ $HM -ge 490 ] && [ $HM -lt 530 ]; then pre tw; fi
+            if [ $DOW -le 5 ] && [ $HM -ge 1250 ] && [ $HM -lt 1290 ]; then pre us; fi
             # 收盤後完整更新：台股 16:45 起（週一～五）、美股 05:20 起（週二～六），當天還沒做過才觸發
             if [ $DOW -le 5 ] && [ $HM -ge 1005 ] && [ $HM -lt 1140 ] && [ "$(echo "$LAST" | jq -r '.fullAt.tw // ""')" != "$DAY" ] && [ $SINCE -ge 40 ]; then kick tw
             elif [ $DOW -ge 2 ] && [ $DOW -le 6 ] && [ $HM -ge 320 ] && [ $HM -lt 470 ] && [ "$(echo "$LAST" | jq -r '.fullAt.us // ""')" != "$DAY" ] && [ $SINCE -ge 40 ]; then kick us

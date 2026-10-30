@@ -74,17 +74,57 @@ function forecastAt(c, lr, states, t, h, W) {
 
 function backtest(c, lr, states, h, W, start) {
   let n = 0, in80 = 0, in50 = 0, dirHit = 0, dirN = 0, ups = 0;
+  const recs = [];
   for (let t = start; t + h < c.length; t++) {
     const f = forecastAt(c, lr, states, t, h, W); if (!f) continue;
     const r = Math.log(c[t + h] / c[t]);
-    n++;
+    n++; recs.push({ q: f.q, p: f.upProb, r });
     if (r >= f.q[0] && r <= f.q[4]) in80++;
     if (r >= f.q[1] && r <= f.q[3]) in50++;
     if (r > 0) ups++;
     if (Math.abs(f.upProb - 0.5) >= 0.02) { dirN++; if ((f.upProb > 0.5) === (r > 0)) dirHit++; }
   }
   if (n < 40) return null;
-  return { n, cov80: in80 / n * 100, cov50: in50 / n * 100, dir: dirN ? dirHit / dirN * 100 : null, dirN, base: ups / n * 100 };
+  return { n, cov80: in80 / n * 100, cov50: in50 / n * 100, dir: dirN ? dirHit / dirN * 100 : null, dirN, base: ups / n * 100, cal: calibrate(recs) };
+}
+
+/**
+ * 自動校正（用滾動回測的實際結果修正推論）：
+ *   區間：找出讓 80%／50% 區間「實際涵蓋率」剛好達標的放大倍數（只用較早的一半挑倍數，再用較新的一半驗證）
+ *   上漲機率：依過去「推論機率 → 實際上漲比例」的對照表修正，樣本少時往整體上漲比例收斂
+ */
+const BINS = [0, 0.4, 0.47, 0.53, 0.6, 1.01];
+function covAt(recs, k, lo, hi) {
+  let inn = 0;
+  for (const x of recs) { const m = x.q[2]; if (x.r >= m - (m - x.q[lo]) * k && x.r <= m + (x.q[hi] - m) * k) inn++; }
+  return recs.length ? inn / recs.length : 0;
+}
+function fitK(recs, target, lo, hi) {
+  let best = 1, err = 9;
+  for (let k = 0.5; k <= 2.5001; k += 0.05) { const e = Math.abs(covAt(recs, k, lo, hi) - target); if (e < err - 1e-9) { err = e; best = k; } }
+  return best;
+}
+function calibrate(recs) {
+  if (recs.length < 80) return null;
+  const half = Math.floor(recs.length / 2), old = recs.slice(0, half), neu = recs.slice(half);
+  const k80o = fitK(old, 0.8, 0, 4), k50o = fitK(old, 0.5, 1, 3);
+  const base = recs.filter(x => x.r > 0).length / recs.length;
+  const binOf = p => BINS.findIndex((b, i) => p >= b && p < BINS[i + 1]);
+  const table = BINS.slice(0, -1).map(() => ({ n: 0, up: 0 }));
+  for (const x of recs) { const b = table[binOf(x.p)]; if (b) { b.n++; if (x.r > 0) b.up++; } }
+  const mapP = p => { const b = table[binOf(p)]; return b ? (b.up + 20 * base) / (b.n + 20) : base; };
+  // 驗證：用較早一半建的對照表，看較新一半的方向命中率有沒有變好
+  const tOld = BINS.slice(0, -1).map(() => ({ n: 0, up: 0 }));
+  for (const x of old) { const b = tOld[binOf(x.p)]; if (b) { b.n++; if (x.r > 0) b.up++; } }
+  const bOld = old.filter(x => x.r > 0).length / old.length, mapOld = p => { const b = tOld[binOf(p)]; return b ? (b.up + 20 * bOld) / (b.n + 20) : bOld; };
+  const hit = (arr, f) => { const a = arr.filter(x => Math.abs(f(x.p) - 0.5) >= 0.02); return a.length ? a.filter(x => (f(x.p) > 0.5) === (x.r > 0)).length / a.length * 100 : null; };
+  return {
+    k80: +fitK(recs, 0.8, 0, 4).toFixed(2), k50: +fitK(recs, 0.5, 1, 3).toFixed(2),
+    oos: { cov80Raw: covAt(neu, 1, 0, 4) * 100, cov80Cal: covAt(neu, k80o, 0, 4) * 100, cov50Raw: covAt(neu, 1, 1, 3) * 100, cov50Cal: covAt(neu, k50o, 1, 3) * 100,
+      dirRaw: hit(neu, p => p), dirCal: hit(neu, mapOld), n: neu.length },
+    table: table.map((b, i) => ({ from: BINS[i], to: Math.min(1, BINS[i + 1]), n: b.n, up: b.n ? b.up / b.n * 100 : null })),
+    mapP,
+  };
 }
 
 function supportResistance(p, bars, lv) {
@@ -165,20 +205,26 @@ function analyze(bars, opt = {}) {
   // ── 推論與回測 ──────────────────────────────────────────────
   const start = Math.max(130, n - (opt.backtestDays || 750));
   const fc = {}, rel = {};
+  const ks = {};
+  const adjQ = (q, cal) => { if (!cal) return q; const m = q[2]; return [m - (m - q[0]) * cal.k80, m - (m - q[1]) * cal.k50, m, m + (q[3] - m) * cal.k50, m + (q[4] - m) * cal.k80]; };
   for (const hz of [5, 20]) {
+    const b = backtest(c, lr, states, hz, W, start), cal = b?.cal || null; ks[hz] = cal;
     const f = forecastAt(c, lr, states, i, hz, W);
-    if (f) fc['h' + hz] = { q: f.q.map(x => r2(p * Math.exp(x), 2)), qPct: f.q.map(x => r2((Math.exp(x) - 1) * 100, 2)), upProb: r2(f.upProb * 100, 0), nState: f.nState };
-    rel['h' + hz] = (b => b && { n: b.n, cov80: r2(b.cov80, 0), cov50: r2(b.cov50, 0), dir: r2(b.dir, 0), dirN: b.dirN, base: r2(b.base, 0) })(backtest(c, lr, states, hz, W, start));
+    if (f) { const q = adjQ(f.q, cal), up = cal ? cal.mapP(f.upProb) : f.upProb;
+      fc['h' + hz] = { q: q.map(x => r2(p * Math.exp(x), 2)), qPct: q.map(x => r2((Math.exp(x) - 1) * 100, 2)), upProb: r2(up * 100, 0), upRaw: r2(f.upProb * 100, 0), nState: f.nState, calibrated: !!cal }; }
+    rel['h' + hz] = b && { n: b.n, cov80: r2(b.cov80, 0), cov50: r2(b.cov50, 0), dir: r2(b.dir, 0), dirN: b.dirN, base: r2(b.base, 0),
+      cal: cal && { k80: cal.k80, k50: cal.k50, cov80Cal: r2(cal.oos.cov80Cal, 0), cov50Cal: r2(cal.oos.cov50Cal, 0), cov80Raw: r2(cal.oos.cov80Raw, 0), cov50Raw: r2(cal.oos.cov50Raw, 0), dirRaw: r2(cal.oos.dirRaw, 0), dirCal: r2(cal.oos.dirCal, 0), oosN: cal.oos.n,
+        table: cal.table.map(t => ({ from: Math.round(t.from * 100), to: Math.round(t.to * 100), n: t.n, up: r2(t.up, 0) })) } };
   }
   const cone = [];
-  for (let d = 1; d <= 20; d++) { const f = forecastAt(c, lr, states, i, d, W); if (f) cone.push(f.q.map(x => r2(p * Math.exp(x), 2))); }
+  for (let d = 1; d <= 20; d++) { const f = forecastAt(c, lr, states, i, d, W); if (f) cone.push(adjQ(f.q, d <= 10 ? ks[5] : ks[20]).map(x => r2(p * Math.exp(x), 2))); }
 
   return {
     state: st, stateZh: STATE_ZH[st] || '—', trendText, posN, negN,
     levels: Object.fromEntries(Object.entries(lv).map(([k, x]) => [k, r2(x, 2)])),
     ind: { rsi: r2(rsi[i], 1), k: r2(K[i], 1), d: r2(D[i], 1), dif: r2(dif[i], 3), dea: r2(dea[i], 3), hist: r2(hist[i], 3), bbWidthPct: r2(bwPct, 0) },
     sr, comments: C, forecast: fc, reliability: rel, cone,
-    method: '波動調整歷史模擬：取過去約 3 年（個股約 1 年）的 h 日報酬分布，依目前波動縮放；上漲機率取過去相同趨勢狀態的實際比例。可靠度為滾動回測（只用當時以前的資料）。',
+    method: '波動調整歷史模擬：取過去約 3 年（個股約 1 年）的 h 日報酬分布，依目前波動縮放；上漲機率取過去相同趨勢狀態的實際比例。可靠度為滾動回測（只用當時以前的資料）；區間寬度與上漲機率依回測的實際結果自動校正。',
   };
 }
 

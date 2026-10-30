@@ -4,6 +4,7 @@
  *
  *   node pipeline/notify.js --snap=out/data/snapshot.json --state=state          每次更新後：送出新事件
  *   node pipeline/notify.js --weekly --snap=… --bars=out/data/bars --state=…      每週一：投資週報
+ *   node pipeline/notify.js --premarket=tw|us --snap=…                           盤前資訊（推播＋選用電子郵件：MAIL_TO，或 SMTP_USER＋SMTP_PASS）
  *
  * 通知管道（GitHub Secrets，至少設一個）：
  *   NTFY_TOPIC（＋選用 NTFY_SERVER，預設 https://ntfy.sh）── 手機裝 ntfy App 訂閱同一個主題
@@ -278,13 +279,98 @@ function newsEvents(N, snap, P, notified) {
   return out.slice(0, 6);
 }
 
-module.exports = { send, decrypt, inQuiet, healthEvents, newsEvents, monthly };
+// ── 盤前資訊（台股 08:15、美股開盤前）──────────────────────────
+// 回傳 { title, sections: [{ h, lines, priv }] }；priv＝含個人資料，只進推播／信件，不印到公開的執行紀錄
+function premarket(snap, N, P, market) {
+  const S = [], items = snap.items || {}, env = Object.fromEntries((snap.env || []).map(e => [e.key, e]));
+  const ix = k => snap.indices?.[k];
+  const day = tpeDay(), wd = '日一二三四五六'[new Date(Date.now() + 8 * 3600000).getUTCDay()];
+  const tw = market === 'tw';
+  const title = `${tw ? '台股' : '美股'}盤前 ${day.slice(5).replace('-', '/')}（${wd}）`;
+  // 1. 前一個市場的收盤
+  if (tw) {
+    const L = [['^GSPC', '標普 500'], ['^IXIC', '那斯達克'], ['^SOX', '費城半導體']].map(([k, n]) => ix(k) && `${n} ${px(ix(k).price)}（${pct(ix(k).changePct, 2)}）`).filter(Boolean);
+    const tsm = items.TSM; if (tsm) L.push(`台積電 ADR ${px(tsm.price)}（${pct(tsm.changePct, 2)}）`);
+    const ex = [env.vix && `VIX ${env.vix.value}（${env.vix.meaning}）`, env.twd && `美元兌台幣 ${env.twd.value}（${env.twd.meaning}）`, env.dxy && `美元指數 ${env.dxy.value}`].filter(Boolean);
+    S.push({ h: '隔夜美股', lines: [L.join('、'), ex.join('、')].filter(Boolean) });
+  } else {
+    const t = ix('^TWII'), L = [t && `加權指數 ${px(t.price)}（${pct(t.changePct, 2)}）`, env.foreign && `外資 ${env.foreign.meaning} ${Math.abs(env.foreign.value)} 億`, env.twd && `台幣 ${env.twd.value}（${env.twd.meaning}）`].filter(Boolean);
+    const twm = Object.values(items).filter(i => i.market === 'tw' && isNum(i.changePct)).sort((a, b) => b.changePct - a.changePct);
+    if (twm.length) L.push(`觀察清單：${twm.slice(0, 2).map(i => `${i.name} ${pct(i.changePct)}`).join('、')} 最強；${twm.slice(-2).reverse().map(i => `${i.name} ${pct(i.changePct)}`).join('、')} 最弱`);
+    const ex = [env.vix && `VIX ${env.vix.value}`, env.curve && `美債利差 ${env.curve.value} 百分點`].filter(Boolean);
+    S.push({ h: '今天台股收盤', lines: [...L, ex.join('、')].filter(Boolean) });
+  }
+  // 2. 今日判斷
+  S.push({ h: '今日判斷', lines: [snap.verdict?.headline, snap.ai?.verdict ? `AI：${snap.ai.verdict}` : null, ...(snap.health?.signals || []).slice(0, 2).map(x => '・' + x.text)].filter(Boolean) });
+  // 3. 全球新聞重點
+  const D = N?.digest, U = D?.ai || D?.rule;
+  if (U) S.push({ h: '全球新聞重點', lines: [U.headline, ...(U.bullets || []).slice(0, 5).map(b => '• ' + b), (D.ai?.watch || []).length ? '接下來盯：' + D.ai.watch.slice(0, 4).join('｜') : null].filter(Boolean) });
+  // 4. 關鍵價位：持股優先，沒有持股就用觀察清單
+  const held = (P?.holdings?.items || []).map(h => h.key).filter(k => items[k]?.market === market);
+  const keys = held.length ? held : Object.values(items).filter(i => i.market === market).sort((a, b) => Math.abs(b.changePct ?? 0) - Math.abs(a.changePct ?? 0)).slice(0, 6).map(i => i.key);
+  const lv = keys.map(k => {
+    const it = items[k], o = it.outlook, s = o?.sr?.support?.[0], r = o?.sr?.resistance?.[0], up = o?.forecast?.h5?.upProb;
+    return `${it.key} ${it.name} ${px(it.price)}（${pct(it.changePct)}）${SIG[it.signal?.sig] || ''}｜撐 ${s ? px(s.p) : '—'}・壓 ${r ? px(r.p) : '—'}${isNum(up) ? `｜5 日上漲機率 ${up}%` : ''}${it.signal?.stop ? `｜停損參考 ${px(it.signal.stop)}` : ''}`;
+  });
+  if (lv.length) S.push({ h: held.length ? '我的持股關鍵價位' : '觀察清單關鍵價位', lines: lv, priv: !!held.length });
+  // 5. 持股相關新聞（24 小時內）
+  if (held.length && N?.per) {
+    const L = [];
+    for (const k of held) for (const n of (N.per[k] || []).slice(0, 3)) if (n.at && Date.now() - Date.parse(n.at) < 24 * 3600000) L.push(`${k}：${n.zh || n.title}${n.imp === -1 || n.tone === -1 ? '（偏空）' : n.imp === 1 || n.tone === 1 ? '（偏多）' : ''}`);
+    if (L.length) S.push({ h: '持股新聞', lines: L.slice(0, 8), priv: true });
+  }
+  // 6. 今天的事件
+  const ev = (snap.calendar || []).filter(e => e.date === day && (e.region === market || e.importance >= 2)).map(e => `${e.title}${e.time ? ` ${e.time}` : ''}`);
+  const near = (snap.calendar || []).filter(e => e.date > day && (Date.parse(e.date) - Date.parse(day)) / 86400000 <= 3 && e.importance >= 2).map(e => `${e.date.slice(5).replace('-', '/')} ${e.title}`);
+  S.push({ h: '今天的事件', lines: [...(ev.length ? ev : ['沒有特別排定的事件']), ...(near.length ? ['接下來 3 天：' + near.slice(0, 4).join('、')] : [])] });
+  // 7. 論點條件（個人）
+  if (P) {
+    const trig = Object.entries(P.journal?.theses || {}).map(([k, t]) => { const it = items[k]; if (!it || it.market !== market) return null; const h = (t.conds || []).map(c => condHit(c, it, P)).filter(x => x[0]).map(x => x[1]); return h.length ? `${k}：${h.join('、')}` : null; }).filter(Boolean);
+    if (trig.length) S.push({ h: '論點條件已觸發', lines: trig, priv: true });
+  }
+  return { title, sections: S };
+}
+const briefText = (B, { pub = false } = {}) => B.sections.filter(s => !(pub && s.priv)).flatMap(s => [`【${s.h}】`, ...s.lines, '']).slice(0, -1);
+function briefHtml(B) {
+  const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const sec = B.sections.map(s => `<h3 style="margin:18px 0 6px;font-size:15px;color:#0f766e;border-bottom:1px solid #e5e7eb;padding-bottom:4px">${esc(s.h)}</h3>` + s.lines.map(l => `<div style="margin:3px 0">${esc(l)}</div>`).join('')).join('');
+  return `<div style="font-family:-apple-system,'PingFang TC','Microsoft JhengHei',sans-serif;font-size:14px;line-height:1.6;color:#111;max-width:640px"><h2 style="margin:0 0 4px;font-size:18px">${esc(B.title)}</h2>${sec}${SITE ? `<p style="margin-top:20px"><a href="${SITE}" style="color:#0f766e">打開訊號終端</a></p>` : ''}</div>`;
+}
+// 寄信：有 SMTP（例如 Gmail 應用程式密碼）就寄排版過的信；否則有 MAIL_TO 就透過 ntfy 轉寄純文字信
+async function sendMail(B) {
+  const to = process.env.MAIL_TO || process.env.SMTP_USER; if (!to) return null;
+  if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+    try {
+      const nm = require('nodemailer');
+      const t = nm.createTransport({ host: process.env.SMTP_HOST || 'smtp.gmail.com', port: +(process.env.SMTP_PORT || 465), secure: +(process.env.SMTP_PORT || 465) === 465, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
+      await t.sendMail({ from: `訊號終端 <${process.env.SMTP_USER}>`, to, subject: B.title, text: briefText(B).join('\n'), html: briefHtml(B) });
+      return 'email ok';
+    } catch (e) { console.log('寄信失敗：', e.message); return 'email fail'; }
+  }
+  if (process.env.NTFY_TOPIC) {
+    const server = (process.env.NTFY_SERVER || 'https://ntfy.sh').replace(/\/+$/, '');
+    const r = await fetch(server, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: process.env.NTFY_TOPIC, title: B.title, message: briefText(B).join('\n').slice(0, 3900), email: to, priority: 1 }) }).catch(e => ({ ok: false, statusText: e.message }));
+    return 'email(ntfy) ' + (r.ok ? 'ok' : 'fail ' + (r.status || r.statusText));
+  }
+  return null;
+}
+
+module.exports = { send, decrypt, inQuiet, healthEvents, newsEvents, monthly, premarket, briefText, briefHtml };
 if (require.main === module) (async () => {
   const snap = readJSON(String(args.snap || 'out/data/snapshot.json'), null);
   if (!snap) { console.log('沒有快照，略過通知'); return; }
   const P = await loadPersonal();
   if (args.weekly) { await send(`訊號終端週報 ${tpeDay()}`, weekly(snap, P, String(args.bars || 'out/data/bars'))); return; }
   if (args.monthly) { await send(`訊號終端月報 ${tpeDay().slice(0, 7)}`, monthly(snap, P, String(args.bars || 'out/data/bars'), await loadLocal())); return; }
+  if (args.premarket) {
+    const mk = args.premarket === 'us' ? 'us' : 'tw', N = readJSON(path.join(path.dirname(String(args.snap || 'out/data/snapshot.json')), 'news.json'), null);
+    const B = premarket(snap, N, P, mk);
+    console.log(briefText(B, { pub: true }).join('\n'));   // 公開紀錄只印不含個人資料的部分
+    if (args.print) return;
+    if (args.push !== 'no') await send(B.title, briefText(B), { priority: 3, tags: ['sunrise'] });
+    const m = await sendMail(B); if (m) console.log(m);
+    return;
+  }
   const stFile = path.join(String(args.state || 'state'), 'notified.json');
   const notified = readJSON(stFile, {});
   // 全球市場快報：早上（美股收盤後 05–10 點，低優先、不響鈴）與傍晚（台股收盤後 16–21 點）各推一次

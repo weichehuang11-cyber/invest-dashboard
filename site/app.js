@@ -19,7 +19,7 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.2.1';
+  const APP_VERSION = '1.2.2';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -807,8 +807,14 @@ ${footer()}`;
     };
     const row = (l, r) => { if (!r) return ''; const g = grade(r); return `<tr><td>${l}</td><td class="num">${r.cov80}%</td><td class="num">${r.cov50}%</td><td class="num">${r.dir ?? '—'}%</td><td class="num muted">${Math.max(r.base, 100 - r.base)}%</td><td class="num muted">${r.n}</td></tr>
       <tr class="sub"><td colspan="6"><span class="rel ${g.band[0]}">${g.band[1]}</span><span class="rel ${g.dir[0]}">${g.dir[1]}</span></td></tr>`; };
+    const cell = (a, b) => `<td class="num"><b>${b ?? '—'}%</b><div class="small muted">原 ${a ?? '—'}%</div></td>`;
+    const calRow = (l, r) => { const c = r?.cal; if (!c) return ''; return `<tr><td style="white-space:normal">${l}<div class="small muted">區間 ×${c.k80}</div></td>${cell(c.cov80Raw, c.cov80Cal)}${cell(c.cov50Raw, c.cov50Cal)}${cell(c.dirRaw, c.dirCal)}</tr>`; };
+    const cal = r5?.cal || r20?.cal;
     return `<div class="tbl-box"><table class="tbl rtbl"><thead><tr><th>回測</th><th class="num">80% 區間<br>實際涵蓋</th><th class="num">50% 區間<br>實際涵蓋</th><th class="num">方向<br>命中率</th><th class="num">單純猜測<br>基準</th><th class="num">次數</th></tr></thead>
-      <tbody>${row('5 日', r5)}${row('20 日', r20)}</tbody></table></div>`;
+      <tbody>${row('5 日', r5)}${row('20 日', r20)}</tbody></table></div>
+      ${cal ? `<details class="small" style="margin-top:6px"><summary>自動校正：圖上的區間與上漲機率已依回測結果修正</summary>
+        <p class="muted" style="margin:6px 0">區間太窄（實際常超出）就自動放大、太寬就縮小；上漲機率依「過去推論 X% 時實際上漲幾成」修正。下表用較早一半的資料挑校正方式、較新一半驗證（校正前 → 校正後），目標是 80% 區間涵蓋 80%、50% 區間涵蓋 50%。</p>
+        <div class="tbl-box"><table class="tbl cm cal"><thead><tr><th>期間</th><th class="num">80% 涵蓋</th><th class="num">50% 涵蓋</th><th class="num">方向命中</th></tr></thead><tbody>${calRow('5 日', r5)}${calRow('20 日', r20)}</tbody></table></div></details>` : ''}`;
   }
 
   function outlookLeft(o) {
@@ -1959,6 +1965,10 @@ ${footer()}`;
     const STZ = { yahoo: 'Yahoo 報價', vix: 'VIX 恐慌指數', treasury: '美國公債殖利率', t86: '三大法人（TWSE）', finmind: 'FinMind 法人／營收', fundamentals: '美股基本面', breadth: '台股寬度（收盤歷史）', futures: '外資台指期', putcall: '選擇權 P/C 比', valuation: '台股估值', margin: '融資餘額', usValuation: '標普本益比', fred: 'FRED 信用／壓力', indices: '指數推論', ai: '雲端 AI 解讀', tdcc: '集保大戶', exdiv: '除權息', tpex: '上櫃行情', usUniverse: '美股清單', universe: '搜尋清單', usFinancials: '美股財報', twFinancials: '台股財報' };
     return `
 <section class="card" aria-labelledby="bt0"><div class="hd"><h2 id="bt0">策略回測</h2><span class="note">過去 2 年照技術面訊號操作的結果，可自行調整門檻、停損、停利；另附 AI 模型的樣本外表現</span><a class="act btn primary sm" href="#/backtest" style="color:#fff">開始回測</a></div></section>
+${(() => { const L = sc?.forecastLive; if (!L) return ''; const row = (l, r) => `<tr><td>${l}</td><td class="num">${r?.n ? r.cov80 + '%' : '—'}</td><td class="num">${r?.n ? r.cov50 + '%' : '—'}</td><td class="num">${r?.dir ?? '—'}%</td><td class="num muted">${r?.base != null ? Math.max(r.base, 100 - r.base) + '%' : '—'}</td><td class="num muted">${r?.n || 0}</td></tr>`;
+  return `<section class="card" aria-labelledby="fl0"><div class="hd"><h2 id="fl0">走勢推論的實際驗證</h2><span class="note">每天收盤後把觀察清單的 5／20 日推論區間記下來，到期後用真實收盤結算（不是回測）・自 ${esc(L.since || '今天')} 起 ${L.records} 筆</span></div>
+    <div class="tbl-box"><table class="tbl cm"><thead><tr><th>期間</th><th class="num">80% 區間<br>涵蓋</th><th class="num">50% 區間<br>涵蓋</th><th class="num">方向<br>命中</th><th class="num">單純<br>猜測</th><th class="num">次數</th></tr></thead><tbody>${row('5 日', L.h5)}${row('20 日', L.h20)}</tbody></table></div>
+    <p class="small muted" style="margin:0">80% 區間涵蓋接近 80%、50% 區間接近 50% 代表區間準；方向命中要明顯高於「單純猜測」才有用。剛開始累積時次數少，5 日要 5 個交易日後、20 日要 20 個交易日後才有第一筆。</p></section>`; })()}
 <section class="card" aria-labelledby="hs0"><div class="hd"><h2 id="hs0">歷史快照</h2><span class="note">查任何一天收盤後的判斷、訊號、指標，並看當天訊號到現在的結果</span><a class="act btn sm" href="#/history">查詢</a></div></section>
 <section class="card" aria-labelledby="hc0"><div class="hd"><h2 id="hc0">高信心訊號：過去 5 年的實際命中率</h2><span class="note">樣本：台灣 50、標普 100 大型股＋觀察清單；依六項條件的信心分數分組，只看「驗證期」（後 40% 時間）的結果，綠底＝命中率 ≥ 65% 且穩定</span></div>
   ${['tw', 'us'].map(m => { const E = S.snap.conviction?.[m]; if (!E) return ''; return `<div><b class="small">${m === 'tw' ? '台股' : '美股'}大型股 ${E.stocks || ''} 檔（${esc(E.from)} → ${esc(E.to)}，驗證期自 ${esc(E.cut)}）・目前大盤${E.regimeNow === 'bull' ? '多頭' : E.regimeNow === 'bear' ? '空頭' : '—'}</b>${convTable(E)}

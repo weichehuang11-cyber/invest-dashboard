@@ -569,8 +569,32 @@ async function main() {
     const ok = rows.filter(p => p[`r${n}`] === 'correct').length;
     return { n: rows.length, correct: ok, rate: rows.length ? r2(ok / rows.length * 100, 1) : null };
   };
+  // ── 推論的實際驗證（上線後才知道的結果）：每天收盤後記下觀察清單的 5／20 日推論區間，之後用真實收盤結算 ──
+  const fcFile = path.join(STATE, 'forecasts.json'), fcLog = readJSON(fcFile, []);
+  if (FULL) {
+    for (const it of Object.values(items)) {
+      const f = it.outlook?.forecast; if (!f?.h5 || !it.marketDate || (FULL === 'tw' ? it.market !== 'tw' : FULL === 'us' ? it.market !== 'us' : false)) continue;
+      if (fcLog.some(x => x.k === it.key && x.d === it.marketDate)) continue;
+      fcLog.push({ k: it.key, d: it.marketDate, p: it.price, h5: f.h5 && { q: f.h5.q, up: f.h5.upProb }, h20: f.h20 && { q: f.h20.q, up: f.h20.upProb } });
+    }
+    while (fcLog.length > 15000) fcLog.shift();
+  }
+  const fcLive = {};
+  for (const [h, key] of [[5, 'h5'], [20, 'h20']]) {
+    let n = 0, in80 = 0, in50 = 0, dn = 0, dh = 0, up = 0;
+    for (const x of fcLog) {
+      const b = daily[x.k]?.bars, fq = x[key]; if (!b || !fq?.q) continue;
+      const j = b.dates.indexOf(x.d); if (j < 0 || j + h >= b.dates.length) continue;
+      const v = b.close[j + h]; n++; if (v > x.p) up++;
+      if (v >= fq.q[0] && v <= fq.q[4]) in80++;
+      if (v >= fq.q[1] && v <= fq.q[3]) in50++;
+      if (Math.abs(fq.up - 50) >= 2) { dn++; if ((fq.up > 50) === (v > x.p)) dh++; }
+    }
+    fcLive[key] = { n, cov80: n ? r2(in80 / n * 100, 0) : null, cov50: n ? r2(in50 / n * 100, 0) : null, dir: dn ? r2(dh / dn * 100, 0) : null, base: n ? r2(up / n * 100, 0) : null };
+  }
   const scorecard = {
     since: predictions[0]?.date || null, total: predictions.length,
+    forecastLive: { since: fcLog[0]?.d || null, records: fcLog.length, ...fcLive },
     d30: { h1: rate(1, 30), h5: rate(5, 30), h20: rate(20, 45) },
     d90: { h1: rate(1, 90), h5: rate(5, 90), h20: rate(20, 120) },
     modelOOS: oos,
@@ -761,6 +785,7 @@ async function main() {
     writeJSON(path.join(STATE, 'heavy.json'), heavy);
     writeJSON(path.join(STATE, 'conviction.json'), { at: nowIso, conviction, high: Object.values(items).filter(i => i.conv?.high?.length).map(i => ({ key: i.key, bucket: i.conv.bucket, score: i.conv.score, high: i.conv.high })) });
     writeJSON(path.join(STATE, 'predictions.json'), predictions);
+    writeJSON(fcFile, fcLog);
     log('狀態已更新', STATE);
   }
 
