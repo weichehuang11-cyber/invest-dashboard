@@ -602,7 +602,7 @@ async function main() {
     const changed = aPrev && aPrev.level != null && aPrev.level !== verdict.level;
     const backoff = aPrev?.errAt && Date.now() - Date.parse(aPrev.errAt) < 60 * 60000;
     if ((process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY) && (FULL || ((stale || changed) && !backoff))) {
-      try { heavy.ai = { ...(await AI.commentary(snapshot)), level: verdict.level, headline: verdict.headline }; writeJSON(aFile, heavy.ai); console.log('DIGEST_CHANGED'); status.ai = `ok（${heavy.ai.model}）`; }
+      try { heavy.ai = { ...(await AI.commentary(snapshot, heavy.newsLast)), level: verdict.level, headline: verdict.headline }; writeJSON(aFile, heavy.ai); console.log('DIGEST_CHANGED'); status.ai = `ok（${heavy.ai.model}）`; }
       catch (e) { status.ai = 'fail: ' + e.message.slice(0, 300); heavy.ai = aPrev; if (aPrev) { writeJSON(aFile, { ...aPrev, err: status.ai, errAt: new Date().toISOString() }); console.log('DIGEST_CHANGED'); } }
     } else heavy.ai = aPrev;
   }

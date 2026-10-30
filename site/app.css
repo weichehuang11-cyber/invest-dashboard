@@ -552,3 +552,17 @@ ul.news .tone { font-size: 10px; margin-right: 4px; }
 .rv div { display: grid; grid-template-columns: 76px 1fr; gap: 8px; font-size: 14px; line-height: 1.55; }
 .rv dt { color: var(--mute); font-weight: 600; }
 .rv dd { margin: 0; }
+
+/* 手機：取消雙擊放大（保留雙指縮放），點擊也不會有 300ms 延遲 */
+html, body, a, button, input, select, label, .card { touch-action: manipulation; }
+#dg-list { scroll-margin-top: 80px; }
+.nc-t a { color: inherit; text-decoration: none; }
+.nc-t a:hover { text-decoration: underline; }
+#dg-more { align-self: center; margin-top: 4px; }
+
+/* 手機：取消雙擊放大（保留雙指縮放），點擊沒有延遲 */
+html, body { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
+button, a, select, input, .btn { touch-action: manipulation; }
+#dg-list.flash { animation: dgflash .5s ease; }
+@keyframes dgflash { from { opacity: .35; } to { opacity: 1; } }
+#dg-cat button { transition: background .15s, color .15s; }

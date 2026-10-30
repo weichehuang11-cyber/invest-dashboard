@@ -57,9 +57,10 @@ const SWITCH_NOW = /HTTP (404|429)\b|逾時|aborted/i;
  * 整體有時間上限（budget），避免拖垮整個排程（工作流程上限 20 分鐘）。
  * once(model, timeoutMs) 只負責送一次請求，回傳文字或丟出錯誤。
  */
-async function withGemini(once, { timeout, budget }) {
+async function withGemini(once, { timeout, budget, lite }) {
   const key = process.env.GEMINI_API_KEY; if (!key) throw new Error('沒有 GEMINI_API_KEY');
   let model = await geminiModel(key);
+  if (lite) { const l = GEM_LIST.find(m => m.includes('lite')); if (l) model = l; }   // 大量的新聞摘要先用 Flash-Lite（額度分開、比較不會用完）
   const t0 = Date.now(), tried = new Set([model]), deadline = t0 + Math.min(budget, GEM_TOTAL - GEM_SPENT), errs = [];
   let sameTries = 0;
   try {
@@ -96,11 +97,11 @@ async function gemPost(model, signal, body) {
   return JSON.parse(text).candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
 }
 /** Google Gemini 一般對話 */
-async function gemini(messages, json, timeout, budget) {
+async function gemini(messages, json, timeout, budget, lite) {
   const sys = messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
   const body = gemBody(sys, messages.filter(m => m.role !== 'system').map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
     { generationConfig: { temperature: 0.4, ...(json ? { responseMimeType: 'application/json' } : {}) } });
-  const r = await withGemini(async (model, signal) => { const out = await gemPost(model, signal, body); if (!out) throw new Error(`${model} 沒有回覆內容`); return out; }, { timeout, budget });
+  const r = await withGemini(async (model, signal) => { const out = await gemPost(model, signal, body); if (!out) throw new Error(`${model} 沒有回覆內容`); return out; }, { timeout, budget, lite });
   chat.lastGem = r.model;
   return r.text;
 }
@@ -110,35 +111,42 @@ async function grounded(prompt, sys, timeout = 120000, budget = 3 * 60000) {
   return (await withGemini((model, signal) => gemPost(model, signal, body), { timeout, budget })).text;
 }
 /** 依序嘗試：Anthropic → Gemini（有哪個金鑰就用哪個） */
-async function chat(messages, { json = false, timeout = 90000, budget = 3 * 60000 } = {}) {
+async function chat(messages, { json = false, timeout = 90000, budget = 3 * 60000, lite = false } = {}) {
   const errs = [];
   if (process.env.ANTHROPIC_API_KEY) { try { const r = await claude(messages, timeout); chat.last = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5'; return r; } catch (e) { errs.push('anthropic: ' + e.message); } }
   if (process.env.GEMINI_API_KEY) {
-    try { const r = await gemini(messages, json, timeout, budget); chat.last = chat.lastGem; return r; }
+    try { const r = await gemini(messages, json, timeout, budget, lite); chat.last = chat.lastGem; return r; }
     catch (e) { errs.push('gemini: ' + e.message); }
   }
   throw new Error(errs.join(' ｜ ') || '沒有可用的 AI（請設定 GEMINI_API_KEY 或 ANTHROPIC_API_KEY）');
 }
 
 const SIG = { BUY: '買進', SELL: '賣出', HOLD: '觀望' };
-async function commentary(snap) {
+/** AI 有時回「2886 兆豐金」當代號，只取開頭的代號 */
+const aiKey = k => (String(k).trim().match(/^[\^A-Za-z0-9.\-]+/) || [String(k).trim()])[0].toUpperCase();
+async function commentary(snap, news) {
   const env = snap.env.map(e => `${e.label} ${e.value}${e.unit || ''}${e.changePct != null ? ` (${e.changePct > 0 ? '+' : ''}${e.changePct}%)` : ''} ${e.meaning}`).join('；');
   const health = (snap.health?.signals || []).map(x => x.text).join('；') || '無';
   const facts = snap.ranking.map(k => {
     const it = snap.items[k], o = it.outlook, f = it.fin;
     return `${k} ${it.name}｜${it.price}（${it.changePct}%）｜${SIG[it.signal.sig]} ${it.signal.score} 分｜${o?.stateZh || ''}｜${(o?.comments || []).slice(0, 3).map(c => c.text).join('，')}｜財報：${f?.grade || '—'}${f?.checks?.[0] ? '，' + f.checks[0].text : ''}`;
   }).join('\n');
-  const sys = '你是專業的台股與美股分析師，用繁體中文、口語但精準地寫給個人投資人。只根據提供的數據，不要編造新聞或數字，不要加免責聲明。';
-  const user = `今日判斷：${snap.verdict.headline}（${snap.verdict.detail}）
+  const D = news?.digest, U = D?.ai || D?.rule || {};
+  const ctx = [U.headline ? `全球快報：${U.headline}；${(U.bullets || []).slice(0, 5).join('；')}` : '', (D?.stories || []).filter(x => x.zh).slice(0, 8).map(x => `・${x.zh}${x.imp ? (x.imp > 0 ? '（利多）' : '（利空）') : ''}`).join('\n'),
+    (news?.themes || []).slice(0, 5).map(t => `${t.name}${t.phase ? '（' + t.phase + '）' : ''}${t.avgChg != null ? ` 相關股平均 ${t.avgChg}%` : ''}`).join('、')].filter(Boolean).join('\n');
+  const sys = '你是專業的台股與美股分析師，用繁體中文、口語但精準地寫給個人投資人。只根據提供的數據，不要編造新聞或數字，不要加免責聲明。你的價值在於補充規則系統看不到的東西，不要把「今日判斷」的理由換句話說再講一遍。';
+  const user = `今日判斷（規則系統，已顯示在畫面上，不要重複）：${snap.verdict.headline}（${snap.verdict.detail}）
+今天的新聞與題材：
+${ctx || '（無）'}
 市場環境：${env}
 市場健康度警訊：${health}
 觀察清單：
 ${facts}
 
-請輸出 JSON：{"verdict": "3 句話以內的今日市場解讀：重點、原因、該怎麼做（不超過 120 字）", "stocks": {"代號": "一句話點評，30 字以內，說出最關鍵的一件事"}}，stocks 要涵蓋上面每一檔。`;
+請輸出 JSON：{"verdict": "3 句話以內：①新聞或題材上今天真正在推動市場的是什麼、②規則判斷可能沒反映到的風險或機會、③今天最該注意的一件事（不超過 120 字，不要重複今日判斷的理由）", "stocks": {"代號（只寫代號，例如 2330、NVDA）": "一句話點評，30 字以內，說出最關鍵的一件事"}}，stocks 要涵蓋上面每一檔。`;
   const txt = await chat([{ role: 'system', content: sys }, { role: 'user', content: user }], { json: true });
   const j = JSON.parse((txt.match(/\{[\s\S]*\}/) || [txt])[0]);
-  return { model: chat.last || MODEL, at: new Date().toISOString(), verdict: String(j.verdict || '').trim(), stocks: Object.fromEntries(Object.entries(j.stocks || {}).map(([k, v]) => [String(k).toUpperCase(), String(v).trim()])) };
+  return { model: chat.last || MODEL, at: new Date().toISOString(), verdict: String(j.verdict || '').trim(), stocks: Object.fromEntries(Object.entries(j.stocks || {}).map(([k, v]) => [aiKey(k), String(v).trim()])) };
 }
 
 module.exports = { chat, grounded, commentary, MODEL };

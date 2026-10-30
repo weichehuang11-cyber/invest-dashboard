@@ -1,0 +1,56 @@
+name: 排程器（補足 GitHub 排程）
+
+# GitHub 內建排程在尖峰時常延遲或略過（實測一天只觸發 4～5 次）。
+# 這個工作在背景常駐（最長約 5 小時 50 分），依台北時間主動觸發「更新資料並發布網站」，
+# 結束前再啟動下一輪，形成不中斷的排程；任何一個內建排程或手動執行都能把它重新接上。
+on:
+  schedule:
+    - cron: '41 */2 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: scheduler
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - name: 依時間觸發更新
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SITE: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+        run: |
+          START=$(date +%s); LAST_KICK=0
+          kick() {   # $1 = full 參數（空白＝盤中快速更新）
+            if [ -n "$1" ]; then BODY="{\"ref\":\"main\",\"inputs\":{\"full\":\"$1\"}}"; else BODY='{"ref":"main"}'; fi
+            gh api -X POST "repos/$REPO/actions/workflows/update.yml/dispatches" --input - <<< "$BODY" && echo "$(TZ=Asia/Taipei date +%H:%M) 觸發更新 ${1:-盤中}"
+            LAST_KICK=$(date +%s)
+          }
+          while [ $(( $(date +%s) - START )) -lt $((340 * 60)) ]; do
+            DOW=$(TZ=Asia/Taipei date +%u); HM=$((10#$(TZ=Asia/Taipei date +%H) * 60 + 10#$(TZ=Asia/Taipei date +%M))); DAY=$(TZ=Asia/Taipei date +%F)
+            GEN=$(curl -fsS "$SITE/data/snapshot.json?t=$(date +%s)" | jq -r '.generatedAt // empty' 2>/dev/null || true)
+            AGE=999; [ -n "$GEN" ] && AGE=$(( ( $(date +%s) - $(date -d "$GEN" +%s) ) / 60 ))
+            LAST=$(curl -fsS "https://raw.githubusercontent.com/$REPO/data/last.json?t=$(date +%s)" 2>/dev/null || echo '{}')
+            SINCE=$(( ( $(date +%s) - LAST_KICK ) / 60 ))
+            # 收盤後完整更新：台股 16:45 起（週一～五）、美股 05:20 起（週二～六），當天還沒做過才觸發
+            if [ $DOW -le 5 ] && [ $HM -ge 1005 ] && [ $HM -lt 1140 ] && [ "$(echo "$LAST" | jq -r '.fullAt.tw // ""')" != "$DAY" ] && [ $SINCE -ge 40 ]; then kick tw
+            elif [ $DOW -ge 2 ] && [ $DOW -le 6 ] && [ $HM -ge 320 ] && [ $HM -lt 470 ] && [ "$(echo "$LAST" | jq -r '.fullAt.us // ""')" != "$DAY" ] && [ $SINCE -ge 40 ]; then kick us
+            # 盤中：台股 09:05–13:40（週一～五）、美股 21:35–04:50；週末每 3 小時。資料超過 25 分鐘沒更新才觸發
+            elif { [ $DOW -le 5 ] && [ $HM -ge 545 ] && [ $HM -le 820 ]; } || { [ $DOW -le 5 ] && [ $HM -ge 1295 ]; } || { [ $DOW -ge 2 ] && [ $DOW -le 6 ] && [ $HM -le 290 ]; }; then
+              [ $AGE -ge 25 ] && [ $SINCE -ge 20 ] && kick ""
+            elif [ $DOW -ge 6 ] && [ $AGE -ge 180 ] && [ $SINCE -ge 60 ]; then kick ""
+            fi
+            sleep 120
+          done
+      - name: 接續下一輪
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/actions/workflows/scheduler.yml/dispatches" -f ref=main && echo "已排下一輪"

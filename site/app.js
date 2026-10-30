@@ -19,7 +19,9 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.2.0';
+  const APP_VERSION = '1.2.1';
+  /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
+  const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const isNum = v => typeof v === 'number' && Number.isFinite(v);
   const isMob = () => window.innerWidth < 760;
@@ -178,12 +180,15 @@
       if (f?.truncated) txt = await (await fetch(f.raw_url, { cache: 'no-store' })).text();
       const d = JSON.parse(txt); d.age = (Date.now() - Date.parse(d.at)) / 60000; d.fresh = d.age < 16;   // 電腦每 10 分鐘上傳一次；超過 16 分鐘沒上傳＝電腦已關機或睡眠
       S.remote = d; S.remoteAt = Date.now();
-      if (d.age < 240 && !localAny()) for (const [k, v] of Object.entries(d.preds || {})) { const p = v.npu || v.cpu; if (p && !S.localPreds[k]) S.localPreds[k] = { d1: p.d1, d5: p.d5, eng: (v.npu ? 'NPU' : 'CPU') + '・電腦' }; }
+      // 模型若對每檔都給幾乎一樣的預測（退化），就不顯示
+      const d5s = Object.values(d.preds || {}).map(v => (v.npu || v.cpu || {}).d5).filter(isNum), m5 = d5s.reduce((a, b) => a + b, 0) / (d5s.length || 1);
+      d.predsFlat = d5s.length >= 5 && Math.sqrt(d5s.reduce((a, b) => a + (b - m5) ** 2, 0) / d5s.length) < 0.05;
+      if (d.age < 240 && !localAny() && !d.predsFlat) for (const [k, v] of Object.entries(d.preds || {})) { const p = v.npu || v.cpu; if (p && !S.localPreds[k]) S.localPreds[k] = { d1: p.d1, d5: p.d5, eng: (v.npu ? 'NPU' : 'CPU') + '・電腦' }; }
       return d;
     } catch (_) { S.remote = null; S.remoteAt = Date.now(); return null; }
   }
   const remoteEngines = d => [d.engines?.npu?.ok && 'NPU', d.engines?.cpu?.ok && 'CPU', d.engines?.llm?.ok && '語言模型'].filter(Boolean);
-  const remoteAI = (txt, d) => `<div class="ai"><b>電腦 AI 解讀</b>${esc(txt)}<span class="small" style="opacity:.7;display:block;margin-top:4px">你的電腦（${esc(d.llm?.model || '本機語言模型')}）・${agoMin((Date.now() - Date.parse(d.llm?.at || d.at)) / 60000)}${d.fresh ? '' : '・電腦目前離線'}${d.llm?.basedOn && S.snap && d.llm.basedOn !== S.snap.generatedAt ? '・根據較早的資料' : ''}</span></div>`;
+  const remoteAI = (txt, d) => `<div class="ai"><b>電腦 AI・反方觀點</b>${esc(txt)}<span class="small" style="opacity:.7;display:block;margin-top:4px">你的電腦（${esc(d.llm?.model || '本機語言模型')}）・${agoMin((Date.now() - Date.parse(d.llm?.at || d.at)) / 60000)}${d.fresh ? '' : '・電腦目前離線'}${d.llm?.basedOn && S.snap && d.llm.basedOn !== S.snap.generatedAt ? '・根據較早的資料' : ''}</span></div>`;
   function updateLocalPill() {
     const el = $('#pill-local'); if (!el) return;
     if (!S.local.checked) return;
@@ -373,7 +378,7 @@
     const impCls = n.imp > 0 ? 'pos' : n.imp < 0 ? 'neg' : 'neu';
     return `<article class="nc ${impCls}">
       <div class="nc-top">${n.cat && !opt.noCat ? `<span class="nc-cat">${esc(n.cat)}</span>` : ''}${impBadge(n.imp ?? 0)}<span class="nc-time">${n.at ? newsAgo(n.at) : ''}</span></div>
-      <h3 class="nc-t">${esc(t)}</h3>
+      <h3 class="nc-t"><a href="${esc(safeUrl(n.link))}" target="_blank" rel="noopener">${esc(t)}</a></h3>
       ${n.sum ? `<p class="nc-s">${esc(n.sum)}</p>` : en ? '<p class="nc-s muted">英文報導，中文摘要會在下一次整理時補上。</p>' : n.desc ? `<p class="nc-s">${esc(n.desc.slice(0, 110))}</p>` : ''}
       ${n.kp?.length ? `<ul class="nc-k">${n.kp.map(k => `<li>${esc(k)}</li>`).join('')}</ul>` : ''}
       ${n.why ? `<div class="nc-w"><b>投資意義</b>${esc(n.why)}</div>` : ''}
@@ -425,20 +430,30 @@
     // 有中文摘要時，只列已翻成中文的新聞（全部繁體中文）
     const st = D.stories.some(x => x.zh) ? D.stories.filter(x => !isEn(x)) : D.stories;
     D = { ...D, stories: st };
-    const cats = [...new Set(D.stories.map(x => x.cat))];
+    const cnt = {}; for (const x of D.stories) cnt[x.cat] = (cnt[x.cat] || 0) + 1;
+    const cats = Object.keys(cnt).sort((a, b) => (a === '其他') - (b === '其他') || cnt[b] - cnt[a]);
     return `<section class="card" aria-labelledby="dgf-h"><div class="hd"><h1 id="dgf-h" style="margin:0;font-size:20px">全球市場快報</h1><span class="note">路透、彭博、CNBC、華爾街日報、中央社、經濟日報等</span></div>
   <div class="dg">${dgSummary(D, false)}</div>
 </section>
 <section class="card fold all" data-fold="dgq" aria-labelledby="dgq-h"><div class="hd"><h2 id="dgq-h">全球行情</h2><span class="note">股、債、匯、原物料</span></div>${dgQuotes(D.quotes)}</section>
 <section class="card" aria-labelledby="dgs-h"><div class="hd"><h2 id="dgs-h">重點新聞</h2><span class="note">每則附繁中摘要・多家媒體同時報導的排前面</span></div>
-  <div class="segs" id="dg-cat"><button type="button" class="btn sm act" data-c="">重點</button>${cats.map(c => `<button type="button" class="btn sm" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+  <div class="segs" id="dg-cat"><button type="button" class="btn sm act" data-c="">重點 ${Math.min(10, D.stories.length)}</button><button type="button" class="btn sm" data-c="*">全部 ${D.stories.length}</button>${cats.map(c => `<button type="button" class="btn sm" data-c="${esc(c)}">${esc(c)} ${cnt[c]}</button>`).join('')}</div>
   <div class="ncl grid" id="dg-list">${D.stories.map((x, i) => `<div data-c="${esc(x.cat)}" data-i="${i}"${i >= 10 ? ' hidden' : ''}>${newsCard(x)}</div>`).join('')}</div>
+  ${D.stories.length > 10 ? `<button type="button" class="btn" id="dg-more">看全部 ${D.stories.length} 則</button>` : ''}
 </section>`;
   }
   function bindDigest() {
     const seg = $('#dg-cat'); if (!seg) return;
-    seg.onclick = e => { const b = e.target.closest('button'); if (!b) return; seg.querySelectorAll('button').forEach(x => x.classList.toggle('act', x === b));
-      document.querySelectorAll('#dg-list > div').forEach(li => { li.hidden = b.dataset.c ? li.dataset.c !== b.dataset.c : +li.dataset.i >= 10; }); };
+    const apply = c => {
+      seg.querySelectorAll('button').forEach(x => x.classList.toggle('act', x.dataset.c === c));
+      document.querySelectorAll('#dg-list > div').forEach(li => { li.hidden = c === '*' ? false : c ? li.dataset.c !== c : +li.dataset.i >= 10; });
+      const more = $('#dg-more'); if (more) more.hidden = c !== '';
+      // 點了：分類按鈕留在畫面上方、清單閃一下，看得到變化
+      const l = $('#dg-list'); if (l) { l.classList.remove('flash'); void l.offsetWidth; l.classList.add('flash'); }
+      const y = seg.getBoundingClientRect().top + scrollY - 70; if (Math.abs(scrollY - y) > 40) scrollTo({ top: y, behavior: 'smooth' });
+    };
+    seg.onclick = e => { const b = e.target.closest('button'); if (b) apply(b.dataset.c); };
+    const more = $('#dg-more'); if (more) more.onclick = () => apply('*');
   }
 
   function viewNews(N) {
@@ -620,7 +635,7 @@ ${footer()}`;
       const it = s.items[k], g = it.signal, l = S.localPreds[k];
       return `<a class="ocard" href="#/s/${encodeURIComponent(k)}"><div class="r1">${st.has(k) ? '<span class="staron" aria-label="自選">★</span>' : ''}<b>${esc(k)}</b><span class="small muted">${esc(it.name)}</span>${convBadge(it)}${sigTag(g.sig)}</div>
         <div class="r2"><span class="mono" style="font-size:17px;font-weight:600">${px(it.price)}</span><span class="mono small ${cls(it.changePct)}">${pct(it.changePct)}</span><span class="small muted" style="margin-left:auto">分數 ${g.score}・停損 ${px(g.stop)}</span></div>
-        <div>${evDots(g.evidence)}${l ? `<span class="small muted" style="margin-left:10px">本機預測 5 日 <b class="${cls(l.d5)}">${pct(l.d5)}</b></span>` : ''}</div>${s.ai?.stocks?.[k] ? `<div class="small muted">💬 ${esc(s.ai.stocks[k])}</div>` : ''}</a>`;
+        <div>${evDots(g.evidence)}${l ? `<span class="small muted" style="margin-left:10px">本機預測 5 日 <b class="${cls(l.d5)}">${pct(l.d5)}</b></span>` : ''}</div>${aiStock(s, k) ? `<div class="small muted">💬 ${esc(aiStock(s, k))}</div>` : ''}</a>`;
     };
     return `
       <div class="hd"><h2 id="opp-h">機會清單</h2><span class="note">${isMob() ? '證據燈：' : `依綜合分數排序・證據：技術／籌碼／基本面／模型（`}${cfg.colors === 'us' ? '實心綠' : '實心紅'}＝支持、${cfg.colors === 'us' ? '實心紅' : '實心綠'}＝反對${isMob() ? '' : '、空心＝中性、虛線＝無資料）'}</span>${n && all.length > n ? `<a class="act" href="#/all">看全部 ${all.length} 檔</a>` : ''}</div>
@@ -1042,7 +1057,7 @@ ${viewDecideCard(key)}
 <section class="card" aria-labelledby="th-h">
   <div class="hd"><h2 id="th-h">系統觀點</h2><span class="note">依公開資料自動整理（和你的論點對照看）</span></div>
   <p style="margin:0;font-size:17px;font-weight:500">${SIG[g.sig]}（${g.score} 分）：${T.pros.length} 項支持、${T.cons.length} 項風險。${isNum(g.stop) ? `跌破 ${px(g.stop)}（2 倍日線 ATR）宜停損。` : ''}</p>
-  <div id="ai-stock">${S.snap.ai?.stocks?.[key] ? `<div class="ai" style="background:var(--bg);color:var(--ink2)"><b style="color:var(--ink)">AI 點評</b>${esc(S.snap.ai.stocks[key])} <span class="small muted">（雲端・${esc(tpeTime(S.snap.ai.at))}）</span></div>` : ''}</div>
+  <div id="ai-stock">${aiStock(S.snap, key) ? `<div class="ai" style="background:var(--bg);color:var(--ink2)"><b style="color:var(--ink)">AI 點評</b>${esc(aiStock(S.snap, key))} <span class="small muted">（雲端・${esc(tpeTime(S.snap.ai.at))}）</span></div>` : ''}</div>
   ${S.local.llm ? `<form id="ask" class="ask"><label for="ask-q" class="sr">問本機 AI</label><input id="ask-q" placeholder="問本機 AI，例如：現在適合加碼嗎？停損要設多少？" autocomplete="off"><button class="btn primary" type="submit">問</button></form><div id="ask-a"></div>` : ''}
   <div class="thesis"><div><b class="small">支持</b><ul>${T.pros.map(x => `<li>${x}</li>`).join('') || '<li class="muted">無</li>'}</ul></div>
   <div><b class="small">風險</b><ul>${T.cons.map(x => `<li>${x}</li>`).join('') || '<li class="muted">無</li>'}</ul></div></div>

@@ -43,7 +43,7 @@ async function summarize(items, chat, cache, { max = 60, batch = 20, log = () =>
     const list = part.map(x => `${x.id}｜${x.source || ''}｜${x.title}${ctxOf(x) ? '｜' + ctxOf(x) : ''}`).join('\n');
     const user = `逐則整理以下新聞（格式：編號｜媒體｜標題｜補充內容）。補充內容越多，摘要要越具體（寫出數字、公司、原因）；只有標題時就簡短說明，不要硬湊：\n${list}\n\n輸出 JSON：{"items":[${FORMAT}]}，每一則都要有。`;
     try {
-      const j = parseJ(await chat([{ role: 'system', content: SYS }, { role: 'user', content: user }], { json: true, timeout: 120000 }));
+      const j = parseJ(await chat([{ role: 'system', content: SYS }, { role: 'user', content: user }], { json: true, timeout: 120000, lite: true }));
       for (const r of j.items || []) { const id = String(r.id || '').trim(); if (part.some(x => x.id === id)) { save(cache, id, r, { src: part.find(x => x.id === id).body ? 'body' : 'title' }); added++; } }
       fails = 0;
     } catch (e) { errs.push(e.message.slice(0, 160)); log('新聞摘要失敗', e.message); if (++fails >= 2) break; }  // 單批失敗就換下一批，連續兩批失敗才停
