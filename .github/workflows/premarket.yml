@@ -49,7 +49,7 @@ jobs:
           node-version: 20
       - name: 安裝寄信套件
         if: steps.slot.outputs.skip != '1'
-        run: npm i --no-save --no-package-lock nodemailer@6.9.16
+        run: mkdir -p /tmp/nm && cd /tmp/nm && npm init -y >/dev/null && npm i --no-audit --no-fund nodemailer@6.9.16
       - name: 取得最新資料
         if: steps.slot.outputs.skip != '1'
         run: |
@@ -69,5 +69,6 @@ jobs:
           MAIL_TO: ${{ secrets.MAIL_TO }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          NODE_PATH: /tmp/nm/node_modules
           SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
         run: node pipeline/notify.js --premarket=${{ steps.slot.outputs.market }} --snap=out/data/snapshot.json
