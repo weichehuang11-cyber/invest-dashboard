@@ -136,41 +136,82 @@ function barsRet(dir, key, n) {
   const b = readJSON(path.join(dir, `${key.replace(/[^A-Za-z0-9_.-]/g, '_')}.json`), null); if (!b?.close?.length) return null;
   const c = b.close, k = c.length; return k > n ? (c[k - 1] / c[k - 1 - n] - 1) * 100 : null;
 }
-function weekly(snap, P, barsDir) {
-  const L = [], items = Object.values(snap.items || {});
-  const tw = barsRet(barsDir, '^TWII', 5), sp = barsRet(barsDir, '^GSPC', 5), sox = barsRet(barsDir, '^SOX', 5);
-  L.push(`【市場】加權 ${pct(tw)}、標普 500 ${pct(sp)}、費半 ${pct(sox)}（近 5 個交易日）`);
-  L.push(`今日判斷：${snap.verdict?.headline || '—'}`);
-  if (snap.ai?.verdict) L.push(`AI 解讀：${snap.ai.verdict}`);
-  const sg = (snap.health?.signals || []).slice(0, 3).map(x => '・' + x.text); if (sg.length) L.push(...sg);
-  const r5 = items.filter(i => isNum(i.ta?.ret5)).sort((a, b) => b.ta.ret5 - a.ta.ret5);
-  if (r5.length) { L.push('', '【觀察清單本週】'); L.push('漲最多：' + r5.slice(0, 3).map(i => `${i.key} ${pct(i.ta.ret5)}`).join('、')); L.push('跌最多：' + r5.slice(-3).reverse().map(i => `${i.key} ${pct(i.ta.ret5)}`).join('、')); }
+// ── 週日週報：本週回顧＋下週方向 ─────────────────────────────
+function weeklyFacts(snap, barsDir) {   // 不含個人資料，給 AI 寫「下週方向」用
+  const ix = k => snap.indices?.[k], o = k => ix(k)?.outlook;
+  const idx = [['^TWII', '加權'], ['^GSPC', '標普 500'], ['^IXIC', '那斯達克'], ['^SOX', '費半']].map(([k, n]) => {
+    const f = o(k)?.forecast?.h5, sr = o(k)?.sr;
+    return `${n}：本週 ${pct(barsRet(barsDir, k, 5))}，${o(k)?.stateZh || ''}，下週上漲機率 ${f?.upProb ?? '—'}%，80% 區間 ${f ? `${pct(f.qPct[0])}～${pct(f.qPct[4])}` : '—'}，支撐 ${sr?.support?.[0] ? px(sr.support[0].p) : '—'}、壓力 ${sr?.resistance?.[0] ? px(sr.resistance[0].p) : '—'}`;
+  });
+  const env = (snap.env || []).map(e => `${e.label} ${e.value}${e.unit || ''}（${e.meaning}）`).join('；');
+  return { idx, env };
+}
+function weekly(snap, N, P, barsDir, aiDir) {
+  const S = [], items = Object.values(snap.items || {}), day = tpeDay();
+  const title = `訊號終端週報 ${day.slice(5).replace('-', '/')}：本週回顧與下週方向`;
+  // 本週市場
+  const r = k => pct(barsRet(barsDir, k, 5));
+  const env = Object.fromEntries((snap.env || []).map(e => [e.key, e]));
+  S.push({ h: '本週市場', lines: [`加權 ${r('^TWII')}、標普 500 ${r('^GSPC')}、那斯達克 ${r('^IXIC')}、費半 ${r('^SOX')}（近 5 個交易日）`,
+    [env.vix && `VIX ${env.vix.value}（${env.vix.meaning}）`, env.twd && `台幣 ${env.twd.value}`, env.foreign && `外資 ${env.foreign.meaning}`].filter(Boolean).join('、'),
+    `目前判斷：${snap.verdict?.headline || '—'}`, ...(snap.health?.signals || []).slice(0, 3).map(x => '・' + x.text)].filter(Boolean) });
+  // 觀察清單
+  const r5 = items.filter(i => isNum(i.ta?.ret5)).sort((a, b) => b.ta.ret5 - a.ta.ret5), L = [];
+  if (r5.length) { L.push('漲最多：' + r5.slice(0, 3).map(i => `${i.key} ${i.name} ${pct(i.ta.ret5)}`).join('、')); L.push('跌最多：' + r5.slice(-3).reverse().map(i => `${i.key} ${i.name} ${pct(i.ta.ret5)}`).join('、')); }
   const buys = items.filter(i => i.signal.sig === 'BUY').map(i => i.key), sells = items.filter(i => i.signal.sig === 'SELL').map(i => i.key);
-  L.push(`目前買進訊號：${buys.join('、') || '無'}；賣出訊號：${sells.join('、') || '無'}`);
+  L.push(`買進訊號：${buys.join('、') || '無'}；賣出訊號：${sells.join('、') || '無'}`);
   const hcs = items.filter(i => i.conv?.high?.length).map(i => `${i.key}（${i.conv.dir < 0 ? '偏空' : '偏多'} ${i.conv.high[0].hit}%）`);
   L.push(`高信心訊號：${hcs.join('、') || '無（本來就少見，正常）'}`);
+  S.push({ h: '觀察清單本週', lines: L });
+  // 本週新聞主軸
+  const D = N?.digest, U = D?.ai || D?.rule, th = (N?.themes || []).slice(0, 4);
+  if (U || th.length) S.push({ h: '本週新聞主軸', lines: [U?.headline, ...(U?.bullets || []).slice(0, 4).map(b => '• ' + b), th.length ? '熱門題材：' + th.map(t => `${t.name}${t.avgChg != null ? `（${pct(t.avgChg)}）` : ''}`).join('、') : null].filter(Boolean) });
+  // 我的部位（個人）
   if (P) {
-    const H = P.holdings?.items || [], fx = snap.env?.find(e => e.key === 'twd')?.value || 32;
+    const PL = [], H = P.holdings?.items || [], fx = env.twd?.value || 32;
     if (H.length) {
-      let mv = 0, wk = 0;
-      for (const h of H) { const it = snap.items[h.key]; if (!it) continue; const v = it.price * h.shares * (it.market === 'us' ? fx : 1); mv += v; if (isNum(it.ta?.ret5)) wk += v - v / (1 + it.ta.ret5 / 100); }
-      L.push('', '【我的部位】', `持股市值約 ${Math.round(mv).toLocaleString()} 元，本週約 ${wk >= 0 ? '+' : ''}${Math.round(wk).toLocaleString()} 元（${pct(mv ? wk / (mv - wk) * 100 : null)}）`);
+      let mv = 0, wk = 0; const rows = [];
+      for (const h of H) { const it = snap.items[h.key]; if (!it) continue; const v = it.price * h.shares * (it.market === 'us' ? fx : 1); mv += v; if (isNum(it.ta?.ret5)) { wk += v - v / (1 + it.ta.ret5 / 100); rows.push(`${it.key} ${pct(it.ta.ret5)}`); } }
+      PL.push(`持股市值約 ${Math.round(mv).toLocaleString()} 元，本週約 ${wk >= 0 ? '+' : ''}${Math.round(wk).toLocaleString()} 元（${pct(mv ? wk / (mv - wk) * 100 : null)}）`);
+      if (rows.length) PL.push('各檔本週：' + rows.join('、'));
     }
-    const J = P.journal || {}, since = new Date(Date.now() - 7 * 86400000).toISOString();
-    const dec = (J.decisions || []).filter(d => d.at >= since.slice(0, 10));
-    const moods = (J.moods || []).filter(m => m.at >= since.slice(0, 10));
-    L.push(`本週記錄：決定 ${dec.length} 筆、市場感覺 ${moods.length} 天`);
-    const th = Object.entries(J.theses || {});
-    const trig = th.map(([k, t]) => { const it = snap.items[k]; if (!it) return null; const h = (t.conds || []).map(c => condHit(c, it, P)).filter(x => x[0]).map(x => x[1]); return h.length ? `${k}（${h.join('、')}）` : null; }).filter(Boolean);
-    L.push(`進行中的論點 ${th.length} 個${trig.length ? `，條件觸發：${trig.join('；')}` : '，沒有觸發'}`);
-    // 已滿 5 個交易日的決定（以 bars 結算）
-    const old = (J.decisions || []).filter(d => d.action !== 'hold');
-    const res = old.map(d => { const b = readJSON(path.join(barsDir, `${d.key.replace(/[^A-Za-z0-9_.-]/g, '_')}.json`), null); if (!b) return null; const i = b.dates.findIndex(x => x >= d.at.slice(0, 10)); if (i < 0 || i + 5 >= b.close.length) return null; const r = (b.close[i + 5] / d.price - 1) * 100 * (d.action === 'sell' ? -1 : 1); return r; }).filter(isNum);
-    if (res.length) L.push(`累計已結算 ${res.length} 筆，5 日勝率 ${(res.filter(r => r > 0.5).length / res.length * 100).toFixed(0)}%、平均 ${pct(res.reduce((s, r) => s + r, 0) / res.length, 2)}`);
+    const J = P.journal || {}, since = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    PL.push(`本週記錄：決定 ${(J.decisions || []).filter(d => d.at >= since).length} 筆、市場感覺 ${(J.moods || []).filter(m => m.at >= since).length} 天`);
+    const thz = Object.entries(J.theses || {});
+    const trig = thz.map(([k, t]) => { const it = snap.items[k]; if (!it) return null; const h = (t.conds || []).map(c => condHit(c, it, P)).filter(x => x[0]).map(x => x[1]); return h.length ? `${k}（${h.join('、')}）` : null; }).filter(Boolean);
+    PL.push(`進行中的論點 ${thz.length} 個${trig.length ? `，條件觸發：${trig.join('；')}` : '，沒有觸發'}`);
+    const res = (J.decisions || []).filter(d => d.action !== 'hold').map(d => { const b = readJSON(path.join(barsDir, `${d.key.replace(/[^A-Za-z0-9_.-]/g, '_')}.json`), null); if (!b) return null; const i = b.dates.findIndex(x => x >= d.at.slice(0, 10)); if (i < 0 || i + 5 >= b.close.length) return null; return (b.close[i + 5] / d.price - 1) * 100 * (d.action === 'sell' ? -1 : 1); }).filter(isNum);
+    if (res.length) PL.push(`累計已結算 ${res.length} 筆，5 日勝率 ${(res.filter(x => x > 0.5).length / res.length * 100).toFixed(0)}%、平均 ${pct(res.reduce((a, x) => a + x, 0) / res.length, 2)}`);
+    S.push({ h: '我的部位', lines: PL, priv: true });
+    // 持股下週關鍵價位
+    const lv = H.map(h => snap.items[h.key]).filter(Boolean).map(it => { const o = it.outlook, sp = o?.sr?.support?.[0], rs = o?.sr?.resistance?.[0], f = o?.forecast?.h5; return `${it.key} ${it.name} ${px(it.price)}｜撐 ${sp ? px(sp.p) : '—'}・壓 ${rs ? px(rs.p) : '—'}${f ? `｜下週上漲機率 ${f.upProb}%、80% 區間 ${px(f.q[0])}～${px(f.q[4])}` : ''}${it.signal?.stop ? `｜停損參考 ${px(it.signal.stop)}` : ''}`; });
+    if (lv.length) S.push({ h: '持股下週關鍵價位', lines: lv, priv: true });
   }
-  const day = tpeDay(), wk = (snap.calendar || []).filter(e => (Date.parse(e.date) - Date.parse(day)) / 86400000 <= 7 && e.importance >= 2);
-  if (wk.length) { L.push('', '【本週行事曆】'); L.push(...wk.slice(0, 8).map(e => `${e.date.slice(5).replace('-', '/')} ${e.title}`)); }
-  return L;
+  // 下週方向
+  const F = weeklyFacts(snap, barsDir);
+  S.push({ h: '下週方向', lines: [...(aiDir ? [aiDir, ''] : []), ...F.idx] });
+  // 下週行事曆
+  const wk = (snap.calendar || []).filter(e => e.date > day && (Date.parse(e.date) - Date.parse(day)) / 86400000 <= 7 && e.importance >= 2);
+  S.push({ h: '下週行事曆', lines: wk.length ? wk.slice(0, 10).map(e => `${e.date.slice(5).replace('-', '/')} ${e.title}`) : ['沒有重要排定事件'] });
+  return { title, sections: S };
+}
+async function weeklyAI(snap, N, barsDir) {
+  if (!process.env.GEMINI_API_KEY && !process.env.ANTHROPIC_API_KEY) return null;
+  try {
+    const AI = require('./lib/ai'), F = weeklyFacts(snap, barsDir), D = N?.digest, U = D?.ai || D?.rule || {};
+    const user = `以下是本週收盤後的數據（指數的上漲機率與區間是經回測校正的統計推論）：
+${F.idx.join('\n')}
+市場環境：${F.env}
+規則判斷：${snap.verdict?.headline || ''}（${snap.verdict?.detail || ''}）
+健康度警訊：${(snap.health?.signals || []).map(x => x.text).join('；') || '無'}
+本週新聞：${U.headline || ''}；${(U.bullets || []).slice(0, 6).join('；')}
+接下來要盯：${(D?.ai?.watch || []).join('；') || '—'}
+下週行事曆：${(snap.calendar || []).filter(e => e.importance >= 2).slice(0, 8).map(e => `${e.date} ${e.title}`).join('；') || '—'}
+
+請用繁體中文寫「下週方向」，4～5 句、200 字以內：①本週市場的主線一句話；②下週台股與美股的基本情境（偏多／偏空／盤整，引用上面的機率與區間）；③會讓情境改變的關鍵事件或價位；④下週操作上最該注意的一件事。只根據上面的數據，不要編造，不要加免責聲明。直接輸出文字。`;
+    const t = await AI.chat([{ role: 'system', content: '你是專業的台股與美股分析師，寫給個人投資人，口語但精準。' }, { role: 'user', content: user }], { timeout: 90000 });
+    return String(t || '').trim().replace(/^["「]|["」]$/g, '') || null;
+  } catch (e) { console.log('AI 下週方向失敗：', e.message); return null; }
 }
 
 
@@ -281,7 +322,7 @@ function newsEvents(N, snap, P, notified) {
 
 // ── 盤前資訊（台股 08:15、美股開盤前）──────────────────────────
 // 回傳 { title, sections: [{ h, lines, priv }] }；priv＝含個人資料，只進推播／信件，不印到公開的執行紀錄
-function premarket(snap, N, P, market) {
+function premarket(snap, N, P, market, live = {}) {
   const S = [], items = snap.items || {}, env = Object.fromEntries((snap.env || []).map(e => [e.key, e]));
   const ix = k => snap.indices?.[k];
   const day = tpeDay(), wd = '日一二三四五六'[new Date(Date.now() + 8 * 3600000).getUTCDay()];
@@ -300,6 +341,22 @@ function premarket(snap, N, P, market) {
     const ex = [env.vix && `VIX ${env.vix.value}`, env.curve && `美債利差 ${env.curve.value} 百分點`].filter(Boolean);
     S.push({ h: '今天台股收盤', lines: [...L, ex.join('、')].filter(Boolean) });
   }
+  // 1b. 送出當下的即時訊號（期貨、亞洲／歐洲盤）
+  {
+    const Q = live.q || {}, f = (sym, n, d = 2) => { const x = Q[sym]; return x && isNum(x.price) ? `${n} ${px(x.price)}（${pct(x.chg, d)}）` : null; };
+    const L = [];
+    if (tw) {
+      const tx = live.tx;
+      if (tx && isNum(tx.last)) L.push(`台指期夜盤 ${px(tx.last)}（${tx.diff >= 0 ? '+' : ''}${Math.round(tx.diff)} 點，${pct(tx.pct, 2)}）→ 暗示今天開盤${Math.abs(tx.pct) < 0.3 ? '平盤附近' : tx.pct > 0 ? '偏高' : '偏低'}`);
+      L.push([f('ES=F', '標普期貨'), f('NQ=F', '那斯達克期貨')].filter(Boolean).join('、'));
+      L.push([f('^N225', '日經'), f('^KS11', '韓國綜合')].filter(Boolean).join('、'));
+    } else {
+      L.push([f('ES=F', '標普期貨'), f('NQ=F', '那斯達克期貨'), f('YM=F', '道瓊期貨')].filter(Boolean).join('、'));
+      L.push([f('^GDAXI', '德國 DAX'), f('^STOXX50E', '歐洲 50')].filter(Boolean).join('、'));
+      const tnx = Q['^TNX']; L.push([tnx && isNum(tnx.price) ? `美債 10 年 ${tnx.price.toFixed(2)}%` : null, f('CL=F', '原油', 1), f('GC=F', '黃金', 1)].filter(Boolean).join('、'));
+    }
+    const lines = L.filter(Boolean); if (lines.length) S.push({ h: '現在的即時訊號', lines });
+  }
   // 2. 今日判斷
   S.push({ h: '今日判斷', lines: [snap.verdict?.headline, snap.ai?.verdict ? `AI：${snap.ai.verdict}` : null, ...(snap.health?.signals || []).slice(0, 2).map(x => '・' + x.text)].filter(Boolean) });
   // 3. 全球新聞重點
@@ -310,7 +367,8 @@ function premarket(snap, N, P, market) {
   const keys = held.length ? held : Object.values(items).filter(i => i.market === market).sort((a, b) => Math.abs(b.changePct ?? 0) - Math.abs(a.changePct ?? 0)).slice(0, 6).map(i => i.key);
   const lv = keys.map(k => {
     const it = items[k], o = it.outlook, s = o?.sr?.support?.[0], r = o?.sr?.resistance?.[0], up = o?.forecast?.h5?.upProb;
-    return `${it.key} ${it.name} ${px(it.price)}（${pct(it.changePct)}）${SIG[it.signal?.sig] || ''}｜撐 ${s ? px(s.p) : '—'}・壓 ${r ? px(r.p) : '—'}${isNum(up) ? `｜5 日上漲機率 ${up}%` : ''}${it.signal?.stop ? `｜停損參考 ${px(it.signal.stop)}` : ''}`;
+    const lq = live.q?.[k], preTxt = !tw && lq && isNum(lq.pre) ? `｜盤前 ${px(lq.pre)}（${pct(lq.preChg)}）` : '';
+    return `${it.key} ${it.name} ${px(it.price)}（${pct(it.changePct)}）${preTxt}${SIG[it.signal?.sig] || ''}｜撐 ${s ? px(s.p) : '—'}・壓 ${r ? px(r.p) : '—'}${isNum(up) ? `｜5 日上漲機率 ${up}%` : ''}${it.signal?.stop ? `｜停損參考 ${px(it.signal.stop)}` : ''}`;
   });
   if (lv.length) S.push({ h: held.length ? '我的持股關鍵價位' : '觀察清單關鍵價位', lines: lv, priv: !!held.length });
   // 5. 持股相關新聞（24 小時內）
@@ -355,16 +413,29 @@ async function sendMail(B) {
   return null;
 }
 
-module.exports = { send, decrypt, inQuiet, healthEvents, newsEvents, monthly, premarket, briefText, briefHtml };
+module.exports = { send, decrypt, inQuiet, healthEvents, newsEvents, monthly, premarket, weekly, briefText, briefHtml };
 if (require.main === module) (async () => {
   const snap = readJSON(String(args.snap || 'out/data/snapshot.json'), null);
   if (!snap) { console.log('沒有快照，略過通知'); return; }
   const P = await loadPersonal();
-  if (args.weekly) { await send(`訊號終端週報 ${tpeDay()}`, weekly(snap, P, String(args.bars || 'out/data/bars'))); return; }
+  if (args.weekly) {
+    const bars = String(args.bars || 'out/data/bars'), N = readJSON(path.join(path.dirname(String(args.snap || 'out/data/snapshot.json')), 'news.json'), null);
+    const B = weekly(snap, N, P, bars, await weeklyAI(snap, N, bars));
+    console.log(briefText(B, { pub: true }).join('\n'));
+    if (args.print) return;
+    await send(B.title, briefText(B), { priority: 3, tags: ['calendar'] });
+    const m = await sendMail(B); if (m) console.log(m);
+    return;
+  }
   if (args.monthly) { await send(`訊號終端月報 ${tpeDay().slice(0, 7)}`, monthly(snap, P, String(args.bars || 'out/data/bars'), await loadLocal())); return; }
   if (args.premarket) {
     const mk = args.premarket === 'us' ? 'us' : 'tw', N = readJSON(path.join(path.dirname(String(args.snap || 'out/data/snapshot.json')), 'news.json'), null);
-    const B = premarket(snap, N, P, mk);
+    const Live = require('./lib/live');
+    const usKeys = Object.values(snap.items || {}).filter(i => i.market === 'us').map(i => i.key);
+    const syms = mk === 'tw' ? ['ES=F', 'NQ=F', '^N225', '^KS11'] : ['ES=F', 'NQ=F', 'YM=F', '^GDAXI', '^STOXX50E', '^TNX', 'CL=F', 'GC=F', ...usKeys];
+    const [q, tx] = await Promise.all([Live.quotes(syms), mk === 'tw' ? Live.taifexNight() : null]);
+    console.log(`::notice::即時報價 ${Object.keys(q).length}/${syms.length}${mk === 'tw' ? `、台指期夜盤 ${tx ? tx.last + '（' + (tx.pct ?? 0).toFixed(2) + '%）' : '失敗'}` : ''}`);
+    const B = premarket(snap, N, P, mk, { q, tx });
     console.log(briefText(B, { pub: true }).join('\n'));   // 公開紀錄只印不含個人資料的部分
     if (args.print) return;
     if (args.push !== 'no') await send(B.title, briefText(B), { priority: 3, tags: ['sunrise'] });

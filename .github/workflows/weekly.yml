@@ -1,27 +1,54 @@
 name: 每週投資週報
 
+# 週日晚上：本週回顧＋下週方向（推播＋選用電子郵件）。排程器會在 20:00 準時觸發，這裡的內建排程是備援。
 on:
   schedule:
-    - cron: '13 0 * * 1'      # 週一 08:13（台北）
+    - cron: '17 12 * * 0'     # 週日 20:17（台北）
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
+
+concurrency:
+  group: weekly
+  cancel-in-progress: false
 
 jobs:
   report:
     runs-on: ubuntu-latest
     steps:
+      - name: 避免重複
+        id: dup
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FROM=$(TZ=Asia/Taipei date -d 'today 00:00' -u +%FT%TZ)
+          N=$(gh api "repos/${{ github.repository }}/actions/workflows/weekly.yml/runs?per_page=10&created=>=$FROM" --jq "[.workflow_runs[] | select(.id != ${{ github.run_id }}) | select(.conclusion == \"success\")] | length")
+          [ "$N" -gt 0 ] && { echo "本週已送過"; echo "skip=1" >> "$GITHUB_OUTPUT"; }
+          true
       - uses: actions/checkout@v4
+        if: steps.dup.outputs.skip != '1'
+      - uses: actions/setup-node@v4
+        if: steps.dup.outputs.skip != '1'
+        with:
+          node-version: 20
+      - name: 安裝套件
+        if: steps.dup.outputs.skip != '1'
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
       - name: 取得最新資料
+        if: steps.dup.outputs.skip != '1'
         run: |
           SITE="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
           mkdir -p out/data/bars
           curl -fsS "$SITE/data/snapshot.json" -o out/data/snapshot.json
-          for k in $(node -e "const s=require('./out/data/snapshot.json');console.log([...Object.keys(s.items),'^TWII','^GSPC','^SOX'].map(k=>k.replace(/[^A-Za-z0-9_.-]/g,'_')).join(' '))"); do
+          curl -fsS "$SITE/data/news.json" -o out/data/news.json || true
+          for k in $(node -e "const s=require('./out/data/snapshot.json');console.log([...Object.keys(s.items),'^TWII','^GSPC','^IXIC','^SOX'].map(k=>k.replace(/[^A-Za-z0-9_.-]/g,'_')).join(' '))"); do
             curl -fsS "$SITE/data/bars/$k.json" -o "out/data/bars/$k.json" || true
           done
       - name: 送出週報
+        if: steps.dup.outputs.skip != '1'
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
@@ -29,5 +56,10 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           BACKUP_GIST_ID: ${{ secrets.BACKUP_GIST_ID }}
           BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
         run: node pipeline/notify.js --weekly --snap=out/data/snapshot.json --bars=out/data/bars

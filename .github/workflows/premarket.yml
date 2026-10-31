@@ -1,15 +1,16 @@
 name: 盤前資訊
 
-# 台股開盤前（08:15）與美股開盤前（約 21:00）各送一份盤前資訊：推播＋（選用）電子郵件。
-# 主要由「排程器」準時觸發；下面的內建排程只是備援，同一場重複觸發會自動略過。
+# 台股開盤前（08:10）與美股開盤前 40 分鐘各送一份盤前資訊：推播＋（選用）電子郵件。
+# 休市日（週末、國定假日、美股假日）不送。主要由「排程器」準時觸發；內建排程是備援，同一場重複觸發會自動略過。
 on:
   schedule:
     - cron: '17 0 * * 1-5'     # 08:17（台北）台股
-    - cron: '57 12 * * 1-5'    # 20:57（台北）美股
+    - cron: '57 12 * * 1-5'    # 20:57（台北）美股夏令
+    - cron: '57 13 * * 1-5'    # 21:57（台北）美股冬令
   workflow_dispatch:
     inputs:
       market:
-        description: 'tw＝台股盤前、us＝美股盤前（空白依時間判斷）'
+        description: 'tw＝台股盤前、us＝美股盤前（空白依時間判斷）；手動指定時休市日也會送'
         required: false
         default: ''
 
@@ -25,7 +26,11 @@ jobs:
   brief:
     runs-on: ubuntu-latest
     steps:
-      - name: 判斷場次、避免重複
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 判斷場次、休市、避免重複
         id: slot
         env:
           GH_TOKEN: ${{ github.token }}
@@ -34,22 +39,22 @@ jobs:
           H=$((10#$(TZ=Asia/Taipei date +%H)))
           MK="$IN"; [ -z "$MK" ] && { [ $H -lt 14 ] && MK=tw || MK=us; }
           echo "market=$MK" >> "$GITHUB_OUTPUT"
-          # 手動指定場次一律送；自動觸發時，同一場（今天同一個上午／晚上）已經成功送過就略過
-          if [ -z "$IN" ] || [ "${{ github.event_name }}" = "schedule" ]; then
-            if [ $H -lt 14 ]; then FROM=$(TZ=Asia/Taipei date -d 'today 00:00' -u +%FT%TZ); else FROM=$(TZ=Asia/Taipei date -d 'today 14:00' -u +%FT%TZ); fi
-            N=$(gh api "repos/${{ github.repository }}/actions/workflows/premarket.yml/runs?per_page=10&created=>=$FROM" --jq "[.workflow_runs[] | select(.id != ${{ github.run_id }}) | select(.conclusion == \"success\")] | length")
-            [ "$N" -gt 0 ] && { echo "這一場已送過，略過"; echo "skip=1" >> "$GITHUB_OUTPUT"; }
+          OPENST=$(node pipeline/lib/holidays.js $MK); echo "::notice::$MK 今天 $OPENST"
+          [ -n "$IN" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ] && exit 0   # 手動指定場次：一律送
+          if [ "$OPENST" = "closed" ]; then echo "今天休市，不送"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+          # 美股：冬令時間 20:57 那次太早（開盤 22:30），交給 21:57 那次
+          OFF=$(TZ=America/New_York date +%z)
+          if [ "$MK" = us ] && [ "${{ github.event_name }}" = "schedule" ]; then
+            HM=$((H * 60 + 10#$(TZ=Asia/Taipei date +%M)))
+            if [ "$OFF" = "-0500" ] && [ $HM -lt 1290 ]; then echo "冬令時間，等下一次"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0; fi
           fi
+          if [ $H -lt 14 ]; then FROM=$(TZ=Asia/Taipei date -d 'today 00:00' -u +%FT%TZ); else FROM=$(TZ=Asia/Taipei date -d 'today 14:00' -u +%FT%TZ); fi
+          N=$(gh api "repos/${{ github.repository }}/actions/workflows/premarket.yml/runs?per_page=10&created=>=$FROM" --jq "[.workflow_runs[] | select(.id != ${{ github.run_id }}) | select(.conclusion == \"success\")] | length")
+          [ "$N" -gt 0 ] && { echo "這一場已送過，略過"; echo "skip=1" >> "$GITHUB_OUTPUT"; }
           true
-      - uses: actions/checkout@v4
+      - name: 安裝套件
         if: steps.slot.outputs.skip != '1'
-      - uses: actions/setup-node@v4
-        if: steps.slot.outputs.skip != '1'
-        with:
-          node-version: 20
-      - name: 安裝寄信套件
-        if: steps.slot.outputs.skip != '1'
-        run: mkdir -p /tmp/nm && cd /tmp/nm && npm init -y >/dev/null && npm i --no-audit --no-fund nodemailer@6.9.16
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
       - name: 取得最新資料
         if: steps.slot.outputs.skip != '1'
         run: |
@@ -69,6 +74,5 @@ jobs:
           MAIL_TO: ${{ secrets.MAIL_TO }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          NODE_PATH: /tmp/nm/node_modules
           SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
         run: node pipeline/notify.js --premarket=${{ steps.slot.outputs.market }} --snap=out/data/snapshot.json

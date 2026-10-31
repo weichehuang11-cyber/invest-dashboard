@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 355
     steps:
+      - uses: actions/checkout@v4
       - name: 依時間觸發更新
         env:
           GH_TOKEN: ${{ github.token }}
@@ -33,28 +34,41 @@ jobs:
             gh api -X POST "repos/$REPO/actions/workflows/update.yml/dispatches" --input - <<< "$BODY" && echo "$(TZ=Asia/Taipei date +%H:%M) 觸發更新 ${1:-盤中}"
             LAST_KICK=$(date +%s)
           }
-          PM_DONE=""
-          pre() {   # 盤前資訊：每一場只觸發一次（premarket.yml 自己也會略過重複）
-            [ "$PM_DONE" = "$DAY-$1" ] && return
-            gh api -X POST "repos/$REPO/actions/workflows/premarket.yml/dispatches" -f ref=main && echo "$(TZ=Asia/Taipei date +%H:%M) 觸發盤前資訊 $1"
-            PM_DONE="$DAY-$1"
+          ONCE=" "
+          once() {   # $1 = workflow 檔名、$2 = 標記；同一個標記只觸發一次（各 workflow 自己也會略過重複）
+            case "$ONCE" in *" $2 "*) return ;; esac
+            gh api -X POST "repos/$REPO/actions/workflows/$1/dispatches" -f ref=main && echo "$(TZ=Asia/Taipei date +%H:%M) 觸發 $1"
+            ONCE="$ONCE$2 "
           }
+          TWD=""; USD=""; TW_OPEN=0; US_OPEN=0
           while [ $(( $(date +%s) - START )) -lt $((340 * 60)) ]; do
             DOW=$(TZ=Asia/Taipei date +%u); HM=$((10#$(TZ=Asia/Taipei date +%H) * 60 + 10#$(TZ=Asia/Taipei date +%M))); DAY=$(TZ=Asia/Taipei date +%F)
+            ETDAY=$(TZ=America/New_York date +%F)
+            # 今天有沒有開盤（週末、國定假日、美股假日都算休市），每天查一次
+            [ "$TWD" != "$DAY" ] && { TWD=$DAY; [ "$(node pipeline/lib/holidays.js tw $DAY)" = open ] && TW_OPEN=1 || TW_OPEN=0; echo "$DAY 台股 $([ $TW_OPEN = 1 ] && echo 開盤 || echo 休市)"; }
+            [ "$USD" != "$ETDAY" ] && { USD=$ETDAY; [ "$(node pipeline/lib/holidays.js us $ETDAY)" = open ] && US_OPEN=1 || US_OPEN=0; echo "$ETDAY 美股 $([ $US_OPEN = 1 ] && echo 開盤 || echo 休市)"; }
+            # 美股開盤時間（台北）：夏令 21:30、冬令 22:30；收盤＝開盤＋6.5 小時
+            [ "$(TZ=America/New_York date +%z)" = "-0400" ] && OPEN=1290 || OPEN=1350
+            CLOSE=$((OPEN + 390 - 1440))
             GEN=$(curl -fsS "$SITE/data/snapshot.json?t=$(date +%s)" | jq -r '.generatedAt // empty' 2>/dev/null || true)
             AGE=999; [ -n "$GEN" ] && AGE=$(( ( $(date +%s) - $(date -d "$GEN" +%s) ) / 60 ))
             LAST=$(curl -fsS "https://raw.githubusercontent.com/$REPO/data/last.json?t=$(date +%s)" 2>/dev/null || echo '{}')
             SINCE=$(( ( $(date +%s) - LAST_KICK ) / 60 ))
-            # 盤前資訊：台股 08:10、美股 20:50（週一～五）
-            if [ $DOW -le 5 ] && [ $HM -ge 490 ] && [ $HM -lt 530 ]; then pre tw; fi
-            if [ $DOW -le 5 ] && [ $HM -ge 1250 ] && [ $HM -lt 1290 ]; then pre us; fi
-            # 收盤後完整更新：台股 16:45 起（週一～五）、美股 05:20 起（週二～六），當天還沒做過才觸發
-            if [ $DOW -le 5 ] && [ $HM -ge 1005 ] && [ $HM -lt 1140 ] && [ "$(echo "$LAST" | jq -r '.fullAt.tw // ""')" != "$DAY" ] && [ $SINCE -ge 40 ]; then kick tw
-            elif [ $DOW -ge 2 ] && [ $DOW -le 6 ] && [ $HM -ge 320 ] && [ $HM -lt 470 ] && [ "$(echo "$LAST" | jq -r '.fullAt.us // ""')" != "$DAY" ] && [ $SINCE -ge 40 ]; then kick us
-            # 盤中：台股 09:05–13:40（週一～五）、美股 21:35–04:50；週末每 3 小時。資料超過 25 分鐘沒更新才觸發
-            elif { [ $DOW -le 5 ] && [ $HM -ge 545 ] && [ $HM -le 820 ]; } || { [ $DOW -le 5 ] && [ $HM -ge 1295 ]; } || { [ $DOW -ge 2 ] && [ $DOW -le 6 ] && [ $HM -le 290 ]; }; then
+            # 盤前資訊：台股 08:10、美股開盤前 40 分鐘；週報：週日 20:00
+            [ $TW_OPEN = 1 ] && [ $HM -ge 490 ] && [ $HM -lt 530 ] && once premarket.yml "pre-tw-$DAY"
+            [ $US_OPEN = 1 ] && [ $HM -ge $((OPEN - 40)) ] && [ $HM -lt $OPEN ] && once premarket.yml "pre-us-$DAY"
+            [ $DOW = 7 ] && [ $HM -ge 1200 ] && [ $HM -lt 1240 ] && once weekly.yml "weekly-$DAY"
+            # 收盤後完整更新：台股 16:45 起、美股 05:20 起，當天還沒做過才觸發
+            if [ $TW_OPEN = 1 ] && [ $HM -ge 1005 ] && [ $HM -lt 1140 ] && [ "$(echo "$LAST" | jq -r '.fullAt.tw // ""')" != "$DAY" ] && [ $SINCE -ge 40 ]; then kick tw
+            elif [ $US_OPEN = 1 ] && [ $HM -ge 320 ] && [ $HM -lt 470 ] && [ "$(echo "$LAST" | jq -r '.fullAt.us // ""')" != "$DAY" ] && [ $SINCE -ge 40 ]; then kick us
+            # 開盤後 90 分鐘：資料超過 10 分鐘就更新（盤前到開盤初段最需要即時）
+            elif { [ $TW_OPEN = 1 ] && [ $HM -ge 540 ] && [ $HM -le 630 ]; } || { [ $US_OPEN = 1 ] && [ $HM -ge $OPEN ] && [ $HM -le $((OPEN + 90)) ]; }; then
+              [ $AGE -ge 10 ] && [ $SINCE -ge 8 ] && kick ""
+            # 其餘盤中：台股 09:05–13:40、美股開盤到收盤後 20 分鐘；資料超過 25 分鐘才更新
+            elif { [ $TW_OPEN = 1 ] && [ $HM -ge 545 ] && [ $HM -le 820 ]; } || { [ $US_OPEN = 1 ] && { [ $HM -ge $OPEN ] || [ $HM -le $((CLOSE + 20)) ]; }; }; then
               [ $AGE -ge 25 ] && [ $SINCE -ge 20 ] && kick ""
-            elif [ $DOW -ge 6 ] && [ $AGE -ge 180 ] && [ $SINCE -ge 60 ]; then kick ""
+            # 兩邊都休市：每 3 小時一次
+            elif [ $TW_OPEN = 0 ] && [ $US_OPEN = 0 ] && [ $AGE -ge 180 ] && [ $SINCE -ge 60 ]; then kick ""
             fi
             sleep 120
           done
