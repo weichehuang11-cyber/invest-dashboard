@@ -137,62 +137,122 @@ function barsRet(dir, key, n) {
   const c = b.close, k = c.length; return k > n ? (c[k - 1] / c[k - 1 - n] - 1) * 100 : null;
 }
 // ── 週日週報：本週回顧＋下週方向 ─────────────────────────────
+const IDXW = [['^TWII', '加權指數'], ['^GSPC', '標普 500'], ['^IXIC', '那斯達克'], ['^SOX', '費城半導體']];
+const WD = '日一二三四五六';
+const loadBars = (dir, key) => readJSON(path.join(dir, `${key.replace(/[^A-Za-z0-9_.-]/g, '_')}.json`), null);
+const monday = d => { const t = Date.parse(d + 'T00:00:00Z'), w = new Date(t).getUTCDay(); return new Date(t - ((w + 6) % 7) * 86400000).toISOString().slice(0, 10); };
+const smaAt = (c, n) => (c.length >= n ? c.slice(-n).reduce((a, x) => a + x, 0) / n : null);
+/** 把一週的日 K 變成看得懂的走勢描述（條列） */
+function trendDesc(b, name) {
+  if (!b?.close?.length) return null;
+  const c = b.close, d = b.dates, n = c.length, wk0 = monday(d[n - 1]);
+  let i0 = n - 1; while (i0 > 0 && d[i0 - 1] >= wk0) i0--;
+  const prev = c[i0 - 1]; if (!isNum(prev)) return null;
+  const days = []; for (let i = i0; i < n; i++) days.push({ wd: WD[new Date(d[i] + 'T00:00:00Z').getUTCDay()], c: c[i], h: b.high?.[i] ?? c[i], l: b.low?.[i] ?? c[i], r: (c[i] / c[i - 1] - 1) * 100 });
+  const last = c[n - 1], wr = (last / prev - 1) * 100;
+  const hi = Math.max(...days.map(x => x.h)), lo = Math.min(...days.map(x => x.l));
+  const iHi = days.findIndex(x => x.h === hi), iLo = days.findIndex(x => x.l === lo), ups = days.filter(x => x.r > 0).length;
+  // 型態
+  let shape;
+  if (days.length >= 3 && ups >= days.length - 0 && wr > 0) shape = '天天收紅，一路走高';
+  else if (days.length >= 3 && ups === 0) shape = '天天收黑，一路走低';
+  else if (iLo < iHi && iLo <= days.length - 2 && (last - lo) / lo * 100 > 1) shape = `先跌後漲：週${days[iLo].wd}探底 ${px(lo)} 後反彈 ${pct((last / lo - 1) * 100)}`;
+  else if (iHi < iLo && iHi <= days.length - 2 && (hi - last) / hi * 100 > 1) shape = `先漲後跌：週${days[iHi].wd}衝到 ${px(hi)} 後回落 ${pct((last / hi - 1) * 100)}`;
+  else if ((hi / lo - 1) * 100 < 1.5) shape = '窄幅整理，波動不大';
+  else shape = null;
+  const posR = hi > lo ? (last - lo) / (hi - lo) : 0.5;
+  if (!shape) shape = wr >= 0 && posR < 0.4 ? '週間一度走高，最後兩天轉弱' : wr < 0 && posR > 0.6 ? '週間一度走低，最後兩天轉強' : wr >= 0 ? '震盪走高' : '震盪走低';
+  const pos = posR >= 0.75 ? '收在本週高檔' : posR <= 0.25 ? '收在本週低檔' : '收在本週區間中段';
+  // 連續幾週
+  const wkClose = new Map(); for (let i = 0; i < n; i++) wkClose.set(monday(d[i]), c[i]);
+  const wc = [...wkClose.values()]; let streak = 0;
+  for (let k = wc.length - 1; k > 0; k--) { const up = wc[k] > wc[k - 1]; if (k === wc.length - 1 || up === (streak > 0)) streak += up ? 1 : -1; else break; }
+  const stTxt = Math.abs(streak) >= 2 ? `，連 ${Math.abs(streak)} 週${streak > 0 ? '上漲' : '下跌'}` : '';
+  // 均線與高點
+  const m20 = smaAt(c, 20), m60 = smaAt(c, 60), h52 = Math.max(...c.slice(-252));
+  const ma = m20 && m60 ? (last > m20 && last > m60 ? '站在 20 日線與 60 日線之上（短中期偏多）' : last < m20 && last < m60 ? '跌破 20 日線與 60 日線（短中期偏弱）' : last < m20 ? `跌破 20 日線 ${px(m20)}，仍守 60 日線 ${px(m60)}` : `站回 20 日線，但仍在 60 日線 ${px(m60)} 之下`) : null;
+  return [
+    `• ${name} ${px(last)}，本週 ${pct(wr)}${stTxt}`,
+    `　走勢：${shape}，${pos}（週高 ${px(hi)}／週低 ${px(lo)}）`,
+    `　每日：${days.map(x => Math.abs(x.r) < 0.05 ? `${x.wd}平` : `${x.wd}${x.r > 0 ? '▲' : '▼'}${Math.abs(x.r).toFixed(1)}`).join(' ')}`,
+    ma && `　位置：${ma}，距 52 週高點 ${pct((last / h52 - 1) * 100)}`,
+  ].filter(Boolean);
+}
+function nextWeek(snap) {   // 指數下週情境（條列）
+  const out = [];
+  for (const [k, n] of IDXW) {
+    const o = snap.indices?.[k]?.outlook, f = o?.forecast?.h5, sp = o?.sr?.support?.[0], rs = o?.sr?.resistance?.[0];
+    if (!f) continue;
+    const view = f.upProb >= 58 ? '偏多' : f.upProb <= 42 ? '偏空' : '中性、偏盤整';
+    out.push(`• ${n}：${view}（下週上漲機率 ${f.upProb}%，目前${o.stateZh || ''}）`);
+    out.push(`　八成機率落在 ${px(f.q[0])}～${px(f.q[4])}（${pct(f.qPct[0])}～${pct(f.qPct[4])}）`);
+    const lb = x => String(x.label).replace(/（.*?）/g, '');
+    if (sp || rs) out.push(`　${rs ? `站上 ${px(rs.p)}（${lb(rs)}）→ 轉強` : ''}${sp && rs ? '；' : ''}${sp ? `跌破 ${px(sp.p)}（${lb(sp)}）→ 轉弱` : ''}`);
+  }
+  return out;
+}
 function weeklyFacts(snap, barsDir) {   // 不含個人資料，給 AI 寫「下週方向」用
-  const ix = k => snap.indices?.[k], o = k => ix(k)?.outlook;
-  const idx = [['^TWII', '加權'], ['^GSPC', '標普 500'], ['^IXIC', '那斯達克'], ['^SOX', '費半']].map(([k, n]) => {
-    const f = o(k)?.forecast?.h5, sr = o(k)?.sr;
-    return `${n}：本週 ${pct(barsRet(barsDir, k, 5))}，${o(k)?.stateZh || ''}，下週上漲機率 ${f?.upProb ?? '—'}%，80% 區間 ${f ? `${pct(f.qPct[0])}～${pct(f.qPct[4])}` : '—'}，支撐 ${sr?.support?.[0] ? px(sr.support[0].p) : '—'}、壓力 ${sr?.resistance?.[0] ? px(sr.resistance[0].p) : '—'}`;
-  });
+  const idx = IDXW.map(([k, n]) => (trendDesc(loadBars(barsDir, k), n) || []).join(' ')).filter(Boolean);
   const env = (snap.env || []).map(e => `${e.label} ${e.value}${e.unit || ''}（${e.meaning}）`).join('；');
-  return { idx, env };
+  return { idx, next: nextWeek(snap), env };
 }
 function weekly(snap, N, P, barsDir, aiDir) {
   const S = [], items = Object.values(snap.items || {}), day = tpeDay();
   const title = `訊號終端週報 ${day.slice(5).replace('-', '/')}：本週回顧與下週方向`;
-  // 本週市場
-  const r = k => pct(barsRet(barsDir, k, 5));
   const env = Object.fromEntries((snap.env || []).map(e => [e.key, e]));
-  S.push({ h: '本週市場', lines: [`加權 ${r('^TWII')}、標普 500 ${r('^GSPC')}、那斯達克 ${r('^IXIC')}、費半 ${r('^SOX')}（近 5 個交易日）`,
-    [env.vix && `VIX ${env.vix.value}（${env.vix.meaning}）`, env.twd && `台幣 ${env.twd.value}`, env.foreign && `外資 ${env.foreign.meaning}`].filter(Boolean).join('、'),
-    `目前判斷：${snap.verdict?.headline || '—'}`, ...(snap.health?.signals || []).slice(0, 3).map(x => '・' + x.text)].filter(Boolean) });
+  // 本週大盤走勢
+  const M = IDXW.flatMap(([k, n]) => trendDesc(loadBars(barsDir, k), n) || []);
+  S.push({ h: '本週大盤走勢', lines: M.length ? M : ['（沒有指數資料）'] });
+  // 市場環境
+  S.push({ h: '市場環境', lines: [
+    env.vix && `• VIX 恐慌指數 ${env.vix.value}（${env.vix.meaning}）`,
+    env.foreign && `• 外資：${env.foreign.meaning}（最近一日約 ${Math.abs(env.foreign.value)} 億）`,
+    env.twd && `• 美元兌台幣 ${env.twd.value}（${env.twd.meaning}）`,
+    env.curve && `• 美債 10 年減 2 年利差 ${env.curve.value} 百分點（${env.curve.meaning}）`,
+    `• 系統判斷：${snap.verdict?.headline || '—'}`,
+    ...(snap.health?.signals || []).slice(0, 3).map(x => `• 警訊：${x.text}`)].filter(Boolean) });
   // 觀察清單
   const r5 = items.filter(i => isNum(i.ta?.ret5)).sort((a, b) => b.ta.ret5 - a.ta.ret5), L = [];
-  if (r5.length) { L.push('漲最多：' + r5.slice(0, 3).map(i => `${i.key} ${i.name} ${pct(i.ta.ret5)}`).join('、')); L.push('跌最多：' + r5.slice(-3).reverse().map(i => `${i.key} ${i.name} ${pct(i.ta.ret5)}`).join('、')); }
-  const buys = items.filter(i => i.signal.sig === 'BUY').map(i => i.key), sells = items.filter(i => i.signal.sig === 'SELL').map(i => i.key);
-  L.push(`買進訊號：${buys.join('、') || '無'}；賣出訊號：${sells.join('、') || '無'}`);
-  const hcs = items.filter(i => i.conv?.high?.length).map(i => `${i.key}（${i.conv.dir < 0 ? '偏空' : '偏多'} ${i.conv.high[0].hit}%）`);
-  L.push(`高信心訊號：${hcs.join('、') || '無（本來就少見，正常）'}`);
+  if (r5.length) {
+    L.push('• 漲最多：', ...r5.slice(0, 3).map(i => `　${i.name}（${i.key}）${pct(i.ta.ret5)}`));
+    L.push('• 跌最多：', ...r5.slice(-3).reverse().map(i => `　${i.name}（${i.key}）${pct(i.ta.ret5)}`));
+    const up = r5.filter(i => i.ta.ret5 > 0).length; L.push(`• 上漲 ${up} 檔、下跌 ${r5.length - up} 檔`);
+  }
+  const buys = items.filter(i => i.signal.sig === 'BUY').map(i => i.name), sells = items.filter(i => i.signal.sig === 'SELL').map(i => i.name);
+  L.push(`• 買進訊號：${buys.join('、') || '無'}`, `• 賣出訊號：${sells.join('、') || '無'}`);
+  const hcs = items.filter(i => i.conv?.high?.length).map(i => `${i.name}（${i.conv.dir < 0 ? '偏空' : '偏多'} ${i.conv.high[0].hit}%）`);
+  if (hcs.length) L.push(`• 高信心訊號：${hcs.join('、')}`);
   S.push({ h: '觀察清單本週', lines: L });
   // 本週新聞主軸
   const D = N?.digest, U = D?.ai || D?.rule, th = (N?.themes || []).slice(0, 4);
-  if (U || th.length) S.push({ h: '本週新聞主軸', lines: [U?.headline, ...(U?.bullets || []).slice(0, 4).map(b => '• ' + b), th.length ? '熱門題材：' + th.map(t => `${t.name}${t.avgChg != null ? `（${pct(t.avgChg)}）` : ''}`).join('、') : null].filter(Boolean) });
+  if (U || th.length) S.push({ h: '本週新聞主軸', lines: [U?.headline && `• ${U.headline}`, ...(U?.bullets || []).slice(0, 4).map(b => '　' + b), th.length ? '• 熱門題材：' + th.map(t => `${t.name}${t.avgChg != null ? `（${pct(t.avgChg)}）` : ''}`).join('、') : null].filter(Boolean) });
   // 我的部位（個人）
   if (P) {
     const PL = [], H = P.holdings?.items || [], fx = env.twd?.value || 32;
     if (H.length) {
       let mv = 0, wk = 0; const rows = [];
-      for (const h of H) { const it = snap.items[h.key]; if (!it) continue; const v = it.price * h.shares * (it.market === 'us' ? fx : 1); mv += v; if (isNum(it.ta?.ret5)) { wk += v - v / (1 + it.ta.ret5 / 100); rows.push(`${it.key} ${pct(it.ta.ret5)}`); } }
-      PL.push(`持股市值約 ${Math.round(mv).toLocaleString()} 元，本週約 ${wk >= 0 ? '+' : ''}${Math.round(wk).toLocaleString()} 元（${pct(mv ? wk / (mv - wk) * 100 : null)}）`);
-      if (rows.length) PL.push('各檔本週：' + rows.join('、'));
+      for (const h of H) { const it = snap.items[h.key]; if (!it) continue; const v = it.price * h.shares * (it.market === 'us' ? fx : 1); mv += v; if (isNum(it.ta?.ret5)) { wk += v - v / (1 + it.ta.ret5 / 100); rows.push([it, it.ta.ret5]); } }
+      PL.push(`• 持股市值約 ${Math.round(mv).toLocaleString()} 元，本週 ${wk >= 0 ? '+' : ''}${Math.round(wk).toLocaleString()} 元（${pct(mv ? wk / (mv - wk) * 100 : null)}）`);
+      for (const [it, r] of rows.sort((a, b) => b[1] - a[1])) PL.push(`　${it.name}（${it.key}）${pct(r)}${SIG[it.signal?.sig] ? `，訊號${SIG[it.signal.sig]}` : ''}`);
     }
     const J = P.journal || {}, since = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-    PL.push(`本週記錄：決定 ${(J.decisions || []).filter(d => d.at >= since).length} 筆、市場感覺 ${(J.moods || []).filter(m => m.at >= since).length} 天`);
+    PL.push(`• 本週記錄：決定 ${(J.decisions || []).filter(d => d.at >= since).length} 筆、市場感覺 ${(J.moods || []).filter(m => m.at >= since).length} 天`);
     const thz = Object.entries(J.theses || {});
     const trig = thz.map(([k, t]) => { const it = snap.items[k]; if (!it) return null; const h = (t.conds || []).map(c => condHit(c, it, P)).filter(x => x[0]).map(x => x[1]); return h.length ? `${k}（${h.join('、')}）` : null; }).filter(Boolean);
-    PL.push(`進行中的論點 ${thz.length} 個${trig.length ? `，條件觸發：${trig.join('；')}` : '，沒有觸發'}`);
-    const res = (J.decisions || []).filter(d => d.action !== 'hold').map(d => { const b = readJSON(path.join(barsDir, `${d.key.replace(/[^A-Za-z0-9_.-]/g, '_')}.json`), null); if (!b) return null; const i = b.dates.findIndex(x => x >= d.at.slice(0, 10)); if (i < 0 || i + 5 >= b.close.length) return null; return (b.close[i + 5] / d.price - 1) * 100 * (d.action === 'sell' ? -1 : 1); }).filter(isNum);
-    if (res.length) PL.push(`累計已結算 ${res.length} 筆，5 日勝率 ${(res.filter(x => x > 0.5).length / res.length * 100).toFixed(0)}%、平均 ${pct(res.reduce((a, x) => a + x, 0) / res.length, 2)}`);
+    PL.push(`• 論點 ${thz.length} 個：${trig.length ? `條件觸發 ${trig.join('；')}` : '沒有觸發'}`);
+    const res = (J.decisions || []).filter(d => d.action !== 'hold').map(d => { const b = loadBars(barsDir, d.key); if (!b) return null; const i = b.dates.findIndex(x => x >= d.at.slice(0, 10)); if (i < 0 || i + 5 >= b.close.length) return null; return (b.close[i + 5] / d.price - 1) * 100 * (d.action === 'sell' ? -1 : 1); }).filter(isNum);
+    if (res.length) PL.push(`• 決策成績：已結算 ${res.length} 筆，5 日勝率 ${(res.filter(x => x > 0.5).length / res.length * 100).toFixed(0)}%、平均 ${pct(res.reduce((a, x) => a + x, 0) / res.length, 2)}`);
     S.push({ h: '我的部位', lines: PL, priv: true });
-    // 持股下週關鍵價位
-    const lv = H.map(h => snap.items[h.key]).filter(Boolean).map(it => { const o = it.outlook, sp = o?.sr?.support?.[0], rs = o?.sr?.resistance?.[0], f = o?.forecast?.h5; return `${it.key} ${it.name} ${px(it.price)}｜撐 ${sp ? px(sp.p) : '—'}・壓 ${rs ? px(rs.p) : '—'}${f ? `｜下週上漲機率 ${f.upProb}%、80% 區間 ${px(f.q[0])}～${px(f.q[4])}` : ''}${it.signal?.stop ? `｜停損參考 ${px(it.signal.stop)}` : ''}`; });
+    const lv = H.map(h => snap.items[h.key]).filter(Boolean).flatMap(it => { const o = it.outlook, sp = o?.sr?.support?.[0], rs = o?.sr?.resistance?.[0], f = o?.forecast?.h5;
+      return [`• ${it.name}（${it.key}）${px(it.price)}${f ? `：下週上漲機率 ${f.upProb}%` : ''}`, `　撐 ${sp ? px(sp.p) : '—'}／壓 ${rs ? px(rs.p) : '—'}${f ? `／八成區間 ${px(f.q[0])}～${px(f.q[4])}` : ''}${it.signal?.stop ? `／停損參考 ${px(it.signal.stop)}` : ''}`]; });
     if (lv.length) S.push({ h: '持股下週關鍵價位', lines: lv, priv: true });
   }
   // 下週方向
-  const F = weeklyFacts(snap, barsDir);
-  S.push({ h: '下週方向', lines: [...(aiDir ? [aiDir, ''] : []), ...F.idx] });
+  const nx = nextWeek(snap);
+  S.push({ h: '下週方向', lines: [...(aiDir ? [...String(aiDir).split('\n').map(x => x.trim()).filter(Boolean).map(x => (/^[•\-*・]/.test(x) ? '• ' + x.replace(/^[•\-*・]\s*/, '') : '• ' + x)), ''] : []), ...nx] });
   // 下週行事曆
   const wk = (snap.calendar || []).filter(e => e.date > day && (Date.parse(e.date) - Date.parse(day)) / 86400000 <= 7 && e.importance >= 2);
-  S.push({ h: '下週行事曆', lines: wk.length ? wk.slice(0, 10).map(e => `${e.date.slice(5).replace('-', '/')} ${e.title}`) : ['沒有重要排定事件'] });
+  S.push({ h: '下週行事曆', lines: wk.length ? wk.slice(0, 10).map(e => `• ${e.date.slice(5).replace('-', '/')}（${WD[new Date(e.date + 'T00:00:00Z').getUTCDay()]}）${e.title}`) : ['• 沒有重要排定事件'] });
   return { title, sections: S };
 }
 async function weeklyAI(snap, N, barsDir) {
@@ -200,7 +260,10 @@ async function weeklyAI(snap, N, barsDir) {
   try {
     const AI = require('./lib/ai'), F = weeklyFacts(snap, barsDir), D = N?.digest, U = D?.ai || D?.rule || {};
     const user = `以下是本週收盤後的數據（指數的上漲機率與區間是經回測校正的統計推論）：
+本週走勢：
 ${F.idx.join('\n')}
+下週統計推論：
+${F.next.join('\n')}
 市場環境：${F.env}
 規則判斷：${snap.verdict?.headline || ''}（${snap.verdict?.detail || ''}）
 健康度警訊：${(snap.health?.signals || []).map(x => x.text).join('；') || '無'}
@@ -208,7 +271,12 @@ ${F.idx.join('\n')}
 接下來要盯：${(D?.ai?.watch || []).join('；') || '—'}
 下週行事曆：${(snap.calendar || []).filter(e => e.importance >= 2).slice(0, 8).map(e => `${e.date} ${e.title}`).join('；') || '—'}
 
-請用繁體中文寫「下週方向」，4～5 句、200 字以內：①本週市場的主線一句話；②下週台股與美股的基本情境（偏多／偏空／盤整，引用上面的機率與區間）；③會讓情境改變的關鍵事件或價位；④下週操作上最該注意的一件事。只根據上面的數據，不要編造，不要加免責聲明。直接輸出文字。`;
+請用繁體中文寫「下週方向」，輸出剛好 4 行條列，每行以「• 」開頭、40 字以內：
+• 本週主線：一句話說本週市場被什麼推動
+• 台股下週：偏多／偏空／盤整，引用機率或關鍵價位
+• 美股下週：偏多／偏空／盤整，引用機率或關鍵價位
+• 最該注意：會讓情境改變的事件或價位
+只根據上面的數據，不要編造，不要加免責聲明，不要其他文字。`;
     const t = await AI.chat([{ role: 'system', content: '你是專業的台股與美股分析師，寫給個人投資人，口語但精準。' }, { role: 'user', content: user }], { timeout: 90000 });
     return String(t || '').trim().replace(/^["「]|["」]$/g, '') || null;
   } catch (e) { console.log('AI 下週方向失敗：', e.message); return null; }
@@ -391,7 +459,9 @@ function premarket(snap, N, P, market, live = {}) {
 const briefText = (B, { pub = false } = {}) => B.sections.filter(s => !(pub && s.priv)).flatMap(s => [`【${s.h}】`, ...s.lines, '']).slice(0, -1);
 function briefHtml(B) {
   const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-  const sec = B.sections.map(s => `<h3 style="margin:18px 0 6px;font-size:15px;color:#0f766e;border-bottom:1px solid #e5e7eb;padding-bottom:4px">${esc(s.h)}</h3>` + s.lines.map(l => `<div style="margin:3px 0">${esc(l)}</div>`).join('')).join('');
+  // 台股習慣：漲紅跌綠
+  const col = h => h.replace(/([+]\d[\d.,]*%|▲[\d.]+)/g, '<span style="color:#dc2626">$1</span>').replace(/((?<![\d～])-\d[\d.,]*%|▼[\d.]+)/g, '<span style="color:#16a34a">$1</span>');
+  const sec = B.sections.map(s => `<h3 style="margin:18px 0 6px;font-size:15px;color:#0f766e;border-bottom:1px solid #e5e7eb;padding-bottom:4px">${esc(s.h)}</h3>` + s.lines.map(l => (/^　/.test(l) ? `<div style="margin:1px 0 1px 18px;color:#4b5563;font-size:13px">${col(esc(l.replace(/^　+/, '')))}</div>` : l ? `<div style="margin:6px 0 2px">${col(esc(l))}</div>` : '<div style="height:6px"></div>')).join('')).join('');
   return `<div style="font-family:-apple-system,'PingFang TC','Microsoft JhengHei',sans-serif;font-size:14px;line-height:1.6;color:#111;max-width:640px"><h2 style="margin:0 0 4px;font-size:18px">${esc(B.title)}</h2>${sec}${SITE ? `<p style="margin-top:20px"><a href="${SITE}" style="color:#0f766e">打開訊號終端</a></p>` : ''}</div>`;
 }
 // 寄信：有 SMTP（例如 Gmail 應用程式密碼）就寄排版過的信；否則有 MAIL_TO 就透過 ntfy 轉寄純文字信
