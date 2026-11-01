@@ -19,7 +19,7 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.2.4';
+  const APP_VERSION = '1.2.5';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -635,7 +635,7 @@ ${footer()}`;
       const it = s.items[k], g = it.signal, l = S.localPreds[k];
       return `<a class="ocard" href="#/s/${encodeURIComponent(k)}"><div class="r1">${st.has(k) ? '<span class="staron" aria-label="自選">★</span>' : ''}<b>${esc(k)}</b><span class="small muted">${esc(it.name)}</span>${convBadge(it)}${sigTag(g.sig)}</div>
         <div class="r2"><span class="mono" style="font-size:17px;font-weight:600">${px(it.price)}</span><span class="mono small ${cls(it.changePct)}">${pct(it.changePct)}</span><span class="small muted" style="margin-left:auto">分數 ${g.score}・停損 ${px(g.stop)}</span></div>
-        <div>${evDots(g.evidence)}${l ? `<span class="small muted" style="margin-left:10px">本機預測 5 日 <b class="${cls(l.d5)}">${pct(l.d5)}</b></span>` : ''}</div>${aiStock(s, k) ? `<div class="small muted">💬 ${esc(aiStock(s, k))}</div>` : ''}</a>`;
+        <div>${evDots(g.evidence)}${l ? `<span class="small muted" style="margin-left:10px">本機預測 5 日 <b class="${cls(l.d5)}">${pct(l.d5)}</b></span>` : ''}</div>${convNote(it)}${aiStock(s, k) ? `<div class="small muted">💬 ${esc(aiStock(s, k))}</div>` : ''}</a>`;
     };
     return `
       <div class="hd"><h2 id="opp-h">機會清單</h2><span class="note">${isMob() ? '證據燈：' : `依綜合分數排序・證據：技術／籌碼／基本面／模型（`}${cfg.colors === 'us' ? '實心綠' : '實心紅'}＝支持、${cfg.colors === 'us' ? '實心紅' : '實心綠'}＝反對${isMob() ? '' : '、空心＝中性、虛線＝無資料）'}</span>${n && all.length > n ? `<a class="act" href="#/all">看全部 ${all.length} 檔</a>` : ''}</div>
@@ -852,7 +852,22 @@ ${footer()}`;
 
   // ── 高信心訊號 ───────────────────────────────────────────────
   const CT = { ex20: '20 日贏大盤', ex5: '5 日贏大盤', up20: '20 日上漲' };
-  const convBadge = it => (it.conv?.high?.length ? `<span class="tag hc" title="過去 5 年驗證期命中率">${it.conv.dir < 0 ? '高信心偏空' : '高信心'} ${it.conv.high[0].hit.toFixed(0)}%</span>` : '');
+  // 高信心訊號說的是「之後贏／輸大盤（或漲／跌）的機率」，和買賣訊號是兩套獨立的判斷
+  const CVT = { ex20: ['20 日贏大盤', '20 日輸大盤'], ex5: ['5 日贏大盤', '5 日輸大盤'], up20: ['20 日上漲', '20 日下跌'] };
+  const convBadge = it => { const h = it.conv?.high?.[0]; if (!h) return ''; const t = (CVT[h.target] || ['偏多', '偏空'])[it.conv.dir < 0 ? 1 : 0];
+    return `<span class="tag hc" title="過去 5 年同樣型態的驗證期命中率：${t} ${h.hit.toFixed(0)}%（${h.n} 次）">高信心・${t} ${h.hit.toFixed(0)}%</span>`; };
+  /** 高信心方向和買賣訊號不一致時，說明為什麼 */
+  function convNote(it) {
+    const c = it.conv, h = c?.high?.[0], g = it.signal; if (!h || !g) return '';
+    const bear = c.dir < 0;
+    if ((bear && g.sig === 'SELL') || (!bear && g.sig === 'BUY')) return '';
+    const EVN = { tech: '技術', chip: '籌碼', fund: '基本面', model: '模型' };
+    const pull = Object.entries(g.evidence || {}).filter(([, v]) => v === (bear ? 'pos' : 'neg')).map(([k]) => EVN[k]).filter(Boolean);
+    const gap = bear ? `分數 ${g.score}，≤ 37 才算賣出` : `分數 ${g.score}，≥ ${g.buyThreshold ?? 63} 才算買進`;
+    const why = pull.length ? `；${pull.join('、')}${bear ? '偏多撐住分數' : '偏空壓住分數'}` : '';
+    const act = bear ? '不急著賣，但不宜加碼，持有者可收緊停損' : '還沒到買點，但同類型態過去多半贏大盤，可列入觀察';
+    return `<div class="small cvnote"><b>為什麼是${SIG[g.sig]}？</b>${gap}${why}。高信心看的是趨勢條件（${c.score > 0 ? '+' : ''}${c.score}），兩者分開判斷。→ ${act}。</div>`;
+  }
   function convTable(ev, only, tbl) {
     if (!ev) return '<p class="empty" style="margin:0">尚無資料</p>';
     const T0 = tbl || ev.table;
@@ -867,7 +882,7 @@ ${footer()}`;
     const pct6 = (c.score + 6) / 12 * 100;
     return `<section class="card fold" data-fold="s-conv" aria-labelledby="cv-h"><div class="hd"><h2 id="cv-h">高信心訊號檢查</h2><span class="note">六項條件 × 過去 5 年同類情況的實際結果</span>${convBadge(it)}</div>
       <div class="cvbar" role="img" aria-label="信心分數 ${c.score}（−6 到 +6）"><div style="left:${pct6}%"></div><span>−6 偏空</span><span>0</span><span>+6 偏多</span></div>
-      <p style="margin:0;font-weight:600">信心分數 ${c.score > 0 ? '+' : ''}${c.score}：${c.bucket}</p>
+      <p style="margin:0;font-weight:600">信心分數 ${c.score > 0 ? '+' : ''}${c.score}：${c.bucket}</p>${convNote(it)}
       <ul class="checks">${c.items.map(x => `<li class="${x.pt > 0 ? 'ok' : x.pt < 0 ? 'hit' : 'na'}"><span class="ic">${x.pt > 0 ? '＋' : x.pt < 0 ? '－' : '·'}</span><b>${esc(x.name)}</b><span class="small muted">${esc(x.txt)}</span></li>`).join('')}</ul>
       ${c.chip ? `<p style="margin:6px 0 0;font-weight:600">籌碼分數 ${c.chip.score > 0 ? '+' : ''}${c.chip.score}：${c.chip.bucket}${c.chip.combo ? `・技術＋籌碼${c.chip.combo}` : ''}</p>
         <ul class="checks">${c.chip.items.map(x => `<li class="${x.pt > 0 ? 'ok' : x.pt < 0 ? 'hit' : 'na'}"><span class="ic">${x.pt > 0 ? '＋' : x.pt < 0 ? '－' : '·'}</span><b>${esc(x.name)}</b><span class="small muted">${esc(x.txt)}</span></li>`).join('')}</ul>` : ''}

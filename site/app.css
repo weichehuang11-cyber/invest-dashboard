@@ -567,3 +567,4 @@ button, a, select, input, .btn { touch-action: manipulation; }
 @keyframes dgflash { from { opacity: .35; } to { opacity: 1; } }
 #dg-cat button { transition: background .15s, color .15s; }
 .tbl.cm.cal th:nth-child(1), .tbl.cm.cal td:nth-child(1) { width: 28%; }
+.cvnote { background: var(--warn-bg); border-left: 3px solid var(--warn); padding: 6px 8px; border-radius: 6px; color: var(--ink2); line-height: 1.5; }
