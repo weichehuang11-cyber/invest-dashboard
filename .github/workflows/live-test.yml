@@ -1,0 +1,16 @@
+name: 即時行情來源測試
+
+# 手動執行：測試 NAS 即時行情用的各個資料來源是否抓得到（結果顯示在執行摘要）
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 抓一次
+        run: node nas/livefeed.js
