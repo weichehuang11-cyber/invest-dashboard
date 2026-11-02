@@ -45,12 +45,12 @@ async function loadPersonal() {
 }
 
 // ── 送出 ──────────────────────────────────────────────────────
-async function send(title, lines, { priority = 3, tags = [] } = {}) {
+async function send(title, lines, { priority = 3, tags = [], click = null } = {}) {
   const body = lines.join('\n');
   const out = [];
   if (process.env.NTFY_TOPIC) {
     const server = (process.env.NTFY_SERVER || 'https://ntfy.sh').replace(/\/+$/, '');
-    const r = await fetch(server, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: process.env.NTFY_TOPIC, title, message: body.slice(0, 3900), priority, tags, ...(SITE ? { click: SITE } : {}) }) }).catch(e => ({ ok: false, statusText: e.message }));
+    const r = await fetch(server, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: process.env.NTFY_TOPIC, title, message: body.slice(0, 3900), priority, tags, ...(click || SITE ? { click: click || SITE } : {}), ...(click && click.includes('#/decide') ? { actions: [{ action: 'view', label: '去確認', url: click }] } : {}) }) }).catch(e => ({ ok: false, statusText: e.message }));
     out.push('ntfy ' + (r.ok ? 'ok' : 'fail ' + (r.status || r.statusText)));
   }
   if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
@@ -463,6 +463,9 @@ function premarket(snap, N, P, market, live = {}) {
   const ev = (snap.calendar || []).filter(e => e.date === day && (e.region === market || e.importance >= 2)).map(e => `${e.title}${e.time ? ` ${e.time}` : ''}`);
   const near = (snap.calendar || []).filter(e => e.date > day && (Date.parse(e.date) - Date.parse(day)) / 86400000 <= 3 && e.importance >= 2).map(e => `${e.date.slice(5).replace('-', '/')} ${e.title}`);
   S.push({ h: '今天的事件', lines: [...(ev.length ? ev : ['沒有特別排定的事件']), ...(near.length ? ['接下來 3 天：' + near.slice(0, 4).join('、')] : [])] });
+  // 6b. 待你確認的調整
+  const pend = snap.proposals?.pending || [];
+  if (pend.length) S.push({ h: '待你確認', lines: pend.map(p => `${p.title}：買進 ${p.from.buyTh}→${p.to.buyTh}、賣出 ${p.from.sellTh}→${p.to.sellTh}（${REC[p.rec] || ''}，證據${p.strength}）→ 網站「待確認」`) });
   // 7. 論點條件（個人）
   if (P) {
     const trig = Object.entries(P.journal?.theses || {}).map(([k, t]) => { const it = items[k]; if (!it || it.market !== market) return null; const h = (t.conds || []).map(c => condHit(c, it, P)).filter(x => x[0]).map(x => x[1]); return h.length ? `${k}：${h.join('、')}` : null; }).filter(Boolean);
@@ -497,7 +500,16 @@ async function sendMail(B) {
   return null;
 }
 
-module.exports = { send, decrypt, inQuiet, healthEvents, newsEvents, monthly, premarket, weekly, briefText, briefHtml };
+// 調整建議：有新的（或內容更新的）待確認項目就通知
+const REC = { approve: '建議同意', wait: '建議再觀察', reject: '建議拒絕' };
+function proposalEvents(snap, notified) {
+  return (snap.proposals?.pending || []).filter(p => !notified['prop:' + p.id]).map(p => ({
+    id: 'prop:' + p.id, prio: 3, click: SITE ? SITE + '#/decide' : null,
+    text: `🔧 待你確認：${p.title}（買進 ${p.from.buyTh}→${p.to.buyTh}、賣出 ${p.from.sellTh}→${p.to.sellTh}、停損 ${p.from.stopK}→${p.to.stopK}×ATR）｜${REC[p.rec] || ''}・證據${p.strength}｜到網站「待確認」決定`,
+  }));
+}
+
+module.exports = { loadPersonal, proposalEvents, send, decrypt, inQuiet, healthEvents, newsEvents, monthly, premarket, weekly, briefText, briefHtml };
 if (require.main === module) (async () => {
   const snap = readJSON(String(args.snap || 'out/data/snapshot.json'), null);
   if (!snap) { console.log('沒有快照，略過通知'); return; }
@@ -542,7 +554,7 @@ if (require.main === module) (async () => {
     }
   }
   const dataDir = path.dirname(String(args.snap || 'out/data/snapshot.json'));
-  const ev = [...await events(snap, P, notified), ...healthEvents(readJSON(path.join(dataDir, 'status.json'), null), snap, notified), ...newsEvents(readJSON(path.join(dataDir, 'news.json'), null), snap, P, notified)].sort((a, b) => b.prio - a.prio);
+  const ev = [...await events(snap, P, notified), ...healthEvents(readJSON(path.join(dataDir, 'status.json'), null), snap, notified), ...newsEvents(readJSON(path.join(dataDir, 'news.json'), null), snap, P, notified), ...proposalEvents(snap, notified)].sort((a, b) => b.prio - a.prio);
   const save = () => { const cut = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10); for (const [k, v] of Object.entries(notified)) if (!k.startsWith('_') && v < cut) delete notified[k]; fs.mkdirSync(path.dirname(stFile), { recursive: true }); fs.writeFileSync(stFile, JSON.stringify(notified)); console.log('NOTIFIED_CHANGED'); };
   // 勿擾時段：只送重大（優先 4 以上），其他先存起來，時段結束後一次送出
   const L = P?.limits || {}, quiet = L.quietOn !== false && inQuiet(L.quietStart ?? 23, L.quietEnd ?? 7);
@@ -554,7 +566,7 @@ if (require.main === module) (async () => {
   if (now.length || flush.length) {
     const top = now.some(e => e.prio >= 4) ? 4 : 3;
     const lines = [...now.map(e => e.text), ...(flush.length ? [`── 勿擾時段累積 ${flush.length} 則 ──`, ...flush] : [])];
-    const sent = await send(lines.length === 1 ? '訊號終端' : `訊號終端：${now.length + flush.length} 則新消息`, lines, { priority: top, tags: top >= 4 ? ['warning'] : [] });
+    const sent = await send(lines.length === 1 ? '訊號終端' : `訊號終端：${now.length + flush.length} 則新消息`, lines, { priority: top, tags: top >= 4 ? ['warning'] : [], click: now.find(e => e.click)?.click || null });
     if (sent) { for (const e of now) notified[e.id] = tpeDay(); if (flush.length) delete notified._queue; changed = true; }
   } else console.log('沒有新事件');
   if (changed) save();

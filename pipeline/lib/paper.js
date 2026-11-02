@@ -41,7 +41,7 @@ const emptyBook = () => ({ lots: [], pending: [], trades: [], equity: [], realiz
  * @param daily   key → { bars }
  * @param bench   大盤日 K bars（算超額報酬）
  */
-function step(st, m, items, daily, bench) {
+function step(st, m, items, daily, bench, siteP) {
   st.v = 1; st.start = st.start || {}; st.mk = st.mk || {}; st.params = st.params || {}; st.sig = st.sig || {};
   const M = st.mk[m] = st.mk[m] || { base: emptyBook(), tuned: emptyBook(), lastDay: null };
   const list = Object.values(items).filter(i => i.market === m && i.marketDate && daily[i.key]?.bars);
@@ -49,7 +49,7 @@ function step(st, m, items, daily, bench) {
   const day = list.map(i => i.marketDate).sort().pop();
   if (M.lastDay === day) return null;   // 這個交易日已經處理過
   st.start[m] = st.start[m] || day;
-  const P = { base: DEFAULT, tuned: { ...DEFAULT, ...(st.params[m] || {}) } };
+  const P = { base: { ...DEFAULT, ...(siteP?.stopK != null ? { stopK: siteP.stopK } : {}) }, tuned: { ...DEFAULT, ...(st.params[m] || {}) } };
   const at = (k, d) => { const b = daily[k].bars, i = b.dates.lastIndexOf(d); return i < 0 ? null : { o: b.open[i], c: b.close[i], i }; };
 
   for (const [name, B] of Object.entries({ base: M.base, tuned: M.tuned })) {

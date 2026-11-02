@@ -32,6 +32,7 @@ const Fin = require('./lib/financials');
 const AI = require('./lib/ai');
 const Conviction = require('./lib/conviction');
 const Paper = require('./lib/paper');
+const Proposals = require('./lib/proposals');
 const News = require('./lib/news');
 const Digest = require('./lib/digest');
 const NewsAI = require('./lib/newsai');
@@ -308,6 +309,14 @@ async function main() {
   // ── 4. 每檔：指標、籌碼、基本面、模型、訊號 ─────────────────────
   let Predictor = null;
   try { Predictor = require('./lib/predictor'); await Predictor.init(); } catch (e) { log('模型載入失敗', e.message); Predictor = null; }
+  // ── 你核准過的訊號參數（調整建議 → 你在網站按「同意」→ 這裡套用）──
+  const propFile = path.join(STATE, 'proposals.json'), propSt = readJSON(propFile, {});
+  let propChanged = false;
+  try {
+    const { loadPersonal } = require('./notify');
+    const P0 = (process.env.BACKUP_GIST_ID && process.env.BACKUP_PASSPHRASE) ? await loadPersonal() : null;
+    if (P0?.approvals) propChanged = Proposals.applyApprovals(propSt, P0.approvals, (...a) => log(...a));
+  } catch (e) { log('讀取核准紀錄失敗', e.message); }
   const items = {};
   for (const key of [...wl.us, ...wl.tw]) {
     const d = daily[key];
@@ -363,7 +372,7 @@ async function main() {
     // Beta：相對大盤（美股對標普 500、台股對加權指數），依共同交易日對齊，近 120 日
     const bench = daily[market === 'tw' ? '^TWII' : '^GSPC'];
     if (ta && bench) ta.beta = betaOf(d.bars, bench.bars, 120);
-    const sig = Signal.score({ ta, changePct: d.changePct, ml, chip, fund, market, vix: vix?.price });
+    const sig = Proposals.applySignal(Signal.score({ ta, changePct: d.changePct, ml, chip, fund, market, vix: vix?.price }), propSt.site, market, d.price, ta?.atr);
     // 財報體質明確時，基本面證據以財報為準（月營收／分析師評等為輔）
     const finA = market === 'tw' ? heavy.tw.fin?.[key] : heavy.us.fin?.[key];
     if (finA && Math.abs(finA.score) >= 2) sig.evidence.fund = finA.score > 0 ? 'pos' : 'neg';
@@ -372,7 +381,7 @@ async function main() {
       divs: (d.divs || []).filter(x => x.date >= new Date(Date.now() - 3 * 366 * 86400000).toISOString().slice(0, 10)),
       price: r2(d.price, 4), prevClose: r2(d.prevClose, 4), changePct: r2(d.changePct), marketDate: d.marketDate, marketTime: d.marketTime,
       ta: ta && Object.fromEntries(Object.entries(ta).map(([k, v]) => [k, typeof v === 'number' ? r2(v, 4) : v])),
-      chip, fund, ml, signal: { ...sig, stop: ta?.stopLong ? r2(ta.stopLong, 2) : null },
+      chip, fund, ml, signal: { ...sig, stop: sig.stopCalc != null ? r2(sig.stopCalc, 2) : ta?.stopLong ? r2(ta.stopLong, 2) : null, stopCalc: undefined },
       fin: (market === 'tw' ? heavy.tw.fin?.[key] : heavy.us.fin?.[key]) || null,
       tdcc: market === 'tw' ? (heavy.tw.tdcc?.[key] || null) : null,
       outlook: (() => { try { return Outlook.analyze(d.bars, { window: 500, backtestDays: 400 }); } catch (e) { log('outlook 失敗', key, e.message); return null; } })(),
@@ -619,7 +628,7 @@ async function main() {
   for (const m of ['tw', 'us']) {
     if (!(m === 'tw' ? fullTW : fullUS)) continue;
     try {
-      const d = Paper.step(paperSt, m, items, daily, benchBars(m)); if (d) log('虛擬跟單', m, d);
+      const d = Paper.step(paperSt, m, items, daily, benchBars(m), Proposals.current(propSt.site, m)); if (d) log('虛擬跟單', m, d);
       paperSt.tune = paperSt.tune || {}; paperSt.params = paperSt.params || {};
       const t0 = paperSt.tune[m]?.at ? Date.parse(paperSt.tune[m].at) : 0;
       if (Date.now() - t0 > 6.5 * 86400000) {
@@ -627,6 +636,10 @@ async function main() {
         const t = Paper.tune(stocks, benchBars(m), b => Conviction.series(b).ta, paperSt.params[m]);
         if (t) { paperSt.tune[m] = t; if (t.adopt) paperSt.params[m] = t.params; log('跟單校正', m, JSON.stringify(t.params), t.adopt ? '已採用' : '維持'); }
       }
+      // 校正帳參數和網站不同 → 產生（或更新）一則給你確認的建議
+      const pm = Paper.summary(paperSt, m, items, daily, benchBars(m));
+      const pr = Proposals.propose(propSt, m, { tune: paperSt.tune[m] && { ...paperSt.tune[m], params: paperSt.params[m] || paperSt.tune[m].params }, paper: pm, items });
+      if (pr) log('調整建議', pr.id, pr.rec); propChanged = true;
     } catch (e) { log('虛擬跟單失敗', m, e.message); }
   }
   const paper = {};
@@ -637,6 +650,7 @@ async function main() {
     status, verdict, env, items, ranking, changes, sectors, scorecard, indices, health, calendar, conviction,
     chipMarket: heavy.tw.chipMarket || null,
     paper,
+    proposals: Proposals.view(propSt),
     watchlist: { us: wl.us, tw: wl.tw },
   };
   // 雲端 AI 解讀：收盤後完整更新時產生，盤中沿用上一次的
@@ -652,6 +666,7 @@ async function main() {
     } else heavy.ai = aPrev;
   }
   snapshot.ai = heavy.ai || null;
+  if (!FULL && propChanged) { writeJSON(propFile, propSt); console.log('DIGEST_CHANGED'); }   // 盤中讀到你的核准，也立刻存檔
   writeJSON(path.join(OUT, 'snapshot.json'), snapshot);
   for (const key of Object.keys(items)) {
     const d = daily[key];
@@ -808,6 +823,7 @@ async function main() {
     writeJSON(path.join(STATE, 'predictions.json'), predictions);
     writeJSON(fcFile, fcLog);
     writeJSON(paperFile, paperSt);
+    writeJSON(propFile, propSt);
     log('狀態已更新', STATE);
   }
 

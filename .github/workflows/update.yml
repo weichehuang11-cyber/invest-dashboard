@@ -112,6 +112,8 @@ jobs:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BACKUP_GIST_ID: ${{ secrets.BACKUP_GIST_ID }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
         run: |
           ARGS="--out=out/data --state=state"
           [ -n "${{ steps.mode.outputs.full }}" ] && ARGS="$ARGS --full=${{ steps.mode.outputs.full }} --archive-daily=state/archive"
