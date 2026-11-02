@@ -247,6 +247,20 @@ function weekly(snap, N, P, barsDir, aiDir) {
       return [`• ${it.name}（${it.key}）${px(it.price)}${f ? `：下週上漲機率 ${f.upProb}%` : ''}`, `　撐 ${sp ? px(sp.p) : '—'}／壓 ${rs ? px(rs.p) : '—'}${f ? `／八成區間 ${px(f.q[0])}～${px(f.q[4])}` : ''}${it.signal?.stop ? `／停損參考 ${px(it.signal.stop)}` : ''}`]; });
     if (lv.length) S.push({ h: '持股下週關鍵價位', lines: lv, priv: true });
   }
+  // 虛擬跟單
+  {
+    const PL = [];
+    for (const [m, n] of [['tw', '台股'], ['us', '美股']]) {
+      const X = snap.paper?.[m]; if (!X) continue; const b = X.base, t = X.tuned, cur = m === 'tw' ? '元' : '美元';
+      const sg = v => `${v > 0 ? '+' : ''}${Math.round(v || 0).toLocaleString()}`;
+      PL.push(`• ${n}：累計 ${sg(b.total)} ${cur}（持倉 ${b.open.length} 檔，已平倉 ${b.closed} 筆${b.closed ? `、勝率 ${b.win}%` : ''}${b.beat != null ? `、贏大盤 ${b.beat}%` : ''}）`);
+      if (t && Math.round(t.total) !== Math.round(b.total)) PL.push(`　校正帳：${sg(t.total)} ${cur}`);
+      const a5 = Object.entries(X.accuracy || {}).filter(([g, v]) => g !== '賣出' && v.h5).map(([g, v]) => `${g.replace('買進・', '')} 5 日上漲 ${v.h5.hit}%（${v.h5.n}）`);
+      if (a5.length) PL.push('　買進訊號對答案：' + a5.join('；'));
+      if (X.tune?.adopt) PL.push(`　本週校正：參數改為買進 ≥ ${X.tune.params.buyTh}、賣出 ≤ ${X.tune.params.sellTh}、停損 ${X.tune.params.stopK || '不設'}${X.tune.params.stopK ? '×ATR' : ''}`);
+    }
+    if (PL.length) S.push({ h: '虛擬跟單', lines: PL });
+  }
   // 下週方向
   const nx = nextWeek(snap);
   S.push({ h: '下週方向', lines: [...(aiDir ? [...String(aiDir).split('\n').map(x => x.trim()).filter(Boolean).map(x => (/^[•\-*・]/.test(x) ? '• ' + x.replace(/^[•\-*・]\s*/, '') : '• ' + x)), ''] : []), ...nx] });

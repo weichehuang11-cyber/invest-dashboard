@@ -19,7 +19,7 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.2.5';
+  const APP_VERSION = '1.3.0';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1975,11 +1975,48 @@ ${footer()}`;
   }
 
   // ── 模型成績 ────────────────────────────────────────────────
+  // ── 虛擬跟單 ────────────────────────────────────────────────
+  const PM = { tw: '台股', us: '美股' };
+  function paperCard(m, X) {
+    if (!X) return '';
+    const cur = m === 'tw' ? '元' : '美元', B = X.base, T = X.tuned;
+    const money = v => `<b class="${cls(v)}">${v > 0 ? '+' : ''}${int(v)}</b>`;
+    const book = (l, sub, b) => `<div class="pp-book"><div class="pp-h"><span>${l}<span class="small muted">・${sub}</span></span><span>合計 ${money(b.total)} ${cur}</span></div>
+      <div class="small muted">持倉成本 ${int(b.cost)}・未實現 ${money(b.unreal)}・已實現 ${money(b.realized)}・成本 ${int(b.fees)}</div>
+      <div class="small muted">已平倉 ${b.closed} 筆${b.closed ? `・勝率 ${b.win}%・平均 ${pct(b.avgRet)}` : ''}${b.beat != null ? `・贏大盤 ${b.beat}%（平均超額 ${pct(b.exAvg)}）` : ''}</div></div>`;
+    const prm = X.params || {}, tn = X.tune;
+    const pTxt = q => q ? `買進 ≥ ${q.buyTh ?? '網站門檻'}、賣出 ≤ ${q.sellTh}、停損 ${q.stopK ? q.stopK + '×ATR' : '不設'}` : '—';
+    const tm = r => r?.n && r.win != null ? `${r.n} 筆，勝率 ${r.win}%，贏大盤 ${r.beat}%，平均超額 ${pct(r.exAvg)}${r.n < 15 ? '（樣本少）' : ''}` : '沒有交易';
+    const nm = k => esc(S.snap.items[k]?.name || k);
+    const pos = B.open.length ? `<div class="pp-list">${B.open.map(o => `<a class="pp-row" href="#/s/${encodeURIComponent(o.k)}"><div class="pp-h"><span><b>${esc(o.name)}</b> <span class="small muted">${esc(o.k)}・${int(o.sh)} 股</span></span><span>${money(o.pnl)} <span class="small ${cls(o.ret)}">${pct(o.ret)}</span></span></div>
+      <div class="small muted">均價 ${px(o.avg)} → 現價 ${px(o.px)}・停損 ${px(o.stop)}・${esc(o.since?.slice(5) || '')} 起</div></a>`).join('')}</div>` : '<p class="small muted" style="margin:0">原始帳目前沒有持倉。</p>';
+    const tr = B.trades.length ? `<details><summary>最近平倉（原始帳）</summary><div class="pp-list">${B.trades.map(t => `<div class="pp-row"><div class="pp-h"><span><b>${esc(t.name)}</b> <span class="small muted">${esc(t.bd.slice(5))}→${esc(t.sd.slice(5))}・${esc(t.why || '')}</span></span><span class="${cls(t.ret)}">${pct(t.ret)}</span></div>${t.ex != null ? `<div class="small muted">同期大盤相比 <span class="${cls(t.ex)}">${pct(t.ex)}</span></div>` : ''}</div>`).join('')}</div></details>` : '';
+    const pend = B.pending.length ? `<div class="pp-next small"><b>明天開盤</b>：${B.pending.map(o => `${o.side === 'buy' ? '買' : '賣'} ${nm(o.k)}${o.sh ? ' ' + o.sh + ' 股' : ''}${o.why ? `（${esc(o.why)}）` : ''}`).join('、')}</div>` : '';
+    const acc = X.accuracy || {};
+    const accTxt = (r, dir) => (r ? `${dir > 0 ? '上漲' : '下跌'} <b>${r.hit}%</b>${r.beat != null ? `、${dir > 0 ? '贏' : '輸'}大盤 ${r.beat}%` : ''}（${r.n} 次，平均 ${pct(r.avg)}）` : '尚未到期');
+    const accRows = ['買進・分數 75+', '買進・分數 68–74', '買進・分數 ≤67', '賣出'].filter(g => acc[g]).map(g => { const d = g === '賣出' ? -1 : 1; return `<div class="pp-row"><b>${g}</b><div class="small">5 日後：${accTxt(acc[g].h5, d)}</div><div class="small">20 日後：${accTxt(acc[g].h20, d)}</div></div>`; }).join('');
+    const eq = spark(B.equity.map(e => e.pnl), { zero: true, cap: '原始帳累計損益（' + cur + '）', fmt: x => (x > 0 ? '+' : '') + Math.round(x).toLocaleString(), min: 2 });
+    return `<section class="card" aria-labelledby="pp-${m}"><div class="hd"><h2 id="pp-${m}">${PM[m]}虛擬跟單</h2><span class="note">每次買進訊號${m === 'tw' ? '買 500 股' : '買 5 股'}，隔天開盤成交，訊號持續就每天加碼・自 ${esc(X.since || '—')} 起・資料日 ${esc(X.lastDay || '—')}</span></div>
+      ${book('原始', '照網站訊號', B)}${book('校正', '用校正後參數', T)}
+      ${eq}${pend}
+      <h3 class="pp-sub">持倉</h3>${pos}${tr}
+      <details${accRows ? ' open' : ''}><summary>訊號對答案（實盤）</summary>${accRows ? `<div class="pp-list">${accRows}</div><p class="small muted" style="margin:0">分數越高的組別命中率越高，才代表分數有用；也要看有沒有贏大盤。</p>` : '<p class="small muted" style="margin:0">累積中：訊號出現後 5 個交易日才有第一筆結果。</p>'}</details>
+      <details><summary>回測校正（每週一次）</summary>${tn ? `<p class="small" style="margin:6px 0">校正帳目前參數：<b>${pTxt(prm)}</b>${tn.adopt ? '（本週更新）' : ''}</p>
+        <div class="pp-list">${[['網站預設', tn.original], ['最佳候選', tn.best]].filter(x => x[1]).map(([l, r]) => `<div class="pp-row"><b>${l}</b> <span class="small muted">${pTxt(r.p)}</span><div class="small">挑選期：${tm(r.train)}</div><div class="small">驗證期：${tm(r.test)}</div></div>`).join('')}</div>
+        <p class="small muted" style="margin:0">用觀察清單 ${tn.stocks} 檔的歷史技術分數模擬同一套流程：${esc(tn.period.start)}～${esc(tn.period.cut)} 挑參數，${esc(tn.period.cut)}～${esc(tn.period.end)} 驗證。最佳候選在驗證期也贏過目前參數、而且平均超額為正才換上${tn.adopt ? '。' : '；本週維持。'}</p>` : '<p class="small muted" style="margin:0">第一次收盤後完整更新時會跑。</p>'}</details>
+    </section>`;
+  }
+  function viewPaper() {
+    const P = S.snap.paper || {};
+    const body = ['tw', 'us'].map(m => paperCard(m, P[m])).join('');
+    return `<div><a href="#/scorecard" class="small">← 回系統</a></div>${body || '<section class="card"><p class="empty">虛擬跟單從下一次收盤後完整更新開始記錄。</p></section>'}${footer()}`;
+  }
   function viewScorecard() {
     const sc = S.snap.scorecard, st = S.snap.status || {};
     const STZ = { yahoo: 'Yahoo 報價', vix: 'VIX 恐慌指數', treasury: '美國公債殖利率', t86: '三大法人（TWSE）', finmind: 'FinMind 法人／營收', fundamentals: '美股基本面', breadth: '台股寬度（收盤歷史）', futures: '外資台指期', putcall: '選擇權 P/C 比', valuation: '台股估值', margin: '融資餘額', usValuation: '標普本益比', fred: 'FRED 信用／壓力', indices: '指數推論', ai: '雲端 AI 解讀', tdcc: '集保大戶', exdiv: '除權息', tpex: '上櫃行情', usUniverse: '美股清單', universe: '搜尋清單', usFinancials: '美股財報', twFinancials: '台股財報' };
     return `
 <section class="card" aria-labelledby="bt0"><div class="hd"><h2 id="bt0">策略回測</h2><span class="note">過去 2 年照技術面訊號操作的結果，可自行調整門檻、停損、停利；另附 AI 模型的樣本外表現</span><a class="act btn primary sm" href="#/backtest" style="color:#fff">開始回測</a></div></section>
+${(() => { const P = S.snap.paper || {}; const row = m => { const X = P[m]; if (!X) return ''; const b = X.base; return `<tr><td>${PM[m]}</td><td class="num"><b class="${cls(b.total)}">${b.total > 0 ? '+' : ''}${int(b.total)}</b></td><td class="num">${b.open.length}</td><td class="num">${b.closed ? b.win + '%' : '—'}</td><td class="num">${b.beat != null ? b.beat + '%' : '—'}</td></tr>`; }; const rows = row('tw') + row('us'); return `<section class="card" aria-labelledby="pp0"><div class="hd"><h2 id="pp0">虛擬跟單</h2><span class="note">照買進訊號用假錢買（台股 500 股、美股 5 股），追蹤實際結果並每週回測校正參數</span><a class="act btn primary sm" href="#/paper" style="color:#fff">看明細</a></div>${rows ? `<div class="tbl-box"><table class="tbl cm"><thead><tr><th>市場</th><th class="num">累計損益</th><th class="num">持倉檔數</th><th class="num">勝率</th><th class="num">贏大盤</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="small muted" style="margin:0">從下一次收盤後完整更新開始記錄。</p>'}</section>`; })()}
 ${(() => { const L = sc?.forecastLive; if (!L) return ''; const row = (l, r) => `<tr><td>${l}</td><td class="num">${r?.n ? r.cov80 + '%' : '—'}</td><td class="num">${r?.n ? r.cov50 + '%' : '—'}</td><td class="num">${r?.dir ?? '—'}%</td><td class="num muted">${r?.base != null ? Math.max(r.base, 100 - r.base) + '%' : '—'}</td><td class="num muted">${r?.n || 0}</td></tr>`;
   return `<section class="card" aria-labelledby="fl0"><div class="hd"><h2 id="fl0">走勢推論的實際驗證</h2><span class="note">每天收盤後把觀察清單的 5／20 日推論區間記下來，到期後用真實收盤結算（不是回測）・自 ${esc(L.since || '今天')} 起 ${L.records} 筆</span></div>
     <div class="tbl-box"><table class="tbl cm"><thead><tr><th>期間</th><th class="num">80% 區間<br>涵蓋</th><th class="num">50% 區間<br>涵蓋</th><th class="num">方向<br>命中</th><th class="num">單純<br>猜測</th><th class="num">次數</th></tr></thead><tbody>${row('5 日', L.h5)}${row('20 日', L.h20)}</tbody></table></div>
@@ -2231,7 +2268,7 @@ ${footer()}`;
   async function render() {
     const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
     S.route = h.startsWith('s/') ? h : (h.split('/')[0] || 'home');
-    const nav = h.startsWith('s/') ? 'home' : S.route === 'all' ? 'home' : ['backtest', 'history'].includes(S.route) ? 'scorecard' : S.route;
+    const nav = h.startsWith('s/') ? 'home' : S.route === 'all' ? 'home' : ['backtest', 'history', 'paper'].includes(S.route) ? 'scorecard' : S.route;
     document.querySelectorAll('[data-nav]').forEach(a => { a.classList.toggle('act', a.dataset.nav === nav); if (a.dataset.nav === nav) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
     const main = $('#main');
     if (!S.snap) return;
@@ -2258,6 +2295,7 @@ ${footer()}`;
     else if (S.route === 'news') { main.innerHTML = '<p class="loading">載入新聞…</p>'; const [N] = await Promise.all([loadNews(), loadUniverse()]); if (S.route !== 'news') return; main.innerHTML = viewNews(N); { const ev = viewPcEvents(); if (ev) main.querySelector('#dgs-h')?.closest('section')?.insertAdjacentHTML('afterend', ev); } bindDigest(); setupFolds(); document.title = '新聞・訊號終端'; }
     else if (S.route === 'journal') { main.innerHTML = viewJournal(); document.title = '我的成績單・訊號終端'; afterJournal(); }
     else if (S.route === 'scorecard') { main.innerHTML = viewScorecard(); document.title = '模型成績・訊號終端'; if (SY.get().token) loadRemote().then(() => { if (S.route !== 'scorecard' || $('#pcs-h')) return; const h = viewPcScore(); if (h) main.querySelector('footer')?.insertAdjacentHTML('beforebegin', h); }); }
+    else if (S.route === 'paper') { main.innerHTML = viewPaper(); document.title = '虛擬跟單・訊號終端'; }
     else if (S.route === 'settings') { main.innerHTML = viewSettings(); bindSettings(); document.title = '設定・訊號終端'; }
     else if (S.route === 'all') { main.innerHTML = `<div><a href="#/" class="small">← 回總覽</a></div><section class="card" id="opps">${viewOpps(0)}</section>${footer()}`; document.title = '全部標的・訊號終端'; }
     else { main.innerHTML = viewHome(); document.title = '訊號終端'; afterHome(); if (SY.get().token) loadRemote().then(() => { if (S.route !== 'home' || $('#pck-h') || $('#ms-h')) return; const h = viewPcReview() + viewPcChecks(), h2 = viewPcScan(); if (h) $('#opps')?.insertAdjacentHTML('beforebegin', h); if (h2) $('#opps')?.insertAdjacentHTML('afterend', h2); if (h || h2) setupFolds(); }); loadNews().then(N => { if (S.route !== 'home') return; const el = $('#themes'); if (el) el.innerHTML = viewThemesMini(N); const d = $('#digest'); if (d) d.innerHTML = viewDigestMini(N); setupFolds(); }); }

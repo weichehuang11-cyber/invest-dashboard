@@ -568,3 +568,10 @@ button, a, select, input, .btn { touch-action: manipulation; }
 #dg-cat button { transition: background .15s, color .15s; }
 .tbl.cm.cal th:nth-child(1), .tbl.cm.cal td:nth-child(1) { width: 28%; }
 .cvnote { background: var(--warn-bg); border-left: 3px solid var(--warn); padding: 6px 8px; border-radius: 6px; color: var(--ink2); line-height: 1.5; }
+.pp-book { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; }
+.pp-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.pp-list { display: flex; flex-direction: column; }
+.pp-row { display: block; padding: 7px 0; border-bottom: 1px solid var(--line2); color: var(--ink); text-decoration: none; }
+.pp-row:last-child { border-bottom: 0; }
+.pp-next { background: var(--acc-bg); border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
+.pp-sub { font-size: 14px; margin: 10px 0 2px; }

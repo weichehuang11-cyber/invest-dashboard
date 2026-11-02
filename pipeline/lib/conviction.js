@@ -154,4 +154,4 @@ function comboScore(tech, chip) {
   return { bc: tech.bc, scores: tech.scores.map((t, i) => { const c = chip.scores[i]; if (!t || !c) return null; const v = t.score >= 3 && c.score >= 2 ? 5 : t.score <= -3 && c.score <= -2 ? -5 : 0; return { date: t.date, score: v, regime: t.regime, items: [] }; }) };
 }
 
-module.exports = { score, chipScore, comboScore, evaluate, bucketOf, BUCKETS };
+module.exports = { score, series, chipScore, comboScore, evaluate, bucketOf, BUCKETS };

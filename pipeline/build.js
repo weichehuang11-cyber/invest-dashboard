@@ -31,6 +31,7 @@ const Calendar = require('./lib/calendar');
 const Fin = require('./lib/financials');
 const AI = require('./lib/ai');
 const Conviction = require('./lib/conviction');
+const Paper = require('./lib/paper');
 const News = require('./lib/news');
 const Digest = require('./lib/digest');
 const NewsAI = require('./lib/newsai');
@@ -612,10 +613,30 @@ async function main() {
   }
   status.indices = `${Object.values(indices).filter(x => x.outlook).length}/${IDX.length}`;
   const ranking = Object.values(items).sort((a, b) => b.signal.score - a.signal.score).map(x => x.key);
+  // ── 虛擬跟單：照訊號用假錢買賣（收盤後完整更新才下單），每週回測校正一次參數 ──
+  const paperFile = path.join(STATE, 'paper.json'), paperSt = readJSON(paperFile, {});
+  const benchBars = m => (longDaily[m === 'tw' ? '^TWII' : '^GSPC'] || daily[m === 'tw' ? '^TWII' : '^GSPC'])?.bars || null;
+  for (const m of ['tw', 'us']) {
+    if (!(m === 'tw' ? fullTW : fullUS)) continue;
+    try {
+      const d = Paper.step(paperSt, m, items, daily, benchBars(m)); if (d) log('虛擬跟單', m, d);
+      paperSt.tune = paperSt.tune || {}; paperSt.params = paperSt.params || {};
+      const t0 = paperSt.tune[m]?.at ? Date.parse(paperSt.tune[m].at) : 0;
+      if (Date.now() - t0 > 6.5 * 86400000) {
+        const stocks = Object.values(items).filter(i => i.market === m && daily[i.key]).map(i => ({ key: i.key, b: daily[i.key].bars }));
+        const t = Paper.tune(stocks, benchBars(m), b => Conviction.series(b).ta, paperSt.params[m]);
+        if (t) { paperSt.tune[m] = t; if (t.adopt) paperSt.params[m] = t.params; log('跟單校正', m, JSON.stringify(t.params), t.adopt ? '已採用' : '維持'); }
+      }
+    } catch (e) { log('虛擬跟單失敗', m, e.message); }
+  }
+  const paper = {};
+  for (const m of ['tw', 'us']) { try { const x = Paper.summary(paperSt, m, items, daily, benchBars(m)); if (x) paper[m] = x; } catch (e) { log('跟單摘要失敗', m, e.message); } }
+
   const snapshot = {
     version: 1, generatedAt: nowIso, mode: FULL ? `full:${FULL}` : 'intraday', buildSeconds: Math.round((Date.now() - t0) / 1000),
     status, verdict, env, items, ranking, changes, sectors, scorecard, indices, health, calendar, conviction,
     chipMarket: heavy.tw.chipMarket || null,
+    paper,
     watchlist: { us: wl.us, tw: wl.tw },
   };
   // 雲端 AI 解讀：收盤後完整更新時產生，盤中沿用上一次的
@@ -786,6 +807,7 @@ async function main() {
     writeJSON(path.join(STATE, 'conviction.json'), { at: nowIso, conviction, high: Object.values(items).filter(i => i.conv?.high?.length).map(i => ({ key: i.key, bucket: i.conv.bucket, score: i.conv.score, high: i.conv.high })) });
     writeJSON(path.join(STATE, 'predictions.json'), predictions);
     writeJSON(fcFile, fcLog);
+    writeJSON(paperFile, paperSt);
     log('狀態已更新', STATE);
   }
 
