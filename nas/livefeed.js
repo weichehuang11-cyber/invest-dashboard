@@ -9,8 +9,8 @@
 const https = require('https');
 
 const LIST = [
-  { key: 'TWII', name: '加權指數', src: 'twse', ch: 'tse_t00.tw', sess: 'tw', every: 10 },
-  { key: 'TWOII', name: '櫃買指數', src: 'twse', ch: 'otc_o00.tw', sess: 'tw', every: 10 },
+  { key: 'TWII', name: '加權指數', src: 'twse', ch: 'tse_t00.tw', ysym: '^TWII', sess: 'tw', every: 10 },
+  { key: 'TWOII', name: '櫃買指數', src: 'twse', ch: 'otc_o00.tw', ysym: '^TWOII', sess: 'tw', every: 10 },
   { key: 'TXF', name: '台指期', src: 'taifex', sess: 'txf', every: 10 },
   { key: 'GSPC', name: '標普 500', src: 'yahoo', sym: '^GSPC', sess: 'us', every: 20 },
   { key: 'IXIC', name: '那斯達克', src: 'yahoo', sym: '^IXIC', sess: 'us', every: 20 },
@@ -76,7 +76,10 @@ async function taifex(sess) {
   if (!f) throw new Error('沒有台指期資料');
   const last = num(f.CLastPrice), prev = num(f.CRefPrice);
   const t = String(f.CTime || '').padStart(6, '0'), d = String(f.CDate || '');
-  const time = d.length === 8 ? new Date(`${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)}T${t.slice(0, 2)}:${t.slice(2, 4)}:${t.slice(4, 6)}+08:00`).toISOString() : new Date().toISOString();
+  // 夜盤的 CDate 是「交易日」不是時鐘日期：用台北今天的日期配 CTime，比現在晚就往前一天
+  const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+  let tm = Date.parse(`${today}T${t.slice(0, 2)}:${t.slice(2, 4)}:${t.slice(4, 6)}+08:00`); if (tm > Date.now() + 5 * 60000) tm -= 86400000;
+  const time = Number.isFinite(tm) ? new Date(tm).toISOString() : new Date().toISOString(); void d;
   return { price: last, prev, high: num(f.CHighPrice), low: num(f.CLowPrice), time, delay: 0, label: f.DispCName || null, night: sess === 'night' };
 }
 async function yahoo(sym) {
@@ -93,6 +96,12 @@ async function yahoo(sym) {
 const live = { at: null, items: {} };
 const due = {};
 const spark = {};   // 證交所／期交所沒有分 K：自己每分鐘記一點
+const ysp = {};     // 自己記的點太少時（剛啟動），先用 Yahoo 一分 K 補走勢線（每 5 分鐘更新）
+async function yahooSpark(sym) {
+  const c = ysp[sym]; if (c && Date.now() - c.at < 300000) return c.pts;
+  try { const r = await yahoo(sym); ysp[sym] = { at: Date.now(), pts: r.spark || [] }; } catch (_) { ysp[sym] = { at: Date.now(), pts: c?.pts || [] }; }
+  return ysp[sym].pts;
+}
 function addSpark(key, time, price) {
   if (!price) return; const day = (time || new Date().toISOString()).slice(0, 10);
   const S = spark[key] && spark[key].day === day ? spark[key] : (spark[key] = { day, pts: [] });
@@ -129,8 +138,12 @@ async function tick(force) {
   await Promise.all(jobs);
   for (const [k, v] of Object.entries(live.items)) {
     if (v.price != null && v.prev) { v.chg = +(v.price - v.prev).toFixed(2); v.chgPct = +((v.price / v.prev - 1) * 100).toFixed(2); }
+    // 盤中資料時間落後太多＝來源有延遲（例如 Yahoo 期貨約 10 分鐘）
+    if (v.state !== 'closed' && v.time) { const lag = Math.round((Date.now() - Date.parse(v.time)) / 60000); v.lag = lag; if (lag >= 3) v.delay = Math.max(v.delay || 0, lag); }
     const sk = k === 'TXF' && v.night ? 'TXFN' : k;
     if (!v.spark || spark[sk]) v.sparkOwn = spark[sk]?.pts || [];
+    const def = LIST.find(x => x.key === k);
+    if (def?.ysym && (v.sparkOwn || []).length < 10 && !(k === 'TXF' && v.night)) v.sparkY = await yahooSpark(def.ysym);
   }
   live.at = new Date().toISOString();
   return live;
@@ -140,7 +153,7 @@ function snapshotJSON() {
   const items = {};
   for (const it of LIST) {
     const v = live.items[it.key]; if (!v) continue;
-    const pts = (v.spark && v.spark.length ? v.spark : v.sparkOwn || []).slice(-300);
+    const pts = (v.spark && v.spark.length ? v.spark : (v.sparkOwn || []).length >= 10 ? v.sparkOwn : v.sparkY?.length ? v.sparkY : v.sparkOwn || []).slice(-300);
     items[it.key] = { name: v.name, price: v.price, prev: v.prev, chg: v.chg, chgPct: v.chgPct, high: v.high, low: v.low, time: v.time, delay: v.delay || 0, state: v.state, src: v.src, ok: v.ok, err: v.ok ? undefined : v.err, spark: pts.map(p => p[1]), t0: pts[0]?.[0] || null };
   }
   return JSON.stringify({ at: live.at, order: LIST.map(x => x.key), items });

@@ -19,7 +19,7 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.4.0';
+  const APP_VERSION = '1.5.0';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -517,6 +517,8 @@ ${footer()}`;
       <div class="m">${esc(e.meaning)}</div></div>`).join('')}</div>
 </section>
 
+<section class="card" id="live" aria-labelledby="lv-h">${viewLive()}</section>
+
 <section class="card fold all" data-fold="digest" data-def="1" id="digest" aria-labelledby="dg-h">${S.news ? viewDigestMini(S.news) : '<p class="loading">載入全球市場快報…</p>'}</section>
 
 <section class="card fold" data-fold="idx" id="idx" aria-labelledby="ix-h"><p class="loading">載入指數走勢…</p></section>
@@ -685,8 +687,44 @@ ${footer()}`;
       資料${S.source === 'nas' ? '來自 NAS 備援' : '由 GitHub 排程產生'}，${esc(tpeTime(S.snap.generatedAt))}（${ago(S.snap.generatedAt)}）。</footer>`;
   }
 
+  // ── 即時行情（NAS 每 10～60 秒代抓；沒有 NAS 時顯示網站資料）──────────
+  const LIVE = { data: null, at: 0, err: null, timer: null, prev: {} };
+  const LV_FALLBACK = [['TWII', '^TWII', '加權指數'], ['GSPC', '^GSPC', '標普 500'], ['IXIC', '^IXIC', '那斯達克'], ['SOX', '^SOX', '費城半導體']];
+  const LV_STATE = { open: ['盤中', 'ok'], night: ['夜盤', 'ok'], closed: ['收盤', ''] };
+  const hms = iso => new Date(iso).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  function liveSpark(a, up) {
+    const v = (a || []).filter(isNum); if (v.length < 2) return '<div class="lv-sp"></div>';
+    const lo = Math.min(...v), hi = Math.max(...v), w = 100, h = 26, x = i => (i / (v.length - 1) * w).toFixed(1), y = t => (h - 2 - (t - lo) / ((hi - lo) || 1) * (h - 4)).toFixed(1);
+    return `<svg class="lv-sp" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="var(--${up ? 'up' : 'down'})" stroke-width="1.4" vector-effect="non-scaling-stroke" points="${v.map((t, i) => x(i) + ',' + y(t)).join(' ')}"/></svg>`;
+  }
+  function viewLive() {
+    const L = LIVE.data, fresh = L && Date.now() - LIVE.at < 60000;
+    let tiles = [];
+    if (L) tiles = (L.order || Object.keys(L.items)).map(k => [k, L.items[k]]).filter(([, v]) => v && isNum(v.price));
+    else tiles = LV_FALLBACK.map(([k, ik, n]) => { const x = S.snap.indices?.[ik]; return x && [k, { name: n, price: x.price, chgPct: x.changePct, chg: isNum(x.changePct) ? x.price - x.price / (1 + x.changePct / 100) : null, state: 'snap', time: S.snap.generatedAt }]; }).filter(Boolean);
+    const tile = ([k, v]) => {
+      const up = (v.chgPct ?? 0) >= 0, st = LV_STATE[v.state], moved = LIVE.prev[k] != null && LIVE.prev[k] !== v.price;
+      const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10), td = v.time && new Date(Date.parse(v.time) + 8 * 3600000).toISOString().slice(0, 10);
+      const tm = v.state === 'snap' ? `網站資料 ${tpeTime(v.time)}` : `${!v.time ? '—' : td === today ? hms(v.time) : tpeTime(v.time)}${v.delay && v.state !== 'closed' ? `・延遲約 ${v.delay} 分` : ''}`;
+      return `<div class="lv-t${moved ? ' lv-flash' : ''}${v.ok === false ? ' lv-bad' : ''}"><div class="lv-n">${esc(v.name)}${st ? `<span class="lv-s ${st[1]}">${st[0]}</span>` : ''}</div>
+        <div class="lv-p mono">${px(v.price)}</div><div class="lv-c ${cls(v.chgPct)}">${isNum(v.chg) ? sign(v.chg) + fix(v.chg, Math.abs(v.chg) >= 100 ? 0 : 2) : ''} ${pct(v.chgPct)}</div>
+        ${liveSpark(v.spark, up)}<div class="lv-m">${tm}</div></div>`;
+    };
+    const note = !nasBase() ? '非即時：在「設定」填入 NAS 網址，就會每 10～60 秒自動更新' : !L ? (LIVE.err ? `NAS 連不到（${esc(LIVE.err)}），先顯示網站資料` : '連線 NAS…') : fresh ? `NAS 即時・${hms(L.at)} 更新・開盤中每 10～60 秒` : `NAS 資料停在 ${hms(L.at)}（連線中斷？）`;
+    return `<div class="hd"><h2 id="lv-h">即時行情</h2><span class="note">${note}</span></div><div class="lv-grid">${tiles.map(tile).join('') || '<p class="empty">沒有資料</p>'}</div>`;
+  }
+  async function pollLive() {
+    if (S.route !== 'home' || document.hidden || !nasBase() || !/^https:\/\//.test(nasBase())) return;
+    try { const d = await getJSON(nasBase() + '/live.json?t=' + Date.now(), 6000); LIVE.prev = Object.fromEntries(Object.entries(LIVE.data?.items || {}).map(([k, v]) => [k, v.price])); LIVE.data = d; LIVE.at = Date.now(); LIVE.err = null; }
+    catch (e) { LIVE.err = e.name === 'AbortError' ? '逾時' : e.message; }
+    const box = $('#live'); if (box && S.route === 'home') box.innerHTML = viewLive();
+  }
+  function startLive() {
+    pollLive();
+    if (!LIVE.timer) { LIVE.timer = setInterval(pollLive, 10000); document.addEventListener('visibilitychange', () => { if (!document.hidden) pollLive(); }); }
+  }
   async function afterHome() {
-    fillIndexSection();
+    fillIndexSection(); startLive();
     const P = holdings();
     if (P.rows.length) {
       const v = await portfolioVaR(P);

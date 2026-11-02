@@ -4,6 +4,7 @@
  *   1. 提供備援網站與資料：http://NAS:8765/backup/（GitHub 網站資料過舊時會來這裡讀）
  *   2. 內建排程：盤中每 30 分鐘、台股收盤後 16:55、美股收盤後 05:45（台北時間）執行 nas/run-backup.sh
  *   3. 狀態：/backup/status.json
+ *   5. 即時行情：/live.json（加權、櫃買、台指期、標普、那斯達克、費半、美股期貨、日經、韓股；開盤中每 10～60 秒更新）
  *   4. 監看 GitHub 排程：盤中網站資料超過 60 分鐘沒更新，就推播提醒並自動觸發一次 GitHub 更新
  *      （設定檔 nas/.env：NTFY_TOPIC=…、GH_TOKEN=…（只需 invest-dashboard 的 Actions 讀寫權限））
  *
@@ -14,6 +15,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const Live = require('./livefeed');
 
 const DIR = path.resolve(__dirname, '..');
 const BASE = process.env.INVEST_BACKUP_BASE || path.resolve(DIR, '..', 'invest-backup');
@@ -88,6 +90,15 @@ setInterval(() => {
   if (m % 15 === 5) watchGithub();
 }, 20000);
 
+// 即時行情：每 5 秒檢查哪些市場該抓了（各市場自己的頻率）
+let liveBusy = false, liveReq = 0;
+setInterval(async () => { if (liveBusy) return; liveBusy = true; try { await Live.tick(); } catch (e) { console.log('即時行情失敗', e.message); } liveBusy = false; }, 5000);
+Live.tick(true).catch(() => {});
+
+// 程式更新（git pull）後自動重新啟動，讓 pm2 載入新版本（備援更新進行中就等它跑完）
+const SELF = [__filename, path.join(__dirname, 'livefeed.js')], mtime0 = SELF.map(f => { try { return fs.statSync(f).mtimeMs; } catch (_) { return 0; } });
+setInterval(() => { const now = SELF.map(f => { try { return fs.statSync(f).mtimeMs; } catch (_) { return 0; } }); if (!state.running && now.some((t, i) => t !== mtime0[i])) { console.log(new Date().toISOString(), '程式已更新，重新啟動'); process.exit(0); } }, 60000);
+
 http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Private-Network', 'true');
@@ -95,6 +106,7 @@ http.createServer((req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
   const url = decodeURIComponent((req.url || '/').split('?')[0]);
   if (url === '/' ) { res.writeHead(302, { Location: '/backup/' }); return res.end(); }
+  if (url === '/live.json' || url === '/backup/live.json') { liveReq++; res.writeHead(200, { 'Content-Type': TYPES['.json'], 'Cache-Control': 'no-store' }); return res.end(Live.snapshotJSON()); }
   if (url === '/backup/status.json' || url === '/health') { res.writeHead(200, { 'Content-Type': TYPES['.json'], 'Cache-Control': 'no-store' }); return res.end(JSON.stringify({ status: 'ok', ...state })); }
   // 歷史封存：盤中每次更新的快照（網站「歷史快照」頁可選時間查詢）
   if (url === '/backup/archive/index.json') {
