@@ -33,6 +33,7 @@ const AI = require('./lib/ai');
 const Conviction = require('./lib/conviction');
 const Paper = require('./lib/paper');
 const Proposals = require('./lib/proposals');
+const Industry = require('./lib/industry');
 const News = require('./lib/news');
 const Digest = require('./lib/digest');
 const NewsAI = require('./lib/newsai');
@@ -711,6 +712,21 @@ async function main() {
     writeJSON(path.join(OUT, 'universe_hist.json'), series);
     status.universe = `${U.length} 檔`;
   }
+  // 產業分類：收盤後完整更新重抓該市場的成分股，其他時候沿用上一次（state/industries.json）
+  try {
+    const defs = readJSON(path.join(ROOT, 'config', 'industries.json'), { groups: [] });
+    const iFile = path.join(STATE, 'industries.json'), iPrev = readJSON(iFile, null);
+    const U = readJSON(path.join(OUT, 'universe.json'), { list: [] }).list, nmI = {};
+    for (const u of U) if (u.n) nmI[u.k] = u.n.replace(/\*$/, '');
+    for (const [k, it] of Object.entries(items)) nmI[k] = it.name;
+    const res = await Industry.compute({ defs, prev: iPrev, refresh: { tw: fullTW, us: fullUS }, names: nmI, log,
+      getDaily: async k => daily[k] || await Yahoo.daily(k, '1y').catch(() => null),
+      benchOf: m => longDaily[m === 'tw' ? '^TWII' : '^GSPC'] || daily[m === 'tw' ? '^TWII' : '^GSPC'] });
+    writeJSON(path.join(OUT, 'industries.json'), res);
+    if (FULL || !iPrev) writeJSON(iFile, res);
+    if (!iPrev && !FULL) console.log('DIGEST_CHANGED');
+    status.industries = `${res.groups.length} 個產業／${Object.keys(res.stocks).length} 檔`;
+  } catch (e) { status.industries = 'fail: ' + e.message.slice(0, 200); log('產業分類失敗', e.message); }
   // 市場新聞、熱門題材與相關個股（每次更新都抓；失敗沿用上一次）
   try {
     const U = readJSON(path.join(OUT, 'universe.json'), { list: [] }).list;

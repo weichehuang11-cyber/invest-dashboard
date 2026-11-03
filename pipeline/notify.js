@@ -247,6 +247,11 @@ function weekly(snap, N, P, barsDir, aiDir) {
       return [`• ${it.name}（${it.key}）${px(it.price)}${f ? `：下週上漲機率 ${f.upProb}%` : ''}`, `　撐 ${sp ? px(sp.p) : '—'}／壓 ${rs ? px(rs.p) : '—'}${f ? `／八成區間 ${px(f.q[0])}～${px(f.q[4])}` : ''}${it.signal?.stop ? `／停損參考 ${px(it.signal.stop)}` : ''}`]; });
     if (lv.length) S.push({ h: '持股下週關鍵價位', lines: lv, priv: true });
   }
+  // 追蹤的產業
+  {
+    const IND = readJSON(path.join(path.dirname(barsDir), 'industries.json'), null), trk = P?.indTrack || [];
+    if (IND && trk.length) { const Ind = require('./lib/industry'); const L = [...(IND.groups || []), ...(P.indCustom || []).map(c => ({ id: 'c-' + c.id, name: c.name, m: 'tw', stats: Ind.groupStats(c.keys, IND.stocks || {}, IND.bench?.tw) }))].filter(g => trk.includes(g.id)).map(g => Ind.line(g, IND.bench?.[g.m])).filter(Boolean).map(x => '• ' + x); if (L.length) S.push({ h: '追蹤的產業', lines: L, priv: true }); }
+  }
   // 虛擬跟單
   {
     const PL = [];
@@ -463,6 +468,9 @@ function premarket(snap, N, P, market, live = {}) {
   const ev = (snap.calendar || []).filter(e => e.date === day && (e.region === market || e.importance >= 2)).map(e => `${e.title}${e.time ? ` ${e.time}` : ''}`);
   const near = (snap.calendar || []).filter(e => e.date > day && (Date.parse(e.date) - Date.parse(day)) / 86400000 <= 3 && e.importance >= 2).map(e => `${e.date.slice(5).replace('-', '/')} ${e.title}`);
   S.push({ h: '今天的事件', lines: [...(ev.length ? ev : ['沒有特別排定的事件']), ...(near.length ? ['接下來 3 天：' + near.slice(0, 4).join('、')] : [])] });
+  // 6a. 追蹤的產業（前一個交易日）
+  const IND = live.ind, trk = P?.indTrack || [];
+  if (IND && trk.length) { const Ind = require('./lib/industry'); const L = [...(IND.groups || []), ...(P.indCustom || []).map(c => ({ id: 'c-' + c.id, name: c.name, m: market, stats: Ind.groupStats(c.keys, IND.stocks || {}, IND.bench?.[market]) }))].filter(g => trk.includes(g.id) && g.m === market).map(g => Ind.line(g, IND.bench?.[g.m])).filter(Boolean); if (L.length) S.push({ h: '追蹤的產業', lines: L, priv: true }); }
   // 6b. 待你確認的調整
   const pend = snap.proposals?.pending || [];
   if (pend.length) S.push({ h: '待你確認', lines: pend.map(p => `${p.title}：買進 ${p.from.buyTh}→${p.to.buyTh}、賣出 ${p.from.sellTh}→${p.to.sellTh}（${REC[p.rec] || ''}，證據${p.strength}）→ 網站「待確認」`) });
@@ -531,7 +539,8 @@ if (require.main === module) (async () => {
     const syms = mk === 'tw' ? ['ES=F', 'NQ=F', '^N225', '^KS11'] : ['ES=F', 'NQ=F', 'YM=F', '^GDAXI', '^STOXX50E', '^TNX', 'CL=F', 'GC=F', ...usKeys];
     const [q, tx] = await Promise.all([Live.quotes(syms), mk === 'tw' ? Live.taifexNight() : null]);
     console.log(`::notice::即時報價 ${Object.keys(q).length}/${syms.length}${mk === 'tw' ? `、台指期夜盤 ${tx ? tx.last + '（' + (tx.pct ?? 0).toFixed(2) + '%）' : '失敗'}` : ''}`);
-    const B = premarket(snap, N, P, mk, { q, tx });
+    const ind = readJSON(path.join(path.dirname(String(args.snap || 'out/data/snapshot.json')), 'industries.json'), null);
+    const B = premarket(snap, N, P, mk, { q, tx, ind });
     console.log(briefText(B, { pub: true }).join('\n'));   // 公開紀錄只印不含個人資料的部分
     if (args.print) return;
     if (args.push !== 'no') await send(B.title, briefText(B), { priority: 3, tags: ['sunrise'] });

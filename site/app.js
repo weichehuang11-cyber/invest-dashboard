@@ -19,7 +19,7 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.5.0';
+  const APP_VERSION = '1.6.0';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -538,6 +538,8 @@ ${footer()}`;
 
 <section class="card" id="opps" aria-labelledby="opp-h">${viewOpps(isMob() ? 6 : 10)}</section>
 
+<section class="card" id="indhome" aria-labelledby="ih-h"><p class="loading">載入產業分類…</p></section>
+
 <section class="card fold all" data-fold="themes" data-def="1" id="themes" aria-labelledby="th-h">${S.news ? viewThemesMini(S.news) : '<p class="loading">載入熱門題材…</p>'}</section>
 
 <div class="row">
@@ -724,7 +726,7 @@ ${footer()}`;
     if (!LIVE.timer) { LIVE.timer = setInterval(pollLive, 10000); document.addEventListener('visibilitychange', () => { if (!document.hidden) pollLive(); }); }
   }
   async function afterHome() {
-    fillIndexSection(); startLive();
+    fillIndexSection(); startLive(); bindIndustry(); fillIndHome();
     const P = holdings();
     if (P.rows.length) {
       const v = await portfolioVaR(P);
@@ -1101,6 +1103,7 @@ ${footer()}`;
   <div class="hd"><h1 id="s-h" style="margin:0;font-size:22px">${esc(key)} ${esc(it.name)}</h1><span class="note">${it.market === 'tw' ? '台股' : '美股'}・${esc(it.currency || '')}${pos ? `・持有 ${int(pos.shares)} 股` : ''}</span>
  <a class="small muted" href="${watchlistLink(key, it.name, true)}" target="_blank" rel="noopener" style="margin-left:auto">從觀察清單移除</a>
     <button type="button" class="btn sm" data-star="${esc(key)}" aria-pressed="${isStar(key)}">${isStar(key) ? '★ 已自選' : '☆ 加入自選'}</button></div>
+  <div id="ind-chips" class="ind-chips"></div>
   <div class="quote">
     <div><div style="display:flex;align-items:baseline;gap:12px"><span class="px">${px(it.price)}</span><span class="ch ${cls(it.changePct)}">${sign(it.price - it.prevClose)}${fix(Math.abs(it.price - it.prevClose), it.price >= 100 ? 1 : 2)}（${pct(it.changePct)}）</span></div>
       <div class="small muted">${esc(it.marketDate)}・成交量為 20 日均量 ${isNum(ta.relVolume) ? ta.relVolume.toFixed(1) : '—'} 倍</div></div>
@@ -2107,6 +2110,104 @@ ${footer()}`;
       render();
     });
   }
+  // ── 產業分類 ────────────────────────────────────────────────
+  let IND = null;
+  async function loadInd() { if (IND) return IND; try { IND = await getJSON(S.base + 'industries.json'); } catch (_) { IND = { groups: [], stocks: {}, bench: {} }; } return IND; }
+  const indTrack = () => LS.get('indTrack', []);
+  const indCustom = () => LS.get('indCustom', []);
+  /** 自訂產業：用產業資料裡的個股，沒有的用全市場清單（只有今日與 20 日） */
+  function customGroups(I, U) {
+    const byU = Object.fromEntries((U?.list || []).map(u => [u.k, u]));
+    return indCustom().map(g => {
+      const keys = g.keys || [];
+      for (const k of keys) if (!I.stocks[k] && byU[k]) I.stocks[k] = { n: byU[k].n, m: byU[k].m, c: byU[k].c, p: byU[k].p, r20: byU[k].r20 ?? null, a20: byU[k].a20 ?? null, lite: true };
+      const S0 = keys.map(k => I.stocks[k]).filter(Boolean), av = f => { const v = S0.map(f).filter(isNum); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+      const m = S0[0]?.m || 'tw', b = I.bench?.[m];
+      const st = S0.length ? { n: S0.length, chg: av(x => x.p), up: S0.filter(x => x.p > 0).length, down: S0.filter(x => x.p < 0).length, r5: av(x => x.r5), r20: av(x => x.r20), r60: av(x => x.r60), above20: Math.round(S0.filter(x => x.a20).length / S0.length * 100) } : null;
+      if (st && b) { st.rs5 = st.r5 != null && b.r5 != null ? st.r5 - b.r5 : null; st.rs20 = st.r20 != null && b.r20 != null ? st.r20 - b.r20 : null; }
+      return { id: 'c-' + g.id, name: g.name, m, desc: '自訂產業（只存在你的裝置與加密備份）', custom: true, stats: st, subs: [{ name: g.name, keys, stats: st }] };
+    });
+  }
+  const rsTxt = (v, b) => (isNum(v) ? `<span class="${cls(v)}">${v >= 0 ? '強於' : '弱於'}${esc(b?.name || '大盤')} ${fix(Math.abs(v), 1)}</span>` : '');
+  function indSpark(g, I) {
+    const s = g.stats; if (!s?.ser?.length) return '';
+    const b = I.bench?.[g.m], bs = b?.ser?.length ? b.ser.map(v => v / b.ser[0] * 100) : null;
+    const all = [...s.ser, ...(bs || [])], lo = Math.min(...all), hi = Math.max(...all), w = 300, h = 44;
+    const pts = a => a.map((v, i) => `${(i / (a.length - 1) * w).toFixed(1)},${(h - 3 - (v - lo) / ((hi - lo) || 1) * (h - 6)).toFixed(1)}`).join(' ');
+    const up = s.ser[s.ser.length - 1] >= 100;
+    return `<svg class="ind-sp" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">${bs ? `<polyline fill="none" stroke="var(--faint)" stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke" points="${pts(bs)}"/>` : ''}<polyline fill="none" stroke="var(--${up ? 'up' : 'down'})" stroke-width="1.8" vector-effect="non-scaling-stroke" points="${pts(s.ser)}"/></svg>`;
+  }
+  function indRow(g, I) {
+    const s = g.stats, tr = indTrack().includes(g.id), b = I.bench?.[g.m];
+    return `<div class="ind-g"><div class="pp-h"><a href="#/industry/${encodeURIComponent(g.id)}"><b>${esc(g.name)}</b></a><span><b class="${cls(s?.chg)}">${pct(s?.chg)}</b> <button type="button" class="btn sm ind-star" data-it="${esc(g.id)}" aria-pressed="${tr}">${tr ? '★ 追蹤中' : '☆ 追蹤'}</button></span></div>
+      ${s ? `<div class="small muted">漲 ${s.up}／跌 ${s.down}・5 日 <span class="${cls(s.r5)}">${pct(s.r5, 1)}</span>・20 日 <span class="${cls(s.r20)}">${pct(s.r20, 1)}</span>（${rsTxt(s.rs20, b)}）・站上月線 ${s.above20}%</div>${indSpark(g, I)}` : '<div class="small muted">尚無資料（下一次收盤後更新）</div>'}</div>`;
+  }
+  async function viewIndustry(id) {
+    const [I, U] = await Promise.all([loadInd(), loadUniverse()]);
+    const groups = [...(I.groups || []), ...customGroups(I, U)];
+    if (id) return viewIndustryOne(groups.find(g => g.id === id), I);
+    const srt = LS.get('indSort', 'r20'), key = { chg: s => s?.chg, r5: s => s?.r5, r20: s => s?.r20 }[srt] || (s => s?.r20);
+    const by = m => groups.filter(g => g.m === m).sort((a, b) => (key(b.stats) ?? -99) - (key(a.stats) ?? -99));
+    const tr = groups.filter(g => indTrack().includes(g.id));
+    const sec = (t, list) => (list.length ? `<section class="card"><div class="hd"><h2>${t}</h2></div><div class="pp-list">${list.map(g => indRow(g, I)).join('')}</div></section>` : '');
+    return `<div><a href="#/" class="small">← 回總覽</a></div>
+      <section class="card"><div class="hd"><h1 style="margin:0;font-size:20px">產業分類</h1><span class="note">等權平均；實線＝產業近 60 日走勢，虛線＝大盤（${esc(I.bench?.tw?.name || '加權指數')}／${esc(I.bench?.us?.name || '標普 500')}）・資料 ${I.at ? esc(tpeTime(I.at)) : '—'}</span></div>
+      <div class="filters">${seg('indsort', srt, [['chg', '今日'], ['r5', '5 日'], ['r20', '20 日']])}</div></section>
+      ${sec('★ 我追蹤的產業', tr)}${sec('台股產業', by('tw'))}${sec('美股產業', by('us'))}
+      <section class="card"><div class="hd"><h2>建立自訂產業</h2><span class="note">例如自己的「AI 伺服器 PCB 概念股」；存在這台裝置並跟著加密備份同步</span></div>
+        <form id="ind-new" class="form" style="max-width:520px"><div class="field"><label for="ind-name">名稱</label><input id="ind-name" required maxlength="20" placeholder="例如：高層數板"></div>
+        <div class="field"><label for="ind-keys">股票代號（逗號或空白分隔）</label><input id="ind-keys" required placeholder="2368 3044 2383 6274"></div>
+        <div class="actions"><button class="btn primary" type="submit">建立</button></div></form>
+        ${indCustom().length ? `<div class="pp-list">${indCustom().map(g => `<div class="pp-row small">${esc(g.name)}：${esc(g.keys.join('、'))} <button type="button" class="btn sm danger" data-indel="${esc(g.id)}">刪除</button></div>`).join('')}</div>` : ''}</section>${footer()}`;
+  }
+  function viewIndustryOne(g, I) {
+    if (!g) return `<div><a href="#/industry" class="small">← 產業分類</a></div><section class="card"><p class="empty">找不到這個產業。</p></section>`;
+    const s = g.stats, b = I.bench?.[g.m], tr = indTrack().includes(g.id), items = S.snap.items || {};
+    const row = k => {
+      const x = I.stocks[k]; if (!x) return `<div class="pp-row small muted">${esc(k)}：沒有資料</div>`;
+      const it = items[k], href = it ? `#/s/${encodeURIComponent(k)}` : `#/q/${encodeURIComponent(k)}`;
+      const sig = it?.signal ? `<span class="tag ${sigCls(it.signal.sig)}" style="margin-left:6px">${SIG[it.signal.sig]}</span>` : '';
+      return `<a class="pp-row" href="${href}"><div class="pp-h"><span><b>${esc(x.n || k)}</b> <span class="small muted">${esc(k)}</span>${sig}${isStar(k) ? ' <span class="staron">★</span>' : ''}</span><span><span class="mono">${px(it?.price ?? x.c)}</span> <b class="${cls(it?.changePct ?? x.p)}">${pct(it?.changePct ?? x.p)}</b></span></div>
+        <div class="small muted">5 日 <span class="${cls(x.r5)}">${pct(x.r5, 1)}</span>・20 日 <span class="${cls(x.r20)}">${pct(x.r20, 1)}</span>${isNum(x.r60) ? `・60 日 <span class="${cls(x.r60)}">${pct(x.r60, 1)}</span>` : ''}・${x.a20 == null ? '' : x.a20 ? '站上月線' : '<span class="down">跌破月線</span>'}${isNum(x.hi) ? `・距 52 週高 ${fix(x.hi, 1)}%` : ''}${x.lite ? '・（只有今日與 20 日資料）' : ''}</div></a>`;
+    };
+    const subs = g.subs.map(sb => { const st = sb.stats; const ks = [...sb.keys].sort((a, c) => (I.stocks[c]?.r20 ?? -99) - (I.stocks[a]?.r20 ?? -99));
+      return `<section class="card"><div class="hd"><h2>${esc(sb.name)}</h2>${st && g.subs.length > 1 ? `<span class="note">今日 <b class="${cls(st.chg)}">${pct(st.chg)}</b>・20 日 <span class="${cls(st.r20)}">${pct(st.r20, 1)}</span>・${rsTxt(st.rs20, b)}</span>` : ''}</div><div class="pp-list">${ks.map(row).join('')}</div></section>`; }).join('');
+    return `<div><a href="#/industry" class="small">← 產業分類</a></div>
+      <section class="card"><div class="hd"><h1 style="margin:0;font-size:20px">${esc(g.name)}</h1><button type="button" class="btn sm ind-star" data-it="${esc(g.id)}" aria-pressed="${tr}" style="margin-left:auto">${tr ? '★ 追蹤中' : '☆ 追蹤'}</button></div>
+        <p class="small muted" style="margin:0">${esc(g.desc || '')}</p>
+        ${s ? `<div class="ind-kpi"><div><span class="small muted">今日</span><b class="${cls(s.chg)}">${pct(s.chg)}</b><span class="small muted">漲 ${s.up}／跌 ${s.down}</span></div><div><span class="small muted">5 日</span><b class="${cls(s.r5)}">${pct(s.r5, 1)}</b><span class="small">${rsTxt(s.rs5, b)}</span></div><div><span class="small muted">20 日</span><b class="${cls(s.r20)}">${pct(s.r20, 1)}</b><span class="small">${rsTxt(s.rs20, b)}</span></div><div><span class="small muted">站上月線</span><b>${s.above20}%</b><span class="small muted">${s.n} 檔</span></div></div>
+        ${indSpark(g, I)}<p class="small muted" style="margin:0">實線＝產業等權走勢（近 60 個交易日），虛線＝${esc(b?.name || '大盤')}。觀察清單內的股票會顯示買賣訊號與即時價格。</p>` : ''}</section>
+      ${subs}${footer()}`;
+  }
+  function bindIndustry() {
+    const mn = $('#main'); if (!mn || mn._ind) return; mn._ind = true;
+    mn.addEventListener('click', e => {
+      if (!S.route.startsWith('industry') && S.route !== 'home') return;
+      const st = e.target.closest('.ind-star'); if (st) { e.preventDefault(); const id = st.dataset.it, T = indTrack(); LS.set('indTrack', T.includes(id) ? T.filter(x => x !== id) : [...T, id]); toast(T.includes(id) ? '已取消追蹤' : '已追蹤，盤前資訊與週報會附上這個產業'); render(); return; }
+      const so = e.target.closest('[data-of="indsort"]'); if (so) { LS.set('indSort', so.dataset.v); render(); return; }
+      const dl = e.target.closest('[data-indel]'); if (dl) { if (!confirm('刪除這個自訂產業？')) return; LS.set('indCustom', indCustom().filter(g => g.id !== dl.dataset.indel)); render(); }
+    });
+    mn.addEventListener('submit', e => {
+      if (e.target.id !== 'ind-new') return; e.preventDefault();
+      const name = $('#ind-name').value.trim(), keys = [...new Set($('#ind-keys').value.toUpperCase().split(/[\s,，、]+/).filter(Boolean))];
+      if (!name || !keys.length) return;
+      const id = Date.now().toString(36); LS.set('indCustom', [...indCustom(), { id, name, keys }]); LS.set('indTrack', [...indTrack(), 'c-' + id]); toast('已建立並追蹤'); render();
+    });
+  }
+  async function fillIndHome() {
+    const box = $('#indhome'); if (!box) return;
+    const [I, U] = await Promise.all([loadInd(), loadUniverse()]); if (S.route !== 'home') return;
+    const groups = [...(I.groups || []), ...customGroups(I, U)], tr = groups.filter(g => indTrack().includes(g.id));
+    const list = tr.length ? tr : [...(I.groups || [])].filter(g => g.stats).sort((a, b) => (b.stats.chg ?? -99) - (a.stats.chg ?? -99)).slice(0, 3);
+    box.innerHTML = `<div class="hd"><h2 id="ih-h">${tr.length ? '我追蹤的產業' : '產業分類'}</h2><span class="note">${tr.length ? '' : '今天漲最多的 3 個產業；按「☆ 追蹤」就會固定顯示在這裡'}</span><a class="act btn sm" href="#/industry">全部產業</a></div>${list.length ? `<div class="pp-list">${list.map(g => indRow(g, I)).join('')}</div>` : '<p class="small muted" style="margin:0">產業資料會在下一次更新後出現。</p>'}`;
+  }
+  async function fillIndChips(key) {
+    const el = $('#ind-chips'); if (!el) return;
+    const I = await loadInd(), gs = [];
+    for (const g of I.groups || []) for (const sb of g.subs) if (sb.keys.includes(key)) gs.push([g, sb]);
+    for (const g of indCustom()) if (g.keys.includes(key)) gs.push([{ id: 'c-' + g.id, name: g.name }, null]);
+    el.innerHTML = gs.map(([g, sb]) => `<a class="chip" href="#/industry/${encodeURIComponent(g.id)}">${esc(g.name)}${sb && g.subs?.length > 1 ? '・' + esc(sb.name) : ''}</a>`).join('');
+  }
   function viewScorecard() {
     const sc = S.snap.scorecard, st = S.snap.status || {};
     const STZ = { yahoo: 'Yahoo 報價', vix: 'VIX 恐慌指數', treasury: '美國公債殖利率', t86: '三大法人（TWSE）', finmind: 'FinMind 法人／營收', fundamentals: '美股基本面', breadth: '台股寬度（收盤歷史）', futures: '外資台指期', putcall: '選擇權 P/C 比', valuation: '台股估值', margin: '融資餘額', usValuation: '標普本益比', fred: 'FRED 信用／壓力', indices: '指數推論', ai: '雲端 AI 解讀', tdcc: '集保大戶', exdiv: '除權息', tpex: '上櫃行情', usUniverse: '美股清單', universe: '搜尋清單', usFinancials: '美股財報', twFinancials: '台股財報' };
@@ -2206,7 +2307,7 @@ ${footer()}`;
 
   // ── 個人資料：加密雲端備份與多裝置同步（GitHub 私密 Gist，AES-256-GCM）──
   // 資料在瀏覽器裡用你的密語加密後才上傳；GitHub 和任何人沒有密語都讀不到內容。
-  const SYNC_KEYS = ['holdings', 'journal', 'stars', 'alerts', 'approvals'];
+  const SYNC_KEYS = ['holdings', 'journal', 'stars', 'alerts', 'approvals', 'indTrack', 'indCustom'];
   const B64 = { enc: u8 => btoa(String.fromCharCode(...u8)), dec: s => Uint8Array.from(atob(s), c => c.charCodeAt(0)) };
   async function deriveKey(pass, salt, iter) {
     const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveKey']);
@@ -2225,11 +2326,11 @@ ${footer()}`;
   }
   const SY = { get: () => LS.get('sync', { token: '', pass: '', gist: '', last: null, err: null }), set: o => LS.set('sync', Object.assign(SY.get(), o)) };
   const stamp = k => { const t = LS.get('ts', {}); t[k] = Date.now(); LS.set('ts', t); };
-  function bundle() { return { v: 1, at: Date.now(), ts: LS.get('ts', {}), holdings: H.load(), journal: J.load(), stars: stars(), alerts: alerts(), limits: cfg.limits, approvals: LS.get('approvals', {}) }; }
+  function bundle() { return { v: 1, at: Date.now(), ts: LS.get('ts', {}), holdings: H.load(), journal: J.load(), stars: stars(), alerts: alerts(), limits: cfg.limits, approvals: LS.get('approvals', {}), indTrack: LS.get('indTrack', []), indCustom: LS.get('indCustom', []) }; }
   /** 合併：決策、市場感覺取聯集（刪除以墓碑記錄）；論點取較新；持股、自選、提醒依各自時間戳取較新 */
   function mergeBundle(remote) {
     const lt = LS.get('ts', {}), rt = remote.ts || {};
-    for (const k of ['holdings', 'stars', 'alerts']) if ((rt[k] || 0) > (lt[k] || 0) && remote[k] != null) { localStorage.setItem(k, JSON.stringify(remote[k])); lt[k] = rt[k]; }
+    for (const k of ['holdings', 'stars', 'alerts', 'indTrack', 'indCustom']) if ((rt[k] || 0) > (lt[k] || 0) && remote[k] != null) { localStorage.setItem(k, JSON.stringify(remote[k])); lt[k] = rt[k]; }
     { const a0 = LS.get('approvals', {}), r0 = remote.approvals || {}; let ch = false; for (const [k, v] of Object.entries(r0)) if (!a0[k] || String(a0[k].at) < String(v.at)) { a0[k] = v; ch = true; } if (ch) localStorage.setItem('approvals', JSON.stringify(a0)); }
     if ((rt.limits || 0) > (lt.limits || 0) && remote.limits) { cfg.limits = Object.assign({}, cfg.limits, remote.limits); saveCfg(); lt.limits = rt.limits; }
     const a = J.load(), b = remote.journal || {};
@@ -2374,7 +2475,7 @@ ${footer()}`;
       main.innerHTML = '<p class="loading">載入走勢…</p>';
       const b = await loadBars(key);
       if (S.route !== 's/' + key) return;
-      main.innerHTML = viewStock(key, b); document.title = `${key} ${nameOf(key)}・訊號終端`;
+      main.innerHTML = viewStock(key, b); document.title = `${key} ${nameOf(key)}・訊號終端`; fillIndChips(key);
       main.querySelector('footer')?.insertAdjacentHTML('beforebegin', '<section class="card fold all" data-fold="snews" data-def="1" id="s-news" aria-labelledby="sn-h" hidden></section>');
       if (!$('#s-news')) main.insertAdjacentHTML('beforeend', '<section class="card fold all" data-fold="snews" data-def="1" id="s-news" aria-labelledby="sn-h" hidden></section>');
       bindStock(key); bindMine(key); setupFolds();
@@ -2392,6 +2493,7 @@ ${footer()}`;
     else if (S.route === 'news') { main.innerHTML = '<p class="loading">載入新聞…</p>'; const [N] = await Promise.all([loadNews(), loadUniverse()]); if (S.route !== 'news') return; main.innerHTML = viewNews(N); { const ev = viewPcEvents(); if (ev) main.querySelector('#dgs-h')?.closest('section')?.insertAdjacentHTML('afterend', ev); } bindDigest(); setupFolds(); document.title = '新聞・訊號終端'; }
     else if (S.route === 'journal') { main.innerHTML = viewJournal(); document.title = '我的成績單・訊號終端'; afterJournal(); }
     else if (S.route === 'scorecard') { main.innerHTML = viewScorecard(); document.title = '模型成績・訊號終端'; if (SY.get().token) loadRemote().then(() => { if (S.route !== 'scorecard' || $('#pcs-h')) return; const h = viewPcScore(); if (h) main.querySelector('footer')?.insertAdjacentHTML('beforebegin', h); }); }
+    else if (S.route === 'industry') { main.innerHTML = '<p class="loading">載入產業分類…</p>'; const html = await viewIndustry(decodeURIComponent(h.split('/')[1] || '')); if (S.route !== 'industry') return; main.innerHTML = html; bindIndustry(); document.title = '產業分類・訊號終端'; }
     else if (S.route === 'decide') { main.innerHTML = viewDecide(); bindDecide(); document.title = '待你確認・訊號終端'; }
     else if (S.route === 'paper') { main.innerHTML = viewPaper(); document.title = '虛擬跟單・訊號終端'; }
     else if (S.route === 'settings') { main.innerHTML = viewSettings(); bindSettings(); document.title = '設定・訊號終端'; }
