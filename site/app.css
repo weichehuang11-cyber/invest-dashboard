@@ -343,10 +343,13 @@ table.corr { min-width: 0; }
   .main > .row { display: contents; }
   .main > .row > * { flex: 0 0 auto; width: 100%; }
   .main > * { order: 50; }
+  .main > .decide-nudge { order: 0; }
+  .main #live { order: 0; }
   .main > .verdict { order: 1; }
   .main section[aria-labelledby="pf-h"] { order: 2; }
   .main section[aria-labelledby="chg-h"] { order: 3; }
   .main #opps { order: 4; }
+  .main #indhome { order: 4; }
   .main section[aria-labelledby="env-h"] { order: 5; }
   .main #idx { order: 6; }
   .main section[aria-labelledby="hl-h"] { order: 7; }
