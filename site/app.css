@@ -611,3 +611,7 @@ button, a, select, input, .btn { touch-action: manipulation; }
 .ind-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 6px; }
 .ind-chips:empty { display: none; }
 .ind-chips .chip { padding: 3px 10px; border-radius: 999px; background: var(--acc-bg); color: var(--acc); font-size: 12px; text-decoration: none; }
+.lv-link { cursor: pointer; }
+.lv-pos { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ixlive { margin: 4px 0 6px; padding: 6px 8px; border-radius: 8px; background: var(--bg); font-size: 14px; }
+.ixlive .lv-s { font-size: 11px; }

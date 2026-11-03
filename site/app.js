@@ -19,7 +19,7 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.6.3';
+  const APP_VERSION = '1.7.0';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -692,6 +692,31 @@ ${footer()}`;
   const LIVE = { data: null, at: 0, err: null, timer: null, prev: {} };
   const LV_FALLBACK = [['TWII', '^TWII', '加權指數'], ['GSPC', '^GSPC', '標普 500'], ['IXIC', '^IXIC', '那斯達克'], ['SOX', '^SOX', '費城半導體']];
   const LV_STATE = { open: ['盤中', 'ok'], night: ['夜盤', 'ok'], closed: ['收盤', ''] };
+  // 即時價格對照指數的推論：支撐壓力、5 日推論分布的位置
+  const LV_IDX = { TWII: '^TWII', GSPC: '^GSPC', IXIC: '^IXIC', SOX: '^SOX' };
+  const IDX_LV = Object.fromEntries(Object.entries(LV_IDX).map(([a, b]) => [b, a]));
+  function livePos(ik, price) {
+    const o = S.snap.indices?.[ik]?.outlook; if (!o || !isNum(price)) return null;
+    const sup = (o.sr?.support || []).filter(x => isNum(x.p)), res = (o.sr?.resistance || []).filter(x => isNum(x.p));
+    const broke = sup.filter(x => price < x.p).sort((a, b) => b.p - a.p)[0], over = res.filter(x => price > x.p).sort((a, b) => a.p - b.p).pop();
+    const ns = sup.filter(x => price >= x.p).sort((a, b) => b.p - a.p)[0], nr = res.filter(x => price <= x.p).sort((a, b) => a.p - b.p)[0];
+    let lv;
+    if (broke) lv = { t: `跌破支撐 ${px(broke.p)}（${broke.label}）`, c: 'down' };
+    else if (over) lv = { t: `站上壓力 ${px(over.p)}（${over.label}）`, c: 'up' };
+    else lv = { t: `撐 ${ns ? px(ns.p) : '—'}・壓 ${nr ? px(nr.p) : '—'}`, c: '' };
+    if (!broke && ns && (price / ns.p - 1) * 100 < 0.5) lv = { t: `逼近支撐 ${px(ns.p)}（${ns.label}）`, c: 'down' };
+    if (!over && nr && (nr.p / price - 1) * 100 < 0.5) lv = { t: `逼近壓力 ${px(nr.p)}（${nr.label}）`, c: 'up' };
+    const q = o.forecast?.h5?.q; let pc = null;
+    if (q?.length === 5) { const P = [10, 25, 50, 75, 90]; if (price <= q[0]) pc = 5; else if (price >= q[4]) pc = 95; else for (let i = 0; i < 4; i++) if (price <= q[i + 1]) { pc = Math.round(P[i] + (P[i + 1] - P[i]) * (price - q[i]) / ((q[i + 1] - q[i]) || 1)); break; } }
+    const fc = pc == null ? null : pc <= 10 ? { t: `已到 5 日推論區間下緣（${px(q[0])}）`, c: 'down' } : pc >= 90 ? { t: `已到 5 日推論區間上緣（${px(q[4])}）`, c: 'up' } : { t: `落在 5 日推論分布第 ${pc} 百分位`, c: '' };
+    return { lv, fc, pc };
+  }
+  function liveIdxHtml(ik) {
+    const k = IDX_LV[ik], v = LIVE.data?.items?.[k]; if (!v || !isNum(v.price)) return '';
+    const P = livePos(ik, v.price), st = LV_STATE[v.state];
+    return `<div class="ixlive"><span class="lv-s ${st?.[1] || ''}">${st ? '即時・' + st[0] : '即時'}</span> <b class="mono">${px(v.price)}</b> <span class="mono ${cls(v.chgPct)}">${pct(v.chgPct)}</span> <span class="small muted">${v.time ? hms(v.time) : ''}</span>
+      ${P ? `<div class="small"><span class="${P.lv.c}">${P.lv.t}</span>${P.fc ? `・<span class="${P.fc.c}">${P.fc.t}</span>` : ''}</div>` : ''}</div>`;
+  }
   const hms = iso => new Date(iso).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   function liveSpark(a, up) {
     const v = (a || []).filter(isNum); if (v.length < 2) return '<div class="lv-sp"></div>';
@@ -707,9 +732,9 @@ ${footer()}`;
       const up = (v.chgPct ?? 0) >= 0, st = LV_STATE[v.state], moved = LIVE.prev[k] != null && LIVE.prev[k] !== v.price;
       const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10), td = v.time && new Date(Date.parse(v.time) + 8 * 3600000).toISOString().slice(0, 10);
       const tm = v.state === 'snap' ? `網站資料 ${tpeTime(v.time)}` : `${!v.time ? '—' : td === today ? hms(v.time) : tpeTime(v.time)}${v.delay && v.state !== 'closed' ? `・延遲約 ${v.delay} 分` : ''}`;
-      return `<div class="lv-t${moved ? ' lv-flash' : ''}${v.ok === false ? ' lv-bad' : ''}"><div class="lv-n">${esc(v.name)}${st ? `<span class="lv-s ${st[1]}">${st[0]}</span>` : ''}</div>
+      return `<div class="lv-t${moved ? ' lv-flash' : ''}${v.ok === false ? ' lv-bad' : ''}${LV_IDX[k] ? ' lv-link' : ''}"${LV_IDX[k] ? ` data-lvidx="${LV_IDX[k]}" role="button" tabindex="0" title="看走勢與推論"` : ''}><div class="lv-n">${esc(v.name)}${st ? `<span class="lv-s ${st[1]}">${st[0]}</span>` : ''}</div>
         <div class="lv-p mono">${px(v.price)}</div><div class="lv-c ${cls(v.chgPct)}">${isNum(v.chg) ? sign(v.chg) + fix(v.chg, Math.abs(v.chg) >= 100 ? 0 : 2) : ''} ${pct(v.chgPct)}</div>
-        ${liveSpark(v.spark, up)}<div class="lv-m">${tm}</div></div>`;
+        ${liveSpark(v.spark, up)}${(() => { const ik = LV_IDX[k], P = ik && v.state !== 'snap' ? livePos(ik, v.price) : null; return P ? `<div class="lv-pos ${P.lv.c}">${P.lv.t.replace(/（.*?）/g, '')}</div>` : ''; })()}<div class="lv-m">${tm}</div></div>`;
     };
     const note = !nasBase() ? '非即時：在「設定」填入 NAS 網址，就會每 10～60 秒自動更新' : !/^https:\/\//.test(nasBase()) ? `非即時：NAS 網址要 https 開頭（目前是 ${esc(nasBase())}）` : !L ? (LIVE.err ? `NAS 連不到（${esc(LIVE.err)}）：${esc(nasBase())}/live.json，先顯示網站資料` : '連線 NAS…') : fresh ? `NAS 即時・${hms(L.at)} 更新・開盤中每 10～60 秒` : `NAS 資料停在 ${hms(L.at)}（連線中斷？）`;
     return `<div class="hd"><h2 id="lv-h">即時行情</h2><span class="note">${note}</span></div><div class="lv-grid">${tiles.map(tile).join('') || '<p class="empty">沒有資料</p>'}</div>`;
@@ -719,9 +744,11 @@ ${footer()}`;
     try { const d = await getJSON(nasBase() + '/live.json?t=' + Date.now(), 6000); LIVE.prev = Object.fromEntries(Object.entries(LIVE.data?.items || {}).map(([k, v]) => [k, v.price])); LIVE.data = d; LIVE.at = Date.now(); LIVE.err = null; }
     catch (e) { LIVE.err = e.name === 'AbortError' ? '逾時' : e.message; }
     const box = $('#live'); if (box && S.route === 'home') box.innerHTML = viewLive();
+    const il = $('#ix-live'); if (il && S.route === 'home') il.innerHTML = liveIdxHtml(S.idx);
   }
   function startLive() {
     pollLive();
+    const mn = $('#main'); if (mn && !mn._lv) { mn._lv = true; mn.addEventListener('click', e => { const t = S.route === 'home' && e.target.closest('[data-lvidx]'); if (!t) return; const ik = t.dataset.lvidx; if (S.snap.indices?.[ik]) { S.idx = ik; LS.set('idx', ik); fillIndexSection().then(() => $('#idx')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); } }); }
     if (!LIVE.timer) { LIVE.timer = setInterval(pollLive, 10000); document.addEventListener('visibilitychange', () => { if (!document.hidden) pollLive(); }); }
   }
   async function afterHome() {
@@ -880,7 +907,7 @@ ${footer()}`;
     const it = ix[S.idx], b = await loadBars(S.idx);
     return `<div class="hd"><h2 id="ix-h">指數走勢與推論</h2><span class="note">${it.years ? `以 ${it.years} 年日 K 回測` : ''}・${esc(it.marketDate || '')}</span></div>
       ${seg('idx', S.idx, ks.map(k => [k, ix[k].name]))}
-      <div class="ixgrid"><div class="chart"><div class="ixq"><b class="mono" style="font-size:22px">${px(it.price)}</b><span class="mono ${cls(it.changePct)}">${pct(it.changePct)}</span></div>${b ? chartHtml('idx', b, { outlook: it.outlook, label: it.name, kind: 'idx' }) : '<p class="empty">走勢資料載入失敗</p>'}<div class="fh">${outlookLeft(it.outlook)}</div></div>
+      <div class="ixgrid"><div class="chart"><div class="ixq"><b class="mono" style="font-size:22px">${px(it.price)}</b><span class="mono ${cls(it.changePct)}">${pct(it.changePct)}</span><span class="small muted">網站資料</span></div><div id="ix-live">${liveIdxHtml(S.idx)}</div>${b ? chartHtml('idx', b, { outlook: it.outlook, label: it.name, kind: 'idx' }) : '<p class="empty">走勢資料載入失敗</p>'}<div class="fh">${outlookLeft(it.outlook)}</div></div>
       <div class="opanel fh">${outlookPanel(it.outlook, it.price)}</div></div>`;
   }
   async function fillIndexSection() {
