@@ -1,0 +1,23 @@
+# 訊號終端專用的 Tailscale 節點：和 NAS 上其他服務（記帳、健身…）完全分開的網址
+#   https://signal.你的tailnet.ts.net  →  NAS 的 8765（訊號終端伺服器）
+#
+# 使用方式（NAS 上）：
+#   1. 到 Tailscale 管理頁 Settings → Keys 產生一把 Auth key，貼到同資料夾的 .env：TS_AUTHKEY=tskey-auth-…
+#   2. 確認 serve.json 裡的 NAS 區網 IP 正確（預設 192.168.1.133）
+#   3. cd /volume2/homes/invest-dashboard/nas/tailscale && sudo docker compose up -d
+#      （或在 Container Manager → 專案 → 新增，路徑選這個資料夾）
+services:
+  ts-signal:
+    image: tailscale/tailscale:stable
+    container_name: ts-signal
+    hostname: signal
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TS_HOSTNAME=signal
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+      - TS_USERSPACE=true
+    volumes:
+      - ./state:/var/lib/tailscale
+      - ./serve.json:/config/serve.json:ro

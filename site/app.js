@@ -19,7 +19,7 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.7.0';
+  const APP_VERSION = '1.7.1';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2165,7 +2165,7 @@ ${footer()}`;
   }
   function indRow(g, I) {
     const s = g.stats, tr = indTrack().includes(g.id), b = I.bench?.[g.m];
-    return `<div class="ind-g"><div class="pp-h"><a href="#/industry/${encodeURIComponent(g.id)}"><b>${esc(g.name)}</b></a><span><b class="${cls(s?.chg)}">${pct(s?.chg)}</b> <button type="button" class="btn sm ind-star" data-it="${esc(g.id)}" aria-pressed="${tr}">${tr ? '★ 追蹤中' : '☆ 追蹤'}</button></span></div>
+    return `<div class="ind-g" data-ind="${esc(g.id)}" role="link" tabindex="0" title="看 ${esc(g.name)} 的成分股"><div class="pp-h"><a href="#/industry/${encodeURIComponent(g.id)}"><b>${esc(g.name)}</b> <span class="ind-go">${s?.n ? s.n + ' 檔 ›' : '›'}</span></a><span><b class="${cls(s?.chg)}">${pct(s?.chg)}</b> <button type="button" class="btn sm ind-star" data-it="${esc(g.id)}" aria-pressed="${tr}">${tr ? '★ 追蹤中' : '☆ 追蹤'}</button></span></div>
       ${s ? `<div class="small muted">漲 ${s.up}／跌 ${s.down}・5 日 <span class="${cls(s.r5)}">${pct(s.r5, 1)}</span>・20 日 <span class="${cls(s.r20)}">${pct(s.r20, 1)}</span>（${rsTxt(s.rs20, b)}）・站上月線 ${s.above20}%</div>${indSpark(g, I)}` : '<div class="small muted">尚無資料（下一次收盤後更新）</div>'}</div>`;
   }
   async function viewIndustry(id) {
@@ -2209,6 +2209,7 @@ ${footer()}`;
     const mn = $('#main'); if (!mn || mn._ind) return; mn._ind = true;
     mn.addEventListener('click', e => {
       if (!S.route.startsWith('industry') && S.route !== 'home') return;
+      const row = e.target.closest('[data-ind]'); if (row && !e.target.closest('.ind-star, a')) { location.hash = '#/industry/' + encodeURIComponent(row.dataset.ind); return; }
       const st = e.target.closest('.ind-star'); if (st) { e.preventDefault(); const id = st.dataset.it, T = indTrack(); LS.set('indTrack', T.includes(id) ? T.filter(x => x !== id) : [...T, id]); toast(T.includes(id) ? '已取消追蹤' : '已追蹤，盤前資訊與週報會附上這個產業'); render(); return; }
       const so = e.target.closest('[data-of="indsort"]'); if (so) { LS.set('indSort', so.dataset.v); render(); return; }
       const dl = e.target.closest('[data-indel]'); if (dl) { if (!confirm('刪除這個自訂產業？')) return; LS.set('indCustom', indCustom().filter(g => g.id !== dl.dataset.indel)); render(); }

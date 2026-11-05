@@ -6,3 +6,5 @@ archive/
 .DS_Store
 
 nas/.env
+nas/tailscale/.env
+nas/tailscale/state/
