@@ -7,4 +7,5 @@ archive/
 
 nas/.env
 nas/tailscale/.env
-nas/tailscale/state/
+nas/tailscale/state/*
+!nas/tailscale/state/.gitkeep
