@@ -67,8 +67,10 @@ jobs:
             # 其餘盤中：台股 09:05–13:40、美股開盤到收盤後 20 分鐘；資料超過 25 分鐘才更新
             elif { [ $TW_OPEN = 1 ] && [ $HM -ge 545 ] && [ $HM -le 820 ]; } || { [ $US_OPEN = 1 ] && { [ $HM -ge $OPEN ] || [ $HM -le $((CLOSE + 20)) ]; }; }; then
               [ $AGE -ge 25 ] && [ $SINCE -ge 20 ] && kick ""
-            # 兩邊都休市：每 3 小時一次
-            elif [ $TW_OPEN = 0 ] && [ $US_OPEN = 0 ] && [ $AGE -ge 180 ] && [ $SINCE -ge 60 ]; then kick ""
+            # 非開盤時間不更新；只在盤前資訊與週報之前各補一次（讓新聞與判斷是新的）
+            elif [ $TW_OPEN = 1 ] && [ $HM -ge 460 ] && [ $HM -lt 485 ] && [ $AGE -ge 60 ] && [ $SINCE -ge 30 ]; then kick ""
+            elif [ $US_OPEN = 1 ] && [ $HM -ge $((OPEN - 70)) ] && [ $HM -lt $((OPEN - 45)) ] && [ $AGE -ge 60 ] && [ $SINCE -ge 30 ]; then kick ""
+            elif [ $DOW = 7 ] && [ $HM -ge 1160 ] && [ $HM -lt 1190 ] && [ $AGE -ge 60 ] && [ $SINCE -ge 30 ]; then kick ""
             fi
             sleep 120
           done

@@ -39,7 +39,24 @@ function local(tz) {
   const wd = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[p.weekday];
   return { wd, hm: (+p.hour % 24) * 60 + +p.minute };
 }
+// 國定假日／美股假日：每天查一次（查不到就只看週末與時段）
+let Hol = null; try { Hol = require('../pipeline/lib/holidays'); } catch (_) { Hol = null; }
+const holCache = {};
+async function refreshHolidays() {
+  if (!Hol) return;
+  for (const [m, tz] of [['tw', 'Asia/Taipei'], ['us', 'America/New_York']]) {
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+    if (holCache[m]?.day === day) continue;
+    try { holCache[m] = { day, open: await Hol.isTradingDay(m, day) }; } catch (_) { holCache[m] = { day, open: true }; }
+  }
+}
+const holidayClosed = s => ((s === 'tw' || s === 'txfDay') && holCache.tw?.open === false) || (s === 'us' && holCache.us?.open === false);
 function session(s) {
+  const r = sessionRaw(s);
+  if (r === 'open' && holidayClosed(s === 'txf' ? 'txfDay' : s)) return 'closed';
+  return r;
+}
+function sessionRaw(s) {
   if (s === 'tw') { const t = local('Asia/Taipei'); return t.wd >= 1 && t.wd <= 5 && t.hm >= 510 && t.hm <= 820 ? 'open' : 'closed'; }       // 08:30–13:40（含試撮）
   if (s === 'txf') { const t = local('Asia/Taipei'); if (t.wd >= 1 && t.wd <= 5 && t.hm >= 525 && t.hm <= 830) return 'open'; if ((t.wd >= 1 && t.wd <= 5 && t.hm >= 900) || (t.wd >= 2 && t.wd <= 6 && t.hm <= 305)) return 'night'; return 'closed'; }
   if (s === 'us') { const t = local('America/New_York'); return t.wd >= 1 && t.wd <= 5 && t.hm >= 570 && t.hm <= 965 ? 'open' : 'closed'; }
@@ -95,6 +112,7 @@ async function yahoo(sym) {
 // ── 狀態與排程 ──────────────────────────────────────────────
 const live = { at: null, items: {} };
 const due = {};
+const afterClose = {};   // 收盤後已經抓了幾次
 const spark = {};   // 證交所／期交所沒有分 K：自己每分鐘記一點
 const ysp = {};     // 自己記的點太少時（剛啟動），先用 Yahoo 一分 K 補走勢線（每 5 分鐘更新）
 async function yahooSpark(sym) {
@@ -110,11 +128,16 @@ function addSpark(key, time, price) {
   if (S.pts.length > 1200) S.pts.shift();
 }
 async function tick(force) {
+  await refreshHolidays();
   const now = Date.now(), jobs = [];
   const twItems = LIST.filter(x => x.src === 'twse');
   for (const it of LIST) {
     const sess = session(it.sess), every = (sess === 'closed' ? 600 : it.every) * 1000;
+    // 休市時不更新：收盤後再抓兩次（剛收盤、10 分鐘後確認收盤價）就停，等下次開盤
+    if (sess !== 'closed') afterClose[it.key] = 0;
+    else if (live.items[it.key]?.ok && (afterClose[it.key] || 0) >= 2 && !force) { if (live.items[it.key]) live.items[it.key].state = 'closed'; continue; }
     if (!force && due[it.key] && now < due[it.key]) continue;
+    if (sess === 'closed') { afterClose[it.key] = (afterClose[it.key] || 0) + 1; if (it.src === 'twse') for (const x of twItems) afterClose[x.key] = afterClose[it.key]; }
     if (it.src === 'twse') { if (it !== twItems[0]) continue; }
     due[it.key] = now + every; if (it.src === 'twse') for (const x of twItems) due[x.key] = now + every;
     jobs.push((async () => {

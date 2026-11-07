@@ -19,7 +19,7 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.7.1';
+  const APP_VERSION = '1.7.2';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -736,11 +736,13 @@ ${footer()}`;
         <div class="lv-p mono">${px(v.price)}</div><div class="lv-c ${cls(v.chgPct)}">${isNum(v.chg) ? sign(v.chg) + fix(v.chg, Math.abs(v.chg) >= 100 ? 0 : 2) : ''} ${pct(v.chgPct)}</div>
         ${liveSpark(v.spark, up)}${(() => { const ik = LV_IDX[k], P = ik && v.state !== 'snap' ? livePos(ik, v.price) : null; return P ? `<div class="lv-pos ${P.lv.c}">${P.lv.t.replace(/（.*?）/g, '')}</div>` : ''; })()}<div class="lv-m">${tm}</div></div>`;
     };
-    const note = !nasBase() ? '非即時：在「設定」填入 NAS 網址，就會每 10～60 秒自動更新' : !/^https:\/\//.test(nasBase()) ? `非即時：NAS 網址要 https 開頭（目前是 ${esc(nasBase())}）` : !L ? (LIVE.err ? `NAS 連不到（${esc(LIVE.err)}）：${esc(nasBase())}/live.json，先顯示網站資料` : '連線 NAS…') : fresh ? `NAS 即時・${hms(L.at)} 更新・開盤中每 10～60 秒` : `NAS 資料停在 ${hms(L.at)}（連線中斷？）`;
+    const note = !nasBase() ? '非即時：在「設定」填入 NAS 網址，就會每 10～60 秒自動更新' : !/^https:\/\//.test(nasBase()) ? `非即時：NAS 網址要 https 開頭（目前是 ${esc(nasBase())}）` : !L ? (LIVE.err ? `NAS 連不到（${esc(LIVE.err)}）：${esc(nasBase())}/live.json，先顯示網站資料` : '連線 NAS…') : liveAllClosed() ? `休市中，不更新（最後資料 ${hms(L.at)}；開盤後自動恢復）` : fresh ? `NAS 即時・${hms(L.at)} 更新・開盤中每 10～60 秒` : `NAS 資料停在 ${hms(L.at)}（連線中斷？）`;
     return `<div class="hd"><h2 id="lv-h">即時行情</h2><span class="note">${note}</span></div><div class="lv-grid">${tiles.map(tile).join('') || '<p class="empty">沒有資料</p>'}</div>`;
   }
+  const liveAllClosed = () => { const it = Object.values(LIVE.data?.items || {}); return it.length > 0 && it.every(v => v.state === 'closed'); };
   async function pollLive() {
     if (S.route !== 'home' || document.hidden || !nasBase() || !/^https:\/\//.test(nasBase())) return;
+    if (liveAllClosed() && Date.now() - LIVE.at < 10 * 60000) return;   // 全部休市：不更新，每 10 分鐘看一次有沒有開盤
     try { const d = await getJSON(nasBase() + '/live.json?t=' + Date.now(), 6000); LIVE.prev = Object.fromEntries(Object.entries(LIVE.data?.items || {}).map(([k, v]) => [k, v.price])); LIVE.data = d; LIVE.at = Date.now(); LIVE.err = null; }
     catch (e) { LIVE.err = e.name === 'AbortError' ? '逾時' : e.message; }
     const box = $('#live'); if (box && S.route === 'home') box.innerHTML = viewLive();
