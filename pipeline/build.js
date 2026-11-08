@@ -34,6 +34,7 @@ const Conviction = require('./lib/conviction');
 const Paper = require('./lib/paper');
 const Proposals = require('./lib/proposals');
 const Industry = require('./lib/industry');
+const WeekCheck = require('./lib/weekcheck');
 const News = require('./lib/news');
 const Digest = require('./lib/digest');
 const NewsAI = require('./lib/newsai');
@@ -622,6 +623,30 @@ async function main() {
     indices[k] = { key: k, name: IDX_NAME[k], price: r2(dd.price, 2), changePct: r2(dd.changePct), marketDate: dd.marketDate, years: r2(d.bars.close.length / 250, 1), outlook: o };
   }
   status.indices = `${Object.values(indices).filter(x => x.outlook).length}/${IDX.length}`;
+  // 週報「下週方向」對答案：每天記下四大指數的 5 日推論，5 個交易日後用實際走勢驗證
+  const wcFile = path.join(STATE, 'idx-forecasts.json'), wcLog = readJSON(wcFile, []);
+  if (FULL) WeekCheck.record(wcLog, indices, FULL);
+  // 第一次：用歷史日 K 回溯重算過去 8 週的週末推論（標記為回溯），讓對答案馬上有紀錄
+  if (FULL && !wcLog.some(x => x.bf)) {
+    for (const k of IDX) {
+      const d = longDaily[k] || daily[k]; if (!d?.bars?.dates?.length) continue;
+      const D = d.bars.dates, ends = [];
+      const mon = x => { const t = Date.parse(x + 'T00:00:00Z'), w = new Date(t).getUTCDay(); return t - ((w + 6) % 7) * 86400000; };
+      if (mon(new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)) > mon(D[D.length - 1])) ends.push(D.length - 1);   // 上週最後一天（週報用的那筆）
+      for (let i = D.length - 2; i > 0 && ends.length < 9; i--) { const w0 = new Date(D[i] + 'T00:00:00Z').getUTCDay(), w1 = new Date(D[i + 1] + 'T00:00:00Z').getUTCDay(); if (w1 < w0 || Date.parse(D[i + 1]) - Date.parse(D[i]) > 3 * 86400000) ends.push(i); }
+      for (const i of ends) {
+        if (wcLog.some(x => x.k === k && x.d === D[i])) continue;
+        try {
+          const cut = Object.fromEntries(Object.entries(d.bars).map(([f, a]) => [f, Array.isArray(a) ? a.slice(0, i + 1) : a]));
+          const o = Outlook.analyze(cut, { window: 750, backtestDays: 1250 }), f = o?.forecast?.h5; if (!f) continue;
+          wcLog.push({ k, d: D[i], p: cut.close[i], up: f.upProb, q: f.q, sup: o.sr?.support?.[0]?.p ?? null, supL: o.sr?.support?.[0]?.label ?? null, res: o.sr?.resistance?.[0]?.p ?? null, resL: o.sr?.resistance?.[0]?.label ?? null, bf: true });
+        } catch (e) { log('回溯推論失敗', k, D[i], e.message); }
+      }
+    }
+    wcLog.sort((a, b) => a.d.localeCompare(b.d));
+    log('週報對答案：回溯', wcLog.filter(x => x.bf).length, '筆');
+  }
+  let weekCheck = null; try { weekCheck = WeekCheck.evaluate(wcLog, k => (longDaily[k] || daily[k])?.bars); } catch (e) { log('週報對答案失敗', e.message); }
   const ranking = Object.values(items).sort((a, b) => b.signal.score - a.signal.score).map(x => x.key);
   // ── 虛擬跟單：照訊號用假錢買賣（收盤後完整更新才下單），每週回測校正一次參數 ──
   const paperFile = path.join(STATE, 'paper.json'), paperSt = readJSON(paperFile, {});
@@ -651,6 +676,7 @@ async function main() {
     status, verdict, env, items, ranking, changes, sectors, scorecard, indices, health, calendar, conviction,
     chipMarket: heavy.tw.chipMarket || null,
     paper,
+    weekCheck,
     proposals: Proposals.view(propSt),
     watchlist: { us: wl.us, tw: wl.tw },
   };
@@ -839,6 +865,7 @@ async function main() {
     writeJSON(path.join(STATE, 'predictions.json'), predictions);
     writeJSON(fcFile, fcLog);
     writeJSON(paperFile, paperSt);
+    writeJSON(wcFile, wcLog);
     writeJSON(propFile, propSt);
     log('狀態已更新', STATE);
   }

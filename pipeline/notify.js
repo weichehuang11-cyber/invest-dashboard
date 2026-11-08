@@ -62,9 +62,19 @@ async function send(title, lines, { priority = 3, tags = [], click = null } = {}
   return out.length > 0;
 }
 
+// 同一檔分多筆買進時合併成一筆（股數相加、成本加權平均）
+function holdAgg(P) {
+  const m = new Map();
+  for (const h of P?.holdings?.items || []) {
+    if (!h?.key) continue; const x = m.get(h.key) || { ...h, shares: 0, _c: 0, _cs: 0 };
+    x.shares += +h.shares || 0; if (isNum(h.cost)) { x._c += h.cost * (+h.shares || 0); x._cs += +h.shares || 0; }
+    m.set(h.key, x);
+  }
+  return [...m.values()].map(x => ({ ...x, cost: x._cs ? x._c / x._cs : (isNum(x.cost) ? x.cost : null) }));
+}
 // ── 論點條件（與網站相同規則）────────────────────────────────
 function costOf(key, P) {
-  const h = (P?.holdings?.items || []).find(x => x.key === key); if (h && isNum(h.cost)) return h.cost;
+  const h = holdAgg(P).find(x => x.key === key); if (h && isNum(h.cost)) return h.cost;
   const b = (P?.journal?.decisions || []).filter(d => d.key === key && d.action === 'buy').pop(); return b ? b.price : null;
 }
 function condHit(c, it, P) {
@@ -228,7 +238,7 @@ function weekly(snap, N, P, barsDir, aiDir) {
   if (U || th.length) S.push({ h: '本週新聞主軸', lines: [U?.headline && `• ${U.headline}`, ...(U?.bullets || []).slice(0, 4).map(b => '　' + b), th.length ? '• 熱門題材：' + th.map(t => `${t.name}${t.avgChg != null ? `（${pct(t.avgChg)}）` : ''}`).join('、') : null].filter(Boolean) });
   // 我的部位（個人）
   if (P) {
-    const PL = [], H = P.holdings?.items || [], fx = env.twd?.value || 32;
+    const PL = [], H = holdAgg(P), fx = env.twd?.value || 32;
     if (H.length) {
       let mv = 0, wk = 0; const rows = [];
       for (const h of H) { const it = snap.items[h.key]; if (!it) continue; const v = it.price * h.shares * (it.market === 'us' ? fx : 1); mv += v; if (isNum(it.ta?.ret5)) { wk += v - v / (1 + it.ta.ret5 / 100); rows.push([it, it.ta.ret5]); } }
@@ -266,6 +276,8 @@ function weekly(snap, N, P, barsDir, aiDir) {
     }
     if (PL.length) S.push({ h: '虛擬跟單', lines: PL });
   }
+  // 上週預測對答案
+  { const W = require('./lib/weekcheck').lines(snap.weekCheck); if (W) S.push({ h: `上週預測對答案（${(W.base || W.week).slice(5).replace('-', '/')} 收盤後的預測${W.bf ? '・回溯重算' : ''}）`, lines: W.lines }); }
   // 下週方向
   const nx = nextWeek(snap);
   S.push({ h: '下週方向', lines: [...(aiDir ? [...String(aiDir).split('\n').map(x => x.trim()).filter(Boolean).map(x => (/^[•\-*・]/.test(x) ? '• ' + x.replace(/^[•\-*・]\s*/, '') : '• ' + x)), ''] : []), ...nx] });
@@ -316,7 +328,7 @@ function monthly(snap, P, barsDir, PC) {
   const tw = barsRet(barsDir, '^TWII', N), sp = barsRet(barsDir, '^GSPC', N), b50 = barsRet(barsDir, '0050', N);
   L.push(`【市場】近一個月：加權 ${pct(tw)}、標普 500 ${pct(sp)}、0050 ${pct(b50)}`);
   if (P) {
-    const H = P.holdings?.items || [], fx = snap.env?.find(e => e.key === 'twd')?.value || 32;
+    const H = holdAgg(P), fx = snap.env?.find(e => e.key === 'twd')?.value || 32;
     let mv = 0, gain = 0, cover = 0;
     for (const h of H) { const it = snap.items[h.key]; if (!it) continue; const v = it.price * h.shares * (it.market === 'us' ? fx : 1); mv += v; const r = barsRet(barsDir, h.key, N); if (isNum(r)) { gain += v - v / (1 + r / 100); cover += v; } }
     if (cover) { const r = gain / (cover - gain) * 100; L.push('', '【我的部位】', `持股近一個月 ${pct(r)}（約 ${gain >= 0 ? '+' : ''}${Math.round(gain).toLocaleString()} 元），${isNum(b50) ? `${r >= b50 ? '贏' : '輸'} 0050 ${Math.abs(r - b50).toFixed(1)} 個百分點` : ''}`); }
@@ -450,7 +462,7 @@ function premarket(snap, N, P, market, live = {}) {
   const D = N?.digest, U = D?.ai || D?.rule;
   if (U) S.push({ h: '全球新聞重點', lines: [U.headline, ...(U.bullets || []).slice(0, 5).map(b => '• ' + b), (D.ai?.watch || []).length ? '接下來盯：' + D.ai.watch.slice(0, 4).join('｜') : null].filter(Boolean) });
   // 4. 關鍵價位：持股優先，沒有持股就用觀察清單
-  const held = (P?.holdings?.items || []).map(h => h.key).filter(k => items[k]?.market === market);
+  const held = holdAgg(P).map(h => h.key).filter(k => items[k]?.market === market);
   const keys = held.length ? held : Object.values(items).filter(i => i.market === market).sort((a, b) => Math.abs(b.changePct ?? 0) - Math.abs(a.changePct ?? 0)).slice(0, 6).map(i => i.key);
   const lv = keys.map(k => {
     const it = items[k], o = it.outlook, s = o?.sr?.support?.[0], r = o?.sr?.resistance?.[0], up = o?.forecast?.h5?.upProb;
