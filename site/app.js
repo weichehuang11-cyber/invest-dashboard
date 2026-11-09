@@ -19,7 +19,7 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.8.1';
+  const APP_VERSION = '1.8.2';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -120,7 +120,7 @@
     const old = S.snap?.generatedAt;
     if (manual) toast('檢查新資料…');
     try { await loadSnapshot(); } catch (_) { if (manual) toast('連不到資料來源，稍後再試'); return; }
-    if (S.snap.generatedAt !== old) { if (!['portfolio', 'settings'].includes(S.route)) render(); toast(`已更新到 ${tpeTime(S.snap.generatedAt)}`); }
+    if (S.snap.generatedAt !== old) { if (!['portfolio', 'settings'].includes(S.route)) bgRender(); toast(`已更新到 ${tpeTime(S.snap.generatedAt)}`); }
     else if (manual) toast(`已是最新（${tpeTime(S.snap.generatedAt)}）・${nextUpdateText()}`);
   }
 
@@ -520,7 +520,7 @@ ${footer()}`;
 
 <section class="card fold all" data-fold="digest" data-def="1" id="digest" aria-labelledby="dg-h">${S.news ? viewDigestMini(S.news) : '<p class="loading">載入全球市場快報…</p>'}</section>
 
-<section class="card fold" data-fold="idx" id="idx" aria-labelledby="ix-h"><p class="loading">載入指數走勢…</p></section>
+<section class="card fold" data-fold="idx" id="idx" aria-labelledby="ix-h">${S.idxHtml || '<p class="loading" style="min-height:420px">載入指數走勢…</p>'}</section>
 
 <div class="row">
   ${s.health ? `<section class="card wide fold" data-fold="health" aria-labelledby="hl-h">${viewHealth()}</section>` : ''}
@@ -537,7 +537,7 @@ ${footer()}`;
 
 <section class="card" id="opps" aria-labelledby="opp-h">${viewOpps(isMob() ? 6 : 10)}</section>
 
-<section class="card" id="indhome" aria-labelledby="ih-h"><p class="loading">載入產業分類…</p></section>
+<section class="card" id="indhome" aria-labelledby="ih-h">${S.indHomeHtml || '<p class="loading" style="min-height:300px">載入產業分類…</p>'}</section>
 
 <section class="card fold all" data-fold="themes" data-def="1" id="themes" aria-labelledby="th-h">${S.news ? viewThemesMini(S.news) : '<p class="loading">載入熱門題材…</p>'}</section>
 
@@ -690,6 +690,7 @@ ${footer()}`;
 
   // ── 即時行情（NAS 每 10～60 秒代抓；沒有 NAS 時顯示網站資料）──────────
   const LIVE = { data: null, at: 0, err: null, timer: null, prev: {} };
+  const LV_SKEL = [['TWII', '加權指數'], ['TWOII', '櫃買指數'], ['TXF', '台指期'], ['GSPC', '標普 500'], ['IXIC', '那斯達克'], ['SOX', '費城半導體'], ['ES', '標普期貨'], ['NQ', '那斯達克期貨'], ['N225', '日經 225'], ['KS11', '韓國綜合']];
   const LV_FALLBACK = [['TWII', '^TWII', '加權指數'], ['GSPC', '^GSPC', '標普 500'], ['IXIC', '^IXIC', '那斯達克'], ['SOX', '^SOX', '費城半導體']];
   const LV_STATE = { open: ['盤中', 'ok'], night: ['夜盤', 'ok'], closed: ['收盤', ''] };
   // 即時價格對照指數的推論：支撐壓力、5 日推論分布的位置
@@ -727,6 +728,7 @@ ${footer()}`;
     const L = LIVE.data, fresh = L && Date.now() - LIVE.at < 60000;
     let tiles = [];
     if (L) tiles = (L.order || Object.keys(L.items)).map(k => [k, L.items[k]]).filter(([, v]) => v && isNum(v.price));
+    else if (nasBase() && /^https:\/\//.test(nasBase()) && !LIVE.err) tiles = LV_SKEL.map(([k, n]) => [k, { name: n, price: null, skel: true }]);
     else tiles = LV_FALLBACK.map(([k, ik, n]) => { const x = S.snap.indices?.[ik]; return x && [k, { name: n, price: x.price, chgPct: x.changePct, chg: isNum(x.changePct) ? x.price - x.price / (1 + x.changePct / 100) : null, state: 'snap', time: S.snap.generatedAt }]; }).filter(Boolean);
     const tile = ([k, v]) => {
       const up = (v.chgPct ?? 0) >= 0, st = LV_STATE[v.state], moved = LIVE.prev[k] != null && LIVE.prev[k] !== v.price;
@@ -915,7 +917,7 @@ ${footer()}`;
   async function fillIndexSection() {
     const box = $('#idx'); if (!box) return;
     const html = await viewIndexSection();
-    if ($('#idx') && S.route === 'home') { box.innerHTML = html; box.hidden = !html; setupFolds(); bindCharts(); }
+    if ($('#idx') && S.route === 'home') { S.idxHtml = html; box.innerHTML = html; box.hidden = !html; setupFolds(); bindCharts(); }
   }
 
   // ── 高信心訊號 ───────────────────────────────────────────────
@@ -1219,7 +1221,7 @@ ${footer()}`;
     if ((S.local.npu || S.local.cpu) && !S.localPreds[key] && !S.localTried[key]) {
       S.localTried[key] = true;
       await localPredict([key]);
-      if (S.localPreds[key] && S.route === 's/' + key) { render(); return; }
+      if (S.localPreds[key] && S.route === 's/' + key) { bgRender(); return; }
     }
     if (!S.local.llm && S.remote?.llm?.stocks?.[key] && S.remote.age < 240) {
       const box = $('#ai-stock'); if (box) box.innerHTML = remoteAI(S.remote.llm.stocks[key], S.remote).replace('class="ai"', 'class="ai" style="background:var(--bg);color:var(--ink2)"');
@@ -2228,7 +2230,7 @@ ${footer()}`;
     const [I, U] = await Promise.all([loadInd(), loadUniverse()]); if (S.route !== 'home') return;
     const groups = [...(I.groups || []), ...customGroups(I, U)], tr = groups.filter(g => indTrack().includes(g.id));
     const list = tr.length ? tr : [...(I.groups || [])].filter(g => g.stats).sort((a, b) => (b.stats.chg ?? -99) - (a.stats.chg ?? -99)).slice(0, 3);
-    box.innerHTML = `<div class="hd"><h2 id="ih-h">${tr.length ? '我追蹤的產業' : '產業分類'}</h2><span class="note">${tr.length ? '' : '今天漲最多的 3 個產業；按「☆ 追蹤」就會固定顯示在這裡'}</span><a class="act btn sm" href="#/industry">全部產業</a></div>${list.length ? `<div class="pp-list">${list.map(g => indRow(g, I)).join('')}</div>` : '<p class="small muted" style="margin:0">產業資料會在下一次更新後出現。</p>'}`;
+    box.innerHTML = S.indHomeHtml = `<div class="hd"><h2 id="ih-h">${tr.length ? '我追蹤的產業' : '產業分類'}</h2><span class="note">${tr.length ? '' : '今天漲最多的 3 個產業；按「☆ 追蹤」就會固定顯示在這裡'}</span><a class="act btn sm" href="#/industry">全部產業</a></div>${list.length ? `<div class="pp-list">${list.map(g => indRow(g, I)).join('')}</div>` : '<p class="small muted" style="margin:0">產業資料會在下一次更新後出現。</p>'}`;
   }
   async function fillIndChips(key) {
     const el = $('#ind-chips'); if (!el) return;
@@ -2495,6 +2497,17 @@ ${footer()}`;
 
   // ── 路由 ────────────────────────────────────────────────────
   function applyColors() { document.body.className = cfg.colors === 'us' ? 'us-colors' : 'tw-colors'; }
+  // 背景資料（同步、電腦 AI、新資料）到了才重畫：合併成一次、保留捲動位置，避免畫面一直跳
+  let bgT = null;
+  function bgRender() {
+    clearTimeout(bgT);
+    bgT = setTimeout(async () => {
+      const route = S.route, y = scrollY;
+      const ae = document.activeElement; if (ae && /INPUT|TEXTAREA|SELECT/.test(ae.tagName)) return;   // 正在輸入就不打斷
+      await render();
+      if (S.route === route) { scrollTo(0, y); requestAnimationFrame(() => scrollTo(0, y)); setTimeout(() => S.route === route && Math.abs(scrollY - y) > 4 && scrollTo(0, y), 600); }
+    }, 400);
+  }
   async function render() {
     const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
     S.route = h.startsWith('s/') ? h : (h.split('/')[0] || 'home');
@@ -2637,8 +2650,8 @@ ${footer()}`;
     catch (e) { $('#main').innerHTML = `<section class="card"><h2 style="margin:0">無法載入資料</h2><p>${esc(e.message)}</p><div class="actions"><button class="btn primary" onclick="location.reload()">重新整理</button><a class="btn" href="#/settings">設定</a></div></section>`; if (location.hash.startsWith('#/settings')) { $('#main').innerHTML = viewSettings(); bindSettings(); } return; }
     setupSearch();
     updateSyncPill();
-    if (H.load().items.some(x => !S.snap.items[x.key])) loadUniverse().then(() => { if (['home', 'portfolio'].includes(S.route)) render(); });
-    if (SY.get().token) syncNow(false).then(() => { if (!['settings', 'portfolio'].includes(S.route)) render(); });
+    if (H.load().items.some(x => !S.snap.items[x.key])) loadUniverse().then(() => { if (['home', 'portfolio'].includes(S.route)) bgRender(); });
+    if (SY.get().token) syncNow(false).then(() => { if (!['settings', 'portfolio'].includes(S.route)) bgRender(); });
     window.addEventListener('hashchange', render);
     document.addEventListener('click', e => {
       const pr = e.target.closest('[data-pcr]');
@@ -2667,10 +2680,10 @@ ${footer()}`;
     document.addEventListener('visibilitychange', () => { if (!document.hidden && S.snap && Date.now() - Date.parse(S.snap.generatedAt) > 10 * 60000) refreshNow(false); });
     await render();
     probeLocal().then(async () => {
-      if (localAny()) { if (S.route === 'home' || S.route.startsWith('s/')) render(); return; }
+      if (localAny()) { if (S.route === 'home' || S.route.startsWith('s/')) bgRender(); return; }
       const d = await loadRemote(); updateLocalPill();
-      if (d && (S.route === 'home' || S.route.startsWith('s/'))) render();
-      const refreshRemote = async () => { if (localAny() || !SY.get().token) return; const was = S.remote?.fresh; const r = await loadRemote(true); updateLocalPill(); if (r && was !== r.fresh && (S.route === 'home' || S.route.startsWith('s/'))) render(); };
+      if (d && (S.route === 'home' || S.route.startsWith('s/'))) bgRender();
+      const refreshRemote = async () => { if (localAny() || !SY.get().token) return; const was = S.remote?.fresh; const r = await loadRemote(true); updateLocalPill(); if (r && was !== r.fresh && (S.route === 'home' || S.route.startsWith('s/'))) bgRender(); };
       setInterval(refreshRemote, 5 * 60000);
       document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshRemote(); });   // 手機切回網頁時立即更新狀態
     });
