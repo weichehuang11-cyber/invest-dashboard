@@ -427,6 +427,11 @@ function premarket(snap, N, P, market, live = {}) {
   const day = tpeDay(), wd = '日一二三四五六'[new Date(Date.now() + 8 * 3600000).getUTCDay()];
   const tw = market === 'tw';
   const title = `${tw ? '台股' : '美股'}盤前 ${day.slice(5).replace('-', '/')}（${wd}）`;
+  {
+    const t = iso => { if (!iso) return '—'; const d = new Date(Date.parse(iso) + 8 * 3600000); return `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`; };
+    const md = k => snap.indices?.[k]?.marketDate?.slice(5).replace('-', '/') || '—';
+    S.push({ h: '資料時間', lines: [`${tw ? `美股收盤 ${md('^GSPC')}` : `台股收盤 ${md('^TWII')}`}・判斷、AI 與新聞 ${t(snap.generatedAt)} 重新整理・即時報價 ${t(new Date().toISOString())} 抓取`] });
+  }
   // 1. 前一個市場的收盤
   if (tw) {
     const L = [['^GSPC', '標普 500'], ['^IXIC', '那斯達克'], ['^SOX', '費城半導體']].map(([k, n]) => ix(k) && `${n} ${px(ix(k).price)}（${pct(ix(k).changePct, 2)}）`).filter(Boolean);
@@ -442,7 +447,10 @@ function premarket(snap, N, P, market, live = {}) {
   }
   // 1b. 送出當下的即時訊號（期貨、亞洲／歐洲盤）
   {
-    const Q = live.q || {}, f = (sym, n, d = 2) => { const x = Q[sym]; return x && isNum(x.price) ? `${n} ${px(x.price)}（${pct(x.chg, d)}）` : null; };
+    // 還沒開盤（或報價停在上個交易日）的要標清楚，避免把上週五的漲跌當成今天
+    const stale = x => !x.time || Date.now() - Date.parse(x.time) > 10 * 3600000 || /PRE|CLOSED/.test(x.state || '');
+    const lastDay = x => { if (!x.time) return '上個交易日'; const d = new Date(Date.parse(x.time) + 8 * 3600000); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}（${'日一二三四五六'[d.getUTCDay()]}）`; };
+    const Q = live.q || {}, f = (sym, n, d = 2) => { const x = Q[sym]; if (!x || !isNum(x.price)) return null; return stale(x) && !/^(ES|NQ|YM|CL|GC)=F$|\^TNX/.test(sym) ? `${n} ${px(x.price)}（尚未開盤；${lastDay(x)} ${pct(x.chg, d)}）` : `${n} ${px(x.price)}（${pct(x.chg, d)}）`; };
     const L = [];
     if (tw) {
       const tx = live.tx;
@@ -499,7 +507,7 @@ function briefHtml(B) {
   // 台股習慣：漲紅跌綠
   const col = h => h.replace(/([+]\d[\d.,]*%|▲[\d.]+)/g, '<span style="color:#dc2626">$1</span>').replace(/((?<![\d～])-\d[\d.,]*%|▼[\d.]+)/g, '<span style="color:#16a34a">$1</span>');
   const sec = B.sections.map(s => `<h3 style="margin:18px 0 6px;font-size:15px;color:#0f766e;border-bottom:1px solid #e5e7eb;padding-bottom:4px">${esc(s.h)}</h3>` + s.lines.map(l => (/^　/.test(l) ? `<div style="margin:1px 0 1px 18px;color:#4b5563;font-size:13px">${col(esc(l.replace(/^　+/, '')))}</div>` : l ? `<div style="margin:6px 0 2px">${col(esc(l))}</div>` : '<div style="height:6px"></div>')).join('')).join('');
-  return `<div style="font-family:-apple-system,'PingFang TC','Microsoft JhengHei',sans-serif;font-size:14px;line-height:1.6;color:#111;max-width:640px"><h2 style="margin:0 0 4px;font-size:18px">${esc(B.title)}</h2>${sec}${SITE ? `<p style="margin-top:20px"><a href="${SITE}" style="color:#0f766e">打開訊號終端</a></p>` : ''}</div>`;
+  return `<div style="font-family:-apple-system,'PingFang TC','Microsoft JhengHei',sans-serif;font-size:14px;line-height:1.6;color:#111;max-width:640px">${sec}${SITE ? `<p style="margin-top:20px"><a href="${SITE}" style="color:#0f766e">打開訊號終端</a></p>` : ''}</div>`;
 }
 // 寄信：有 SMTP（例如 Gmail 應用程式密碼）就寄排版過的信；否則有 MAIL_TO 就透過 ntfy 轉寄純文字信
 async function sendMail(B) {
