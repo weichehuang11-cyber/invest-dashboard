@@ -135,7 +135,8 @@ async function events(snap, P, notified) {
   // 觀察清單訊號轉變（持股優先標示）
   for (const c of snap.changes || []) if (c.tag === '訊號') add(`sig:${c.key}:${c.title}:${day}`, held.has(c.key) ? 4 : 3, `${held.has(c.key) ? '⚠️ 持股 ' : '🔄 '}${c.title}（${c.detail}）`);
   // 市場
-  for (const sgl of snap.health?.signals || []) if (sgl.sev >= 3) add(`mkt:${sgl.text}:${day}`, 4, `🚨 ${sgl.text}`);
+  // 同一種警訊一天只通知一次（去掉數字當作類型，數字變動不算新警訊）
+  for (const sgl of snap.health?.signals || []) if (sgl.sev >= 3) add(`mkt:${sgl.text.replace(/[-+]?[\d.,]+/g, '#')}:${day}`, 4, `🚨 ${sgl.text}`);
   if (snap.verdict?.trend && snap.verdict.trend !== '與前次相同') add(`verdict:${snap.verdict.headline}:${day}`, 3, `🧭 今日判斷${snap.verdict.trend}：${snap.verdict.headline}`);
   for (const e of snap.calendar || []) { const d = Math.round((Date.parse(e.date) - Date.parse(day)) / 86400000); if (e.kind === 'macro' && e.importance >= 3 && d === 1) add(`cal:${e.date}:${e.title}`, 2, `🗓 明天：${e.title}`); }
   return ev;

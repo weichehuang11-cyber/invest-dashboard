@@ -116,11 +116,12 @@ function buildHealth({ heavy, daily, vix, tsy, sectorsList }) {
   }
   const above50 = sectorsList.filter(k => { const d = daily[k]; return d && d.bars.close.length > 50 && d.price > TA.sma(d.bars.close, 50); }).length;
   H.us.sectorsAbove50 = { n: above50, of: sectorsList.filter(k => daily[k]).length };
-  const v3 = daily['^VIX3M'];
-  if (vix?.price && v3?.price) {
-    const ratio = vix.price / v3.price;
-    H.us.vixTerm = { vix: r2(vix.price), vix3m: r2(v3.price), ratio: r2(ratio, 3) };
-    if (ratio > 1) sig(3, 'neg', `VIX 期限結構倒掛（近月 ${vix.price.toFixed(1)} > 三個月 ${v3.price.toFixed(1)}），市場處於急性恐慌`);
+  // 期限結構：近月與三個月必須是同一個來源、同一個時間點，才能比較
+  const v1 = daily['^VIX'], v3 = daily['^VIX3M'];
+  if (v1?.price && v3?.price && v1.marketDate === v3.marketDate) {
+    const ratio = v1.price / v3.price;
+    H.us.vixTerm = { vix: r2(v1.price), vix3m: r2(v3.price), ratio: r2(ratio, 3), date: v1.marketDate };
+    if (ratio > 1) sig(3, 'neg', `VIX 期限結構倒掛（近月 ${v1.price.toFixed(1)} > 三個月 ${v3.price.toFixed(1)}），市場處於急性恐慌`);
   }
   const uv = heavy.us.valHist || [];
   if (uv.length) {
@@ -148,7 +149,7 @@ async function main() {
   log(`開始 mode=${FULL ? 'full:' + FULL : 'intraday'} us=${wl.us.length} tw=${wl.tw.length}`);
 
   // ── 1. 日 K + 報價 ─────────────────────────────────────────────
-  const keys = [...wl.us, ...wl.tw, ...Object.keys(INDEX), ...Object.keys(SECTORS), 'RSP', 'SPY', '^VIX3M'];
+  const keys = [...wl.us, ...wl.tw, ...Object.keys(INDEX), ...Object.keys(SECTORS), 'RSP', 'SPY', '^VIX3M', '^VIX'];
   const daily = {};
   const wset0 = new Set([...wl.us, ...wl.tw]);
   await mapSeries(keys, async k => { const d = await Yahoo.daily(k, wset0.has(k) ? '5y' : '2y'); if (d) daily[k] = d; }, 300);   // 觀察清單抓 5 年（走勢圖 3／5 年、回測），其他 2 年
@@ -162,6 +163,8 @@ async function main() {
   // ── 2. 總經 ────────────────────────────────────────────────────
   let vix = await Macro.vix().catch(() => null);
   if (!vix) { const d = await Yahoo.daily('^VIX', '1mo'); if (d) vix = { price: d.price, prevClose: d.prevClose, changePct: d.changePct, date: d.marketDate }; }
+  // CBOE 的歷史檔只有每天收盤一筆；盤中改用 Yahoo 的即時 VIX（日期較新或同一天時），歷史序列仍用 CBOE
+  { const y = daily['^VIX']; if (y?.price && (!vix || !vix.date || y.marketDate >= vix.date)) vix = { ...(vix || {}), price: y.price, prevClose: y.prevClose ?? vix?.prevClose, changePct: y.changePct, date: y.marketDate, src: 'yahoo' }; }
   const tsy = await Macro.treasury().catch(() => null);
   status.vix = vix ? 'ok' : 'fail'; status.treasury = tsy ? 'ok' : 'fail';
 
