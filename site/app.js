@@ -19,7 +19,7 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.8.3';
+  const APP_VERSION = '1.8.4';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -734,12 +734,28 @@ ${footer()}`;
       const up = (v.chgPct ?? 0) >= 0, st = LV_STATE[v.state], moved = LIVE.prev[k] != null && LIVE.prev[k] !== v.price;
       const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10), td = v.time && new Date(Date.parse(v.time) + 8 * 3600000).toISOString().slice(0, 10);
       const tm = v.state === 'snap' ? `網站資料 ${tpeTime(v.time)}` : `${!v.time ? '—' : td === today ? hms(v.time) : tpeTime(v.time)}${v.delay && v.state !== 'closed' ? `・延遲約 ${v.delay} 分` : ''}`;
-      return `<div class="lv-t${moved ? ' lv-flash' : ''}${v.ok === false ? ' lv-bad' : ''}${LV_IDX[k] ? ' lv-link' : ''}"${LV_IDX[k] ? ` data-lvidx="${LV_IDX[k]}" role="button" tabindex="0" title="看走勢與推論"` : ''}><div class="lv-n">${esc(v.name)}${st ? `<span class="lv-s ${st[1]}">${st[0]}</span>` : ''}</div>
+      return `<div data-lvk="${esc(k)}" class="lv-t${moved ? ' lv-flash' : ''}${v.ok === false ? ' lv-bad' : ''}${LV_IDX[k] ? ' lv-link' : ''}"${LV_IDX[k] ? ` data-lvidx="${LV_IDX[k]}" role="button" tabindex="0" title="看走勢與推論"` : ''}><div class="lv-n">${esc(v.name)}${st ? `<span class="lv-s ${st[1]}">${st[0]}</span>` : ''}</div>
         <div class="lv-p mono">${px(v.price)}</div><div class="lv-c ${cls(v.chgPct)}">${isNum(v.chg) ? sign(v.chg) + fix(v.chg, Math.abs(v.chg) >= 100 ? 0 : 2) : ''} ${pct(v.chgPct)}</div>
-        ${liveSpark(v.spark, up)}${(() => { const ik = LV_IDX[k], P = ik && v.state !== 'snap' ? livePos(ik, v.price) : null; return P ? `<div class="lv-pos ${P.lv.c}">${P.lv.t.replace(/（.*?）/g, '')}</div>` : ''; })()}<div class="lv-m">${tm}</div></div>`;
+        ${liveSpark(v.spark, up)}${(() => { const ik = LV_IDX[k], P = ik && v.state !== 'snap' ? livePos(ik, v.price) : null; return ik ? `<div class="lv-pos ${P ? P.lv.c : ''}">${P ? P.lv.t.replace(/（.*?）/g, '') : '&nbsp;'}</div>` : ''; })()}<div class="lv-m">${tm}</div></div>`;
     };
     const note = !nasBase() ? '非即時：在「設定」填入 NAS 網址，就會每 10～60 秒自動更新' : !/^https:\/\//.test(nasBase()) ? `非即時：NAS 網址要 https 開頭（目前是 ${esc(nasBase())}）` : !L ? (LIVE.err ? `NAS 連不到（${esc(LIVE.err)}）：${esc(nasBase())}/live.json，先顯示網站資料` : '連線 NAS…') : liveAllClosed() ? `休市中，不更新（最後資料 ${hms(L.at)}；開盤後自動恢復）` : fresh ? `NAS 即時・${hms(L.at)} 更新・開盤中每 10～60 秒` : `NAS 資料停在 ${hms(L.at)}（連線中斷？）`;
     return `<div class="hd"><h2 id="lv-h">即時行情</h2><span class="note">${note}</span></div><div class="lv-grid">${tiles.map(tile).join('') || '<p class="empty">沒有資料</p>'}</div>`;
+  }
+  // 每 10 秒更新只改數字、不重建整張卡；萬一高度變了，補償捲動位置，畫面不會跳
+  function patchKeep(el, fn) {
+    if (!el) return; const r0 = el.getBoundingClientRect(), h0 = el.offsetHeight; fn(el);
+    const dh = el.offsetHeight - h0; if (dh && r0.top < 0) scrollBy(0, dh);
+  }
+  function patchLive(box) {
+    const tmp = document.createElement('div'); tmp.innerHTML = viewLive();
+    const nk = [...tmp.querySelectorAll('[data-lvk]')].map(x => x.dataset.lvk).join(), ok = [...box.querySelectorAll('[data-lvk]')].map(x => x.dataset.lvk).join();
+    if (nk !== ok || !ok) { box.innerHTML = tmp.innerHTML; return; }
+    const nt = tmp.querySelector('.hd .note'), ot = box.querySelector('.hd .note'); if (nt && ot && ot.innerHTML !== nt.innerHTML) ot.innerHTML = nt.innerHTML;
+    for (const t of tmp.querySelectorAll('[data-lvk]')) {
+      const o = box.querySelector(`[data-lvk="${CSS.escape(t.dataset.lvk)}"]`); if (!o) continue;
+      if (o.innerHTML !== t.innerHTML) o.innerHTML = t.innerHTML;
+      if (o.className !== t.className) { o.className = t.className.replace(' lv-flash', ''); if (t.classList.contains('lv-flash')) { void o.offsetWidth; o.classList.add('lv-flash'); } }
+    }
   }
   const liveAllClosed = () => { const it = Object.values(LIVE.data?.items || {}); return it.length > 0 && it.every(v => v.state === 'closed'); };
   async function pollLive() {
@@ -747,8 +763,9 @@ ${footer()}`;
     if (liveAllClosed() && Date.now() - LIVE.at < 10 * 60000) return;   // 全部休市：不更新，每 10 分鐘看一次有沒有開盤
     try { const d = await getJSON(nasBase() + '/live.json?t=' + Date.now(), 6000); LIVE.prev = Object.fromEntries(Object.entries(LIVE.data?.items || {}).map(([k, v]) => [k, v.price])); LIVE.data = d; LIVE.at = Date.now(); LIVE.err = null; }
     catch (e) { LIVE.err = e.name === 'AbortError' ? '逾時' : e.message; }
-    const box = $('#live'); if (box && S.route === 'home') box.innerHTML = viewLive();
-    const il = $('#ix-live'); if (il && S.route === 'home') il.innerHTML = liveIdxHtml(S.idx);
+    if (S.route !== 'home') return;
+    patchKeep($('#live'), el => patchLive(el));
+    const il = $('#ix-live'); if (il) patchKeep(il, el => { const h = liveIdxHtml(S.idx); if (el.innerHTML !== h) el.innerHTML = h; });
   }
   function startLive() {
     pollLive();

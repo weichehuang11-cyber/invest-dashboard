@@ -617,3 +617,10 @@ button, a, select, input, .btn { touch-action: manipulation; }
 .ixlive .lv-s { font-size: 11px; }
 .ind-g[data-ind] { cursor: pointer; }
 .ind-go { font-size: 12px; font-weight: 400; color: var(--acc); }
+/* 即時行情固定每格高度，更新時版面不變 */
+.lv-n { height: 18px; }
+.lv-p { height: 24px; overflow: hidden; }
+.lv-c { height: 18px; white-space: nowrap; overflow: hidden; }
+.lv-pos { height: 15px; }
+.lv-m { height: 15px; }
+.ixlive { min-height: 52px; }
