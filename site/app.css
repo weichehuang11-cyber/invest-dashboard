@@ -632,3 +632,27 @@ button, a, select, input, .btn { touch-action: manipulation; }
 .tool .ti { font-size: 20px; }
 .twcol { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 420px) { .tools { grid-template-columns: 1fr 1fr; } }
+.ptc { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 6px 0; display: flex; flex-direction: column; gap: 3px; }
+.ptc-bad { color: var(--bad); } .ptc-warn { color: var(--warn); } .ptc-ok { color: var(--ink2); } .ptc-info { color: var(--mute); }
+.cmp-form { display: grid; grid-template-columns: repeat(4, 1fr) auto; gap: 6px; }
+@media (max-width: 520px) { .cmp-form { grid-template-columns: 1fr 1fr; } .cmp-form .btn { grid-column: 1 / -1; } }
+.cmp-ch { display: block; width: 100%; height: 160px; }
+.tbl.cmp td:first-child { white-space: nowrap; color: var(--ink2); }
+.cmp-best { font-weight: 700; background: var(--acc-bg); }
+.lab-f { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.lab-f legend { font-size: 13px; color: var(--ink2); padding: 0 4px; }
+.lab-c { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 14px; }
+.lab-n { width: 64px; }
+.ask-f { display: flex; gap: 8px; align-items: stretch; }
+.ask-f textarea { flex: 1; min-width: 0; }
+.ask-ex { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ask-ex .chip { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 3px 10px; cursor: pointer; color: var(--ink2); }
+.ask-qa { padding: 8px 0; border-bottom: 1px solid var(--line2); }
+.ask-qq { font-weight: 600; margin-bottom: 4px; }
+.ask-aa { line-height: 1.6; }
+.cmp-form input { min-width: 0; width: 100%; }
+.cmpg { display: grid; gap: 0; font-size: 14px; }
+.cmpg > div { padding: 6px 4px; border-bottom: 1px solid var(--line2); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cmpg .num { text-align: right; }
+.cmph { text-align: right; font-weight: 600; font-size: 13px; }
+.cmpl { color: var(--ink2); white-space: nowrap; }
