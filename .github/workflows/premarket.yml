@@ -63,6 +63,7 @@ jobs:
           curl -fsS "$SITE/data/snapshot.json?t=$(date +%s)" -o out/data/snapshot.json
           curl -fsS "$SITE/data/news.json?t=$(date +%s)" -o out/data/news.json || true
           curl -fsS "$SITE/data/industries.json?t=$(date +%s)" -o out/data/industries.json || true
+          curl -fsS "$SITE/data/twdata.json?t=$(date +%s)" -o out/data/twdata.json || true
       - name: 送出盤前資訊
         if: steps.slot.outputs.skip != '1'
         env:

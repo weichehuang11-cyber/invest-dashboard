@@ -45,6 +45,7 @@ jobs:
           curl -fsS "$SITE/data/snapshot.json" -o out/data/snapshot.json
           curl -fsS "$SITE/data/news.json" -o out/data/news.json || true
           curl -fsS "$SITE/data/industries.json" -o out/data/industries.json || true
+          curl -fsS "$SITE/data/twdata.json" -o out/data/twdata.json || true
           for k in $(node -e "const s=require('./out/data/snapshot.json');console.log([...Object.keys(s.items),'^TWII','^GSPC','^IXIC','^SOX'].map(k=>k.replace(/[^A-Za-z0-9_.-]/g,'_')).join(' '))"); do
             curl -fsS "$SITE/data/bars/$k.json" -o "out/data/bars/$k.json" || true
           done

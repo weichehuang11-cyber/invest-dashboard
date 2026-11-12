@@ -267,6 +267,17 @@ function weekly(snap, N, P, barsDir, aiDir) {
     if (IND?.rotationRecent?.length) S.push({ h: '本週產業輪動', lines: IND.rotationRecent.slice(0, 10).map(r => `• ${r.d.slice(5).replace('-', '/')} ${r.text}`) });
     if (IND && trk.length) { const Ind = require('./lib/industry'); const L = [...(IND.groups || []), ...(P.indCustom || []).map(c => ({ id: 'c-' + c.id, name: c.name, m: 'tw', stats: Ind.groupStats(c.keys, IND.stocks || {}, IND.bench?.tw) }))].filter(g => trk.includes(g.id)).map(g => Ind.line(g, IND.bench?.[g.m])).filter(Boolean).map(x => '• ' + x); if (L.length) S.push({ h: '追蹤的產業', lines: L, priv: true }); }
   }
+  // 台股籌碼、營收、大戶
+  {
+    const T = readJSON(path.join(path.dirname(barsDir), 'twdata.json'), null), L = [];
+    if (T) {
+      for (const a of (T.chips?.alerts || []).slice(0, 6)) L.push(`• ${a.k} ${a.n}：${a.text}`);
+      if (T.tdcc?.up?.length && T.tdcc.prev) L.push(`• 千張大戶增加最多：${T.tdcc.up.slice(0, 3).map(x => `${x.n} +${x.chg}`).join('、')}；減少最多：${T.tdcc.down.slice(0, 3).map(x => `${x.n} ${x.chg}`).join('、')}（百分點）`);
+      if (T.revenue?.ai?.text) L.push(`• ${T.revenue.period} 月營收重點：`, ...String(T.revenue.ai.text).split('\n').filter(Boolean).slice(0, 4).map(x => '　' + x.replace(/^[•\-*]\s*/, '')));
+      const up = (T.conf || []).filter(c => !c.held && Date.parse(c.date) - Date.now() < 8 * 864e5); if (up.length) L.push(`• 下週法說會：${up.map(c => `${c.date.slice(5)} ${c.n}`).join('、')}`);
+    }
+    if (L.length) S.push({ h: '台股籌碼與營收', lines: L });
+  }
   // 虛擬跟單
   {
     const PL = [];
@@ -496,6 +507,12 @@ function premarket(snap, N, P, market, live = {}) {
   // 6a. 追蹤的產業（前一個交易日）
   const IND = live.ind, trk = P?.indTrack || [];
   if (IND && trk.length) { const Ind = require('./lib/industry'); const L = [...(IND.groups || []), ...(P.indCustom || []).map(c => ({ id: 'c-' + c.id, name: c.name, m: market, stats: Ind.groupStats(c.keys, IND.stocks || {}, IND.bench?.[market]) }))].filter(g => trk.includes(g.id) && g.m === market).map(g => Ind.line(g, IND.bench?.[g.m])).filter(Boolean); if (L.length) S.push({ h: '追蹤的產業', lines: L, priv: true }); }
+  // 6a2. 今天的法說會、本週籌碼異動（台股場）
+  if (tw && live.twd) {
+    const today = (live.twd.conf || []).filter(c => c.date === day && !c.held).map(c => `${c.k} ${c.n} 今天開法說會`);
+    const ch = (live.twd.chips?.alerts || []).slice(0, 5).map(a => `${a.k} ${a.n}：${a.text}`);
+    if (today.length || ch.length) S.push({ h: '法說會與籌碼', lines: [...today, ...ch] });
+  }
   // 6b. 待你確認的調整
   const pend = snap.proposals?.pending || [];
   if (pend.length) S.push({ h: '待你確認', lines: pend.map(p => `${p.title}：${propTxt(p)}（${REC[p.rec] || ''}，證據${p.strength}）→ 網站「待確認」`) });
@@ -541,6 +558,25 @@ function rotationEvents(IND, P, notified) {
   const icon = { up: '🔥', thrust: '🔥', top: '🏆', down: '🧊', break: '🧊' };
   return IND.rotation.filter(r => trk.has(r.id)).map(r => ({ id: `rot:${r.id}:${r.type}:${r.d}`, prio: 3, text: `${icon[r.type] || '🔄'} 追蹤產業：${r.text}` })).filter(e => !notified[e.id]);
 }
+// 台股補充：籌碼異動、持股月營收、法說會
+function twEvents(T, snap, P, notified) {
+  if (!T) return [];
+  const held = new Set(holdAgg(P).map(h => h.key)), day = tpeDay(), out = [];
+  const wk = (() => { const d = new Date(Date.now() + 8 * 3600000); return `${d.getUTCFullYear()}-${Math.floor((d - Date.UTC(d.getUTCFullYear(), 0, 1)) / 6048e5)}`; })();
+  const add = (id, prio, text) => { if (!notified[id]) out.push({ id, prio, text }); };
+  const ICON = { trustBuy: '🟢', foreignBuy: '🟢', foreignSell: '🔴', sbl: '🔴', marginUp: '🟠' };
+  for (const a of T.chips?.alerts || []) add(`chip:${a.k}:${a.type}:${wk}`, held.has(a.k) ? 3 : 2, `${ICON[a.type] || '•'} ${held.has(a.k) ? '持股 ' : ''}${a.k} ${a.n} ${a.text}`);
+  for (const r of T.revenue?.rows || []) {
+    if (!held.has(r.k) || r.p !== T.revenue.period) continue;
+    add(`rev:${r.k}:${r.p}`, 3, `📊 持股 ${r.k} ${r.n} ${r.p.slice(5)} 月營收：年增 ${r.yoy}%、月增 ${r.mom}%${r.surprise != null ? `，比過去平均年增${r.surprise >= 0 ? '高' : '低'} ${Math.abs(r.surprise)} 個百分點` : ''}`);
+  }
+  for (const c of T.conf || []) {
+    const isHeld = held.has(c.k), dd = Math.round((Date.parse(c.date) - Date.parse(day)) / 86400000);
+    if (!c.held && dd === 1) add(`conf:${c.k}:${c.date}`, isHeld ? 3 : 2, `🎤 ${isHeld ? '持股 ' : ''}${c.k} ${c.n} 明天（${c.date.slice(5)}）開法說會`);
+    if (c.held && c.points?.length && dd >= -7) add(`confsum:${c.k}:${c.date}`, isHeld ? 3 : 2, `🎤 ${isHeld ? '持股 ' : ''}${c.k} ${c.n} 法說會重點（${c.date.slice(5)}）：${c.points.join('；')}`);
+  }
+  return out;
+}
 const propTxt = p => (p.type === 'weights' ? `模型權重 ${Math.round(p.from.mlW * 100)}% → ${Math.round(p.to.mlW * 100)}%` : `買進 ${p.from.buyTh}→${p.to.buyTh}、賣出 ${p.from.sellTh}→${p.to.sellTh}、停損 ${p.from.stopK}→${p.to.stopK}×ATR`);
 function proposalEvents(snap, notified) {
   return (snap.proposals?.pending || []).filter(p => !notified['prop:' + p.id]).map(p => ({
@@ -572,7 +608,8 @@ if (require.main === module) (async () => {
     const [q, tx] = await Promise.all([Live.quotes(syms), mk === 'tw' ? Live.taifexNight() : null]);
     console.log(`::notice::即時報價 ${Object.keys(q).length}/${syms.length}${mk === 'tw' ? `、台指期夜盤 ${tx ? tx.last + '（' + (tx.pct ?? 0).toFixed(2) + '%）' : '失敗'}` : ''}`);
     const ind = readJSON(path.join(path.dirname(String(args.snap || 'out/data/snapshot.json')), 'industries.json'), null);
-    const B = premarket(snap, N, P, mk, { q, tx, ind });
+    const twd = readJSON(path.join(path.dirname(String(args.snap || 'out/data/snapshot.json')), 'twdata.json'), null);
+    const B = premarket(snap, N, P, mk, { q, tx, ind, twd });
     console.log(briefText(B, { pub: true }).join('\n'));   // 公開紀錄只印不含個人資料的部分
     if (args.print) return;
     if (args.push !== 'no') await send(B.title, briefText(B), { priority: 3, tags: ['sunrise'] });
@@ -595,7 +632,7 @@ if (require.main === module) (async () => {
     }
   }
   const dataDir = path.dirname(String(args.snap || 'out/data/snapshot.json'));
-  const ev = [...await events(snap, P, notified), ...healthEvents(readJSON(path.join(dataDir, 'status.json'), null), snap, notified), ...newsEvents(readJSON(path.join(dataDir, 'news.json'), null), snap, P, notified), ...proposalEvents(snap, notified), ...rotationEvents(readJSON(path.join(dataDir, 'industries.json'), null), P, notified)].sort((a, b) => b.prio - a.prio);
+  const ev = [...await events(snap, P, notified), ...healthEvents(readJSON(path.join(dataDir, 'status.json'), null), snap, notified), ...newsEvents(readJSON(path.join(dataDir, 'news.json'), null), snap, P, notified), ...proposalEvents(snap, notified), ...rotationEvents(readJSON(path.join(dataDir, 'industries.json'), null), P, notified), ...twEvents(readJSON(path.join(dataDir, 'twdata.json'), null), snap, P, notified)].sort((a, b) => b.prio - a.prio);
   const save = () => { const cut = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10); for (const [k, v] of Object.entries(notified)) if (!k.startsWith('_') && v < cut) delete notified[k]; fs.mkdirSync(path.dirname(stFile), { recursive: true }); fs.writeFileSync(stFile, JSON.stringify(notified)); console.log('NOTIFIED_CHANGED'); };
   // 勿擾時段：只送重大（優先 4 以上），其他先存起來，時段結束後一次送出
   const L = P?.limits || {}, quiet = L.quietOn !== false && inQuiet(L.quietStart ?? 23, L.quietEnd ?? 7);

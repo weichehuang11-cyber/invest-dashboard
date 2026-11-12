@@ -36,6 +36,7 @@ const Proposals = require('./lib/proposals');
 const Industry = require('./lib/industry');
 const WeekCheck = require('./lib/weekcheck');
 const Quality = require('./lib/quality');
+const TWData = require('./lib/twdata');
 const News = require('./lib/news');
 const Digest = require('./lib/digest');
 const NewsAI = require('./lib/newsai');
@@ -226,6 +227,8 @@ async function main() {
       try {
         const td = await Market.tdcc(null);
         if (td && !td.error) {
+          if (heavy.tw.tdccAll && heavy.tw.tdccDate !== td.date) { heavy.tw.tdccAllPrev = heavy.tw.tdccAll; heavy.tw.tdccPrevDate = heavy.tw.tdccDate; }
+          heavy.tw.tdccDate = td.date;
           heavy.tw.tdccAll = Object.fromEntries(Object.entries(td.rows).filter(([id]) => /^(\d{4}|0\d{3,5}[A-Z]?)$/.test(id)).map(([id, o]) => [id, o.b1000]));
           heavy.tw.tdcc = heavy.tw.tdcc || {};
           for (const id of wl.tw) { const o = td.rows[id]; if (!o) continue; const h = (heavy.tw.tdcc[id] || []).filter(x => x.date !== td.date); h.push({ date: td.date, ...o }); heavy.tw.tdcc[id] = h.slice(-26); }
@@ -344,6 +347,7 @@ async function main() {
           dealer20: r2(FinMind.sum(h, 'dealer', 20), 0),
           foreignStreak: FinMind.consecutive(h, 'foreign'), trustStreak: FinMind.consecutive(h, 'trust'),
           volume5: r2(vol5, 0),
+          margin: (() => { const m = fm.margin || []; const a = m[m.length - 1], b = m[Math.max(0, m.length - 6)]; return a ? { bal: a.margin, chg5: b?.margin > 0 ? r2((a.margin / b.margin - 1) * 100, 1) : null, short: a.short } : null; })(),
         };
         // 模型籌碼特徵（定義同 ml/train_tw_chip.py）：法人淨買股數 / 當日成交股數
         const volBy = Object.fromEntries(d.bars.dates.map((x, i) => [x, d.bars.volume[i]]));
@@ -758,6 +762,64 @@ async function main() {
     writeJSON(path.join(OUT, 'universe_hist.json'), series);
     status.universe = `${U.length} 檔`;
   }
+  // ── 台股補充資料：月營收、籌碼異動、大戶持股變化、法說會（收盤後完整更新；結果放 twdata.json）──
+  try {
+    const defsI = readJSON(path.join(ROOT, 'config', 'industries.json'), { groups: [] });
+    const interest = [...new Set([...wl.tw, ...defsI.groups.filter(g => g.m === 'tw').flatMap(g => g.subs.flatMap(x => x.keys))])];
+    const U0 = readJSON(path.join(OUT, 'universe.json'), { list: [] }).list, nm0 = Object.fromEntries(U0.map(u => [u.k, (u.n || '').replace(/\*$/, '')]));
+    for (const [k, it] of Object.entries(items)) nm0[k] = it.name;
+    const TD = heavy.tw.extra = heavy.tw.extra || {};
+    if (fullTW || !TD.revAt) {
+      // 月營收：每天看一次有沒有新月份
+      const rv = await TWData.revenueAll().catch(e => ({ rows: {}, errs: [e.message] }));
+      if (Object.keys(rv.rows).length > 500) {
+        const H = TD.revHist = TD.revHist || {};
+        for (const k of interest) { const r = rv.rows[k]; if (!r?.p) continue; const h = (H[k] || []).filter(x => x.p !== r.p); h.push({ p: r.p, yoy: r.yoy, mom: r.mom, cum: r.cum, rev: r.rev }); H[k] = h.sort((a, b) => a.p.localeCompare(b.p)).slice(-13); }
+        const newMonth = rv.period && rv.period !== TD.revPeriod;
+        TD.revPeriod = rv.period; TD.revAt = Date.now();
+        const rows = interest.map(k => { const h = H[k] || [], last = h[h.length - 1]; if (!last) return null; const prev = h.slice(0, -1).map(x => x.yoy).filter(v => v != null); const avg = prev.length ? prev.reduce((a, b) => a + b, 0) / prev.length : null; return { k, n: nm0[k] || rv.rows[k]?.n || k, p: last.p, yoy: last.yoy, mom: last.mom, cum: last.cum, surprise: avg != null && last.yoy != null ? r2(last.yoy - avg, 1) : null, avgYoY: avg != null ? r2(avg, 1) : null }; }).filter(Boolean);
+        TD.revRows = rows;
+        if (newMonth || !TD.revAI) {
+          const top = [...rows].filter(r => r.p === rv.period).sort((a, b) => Math.abs(b.surprise ?? b.yoy ?? 0) - Math.abs(a.surprise ?? a.yoy ?? 0)).slice(0, 15);
+          try {
+            const txt = await AI.chat([{ role: 'system', content: '你是台股分析師，用繁體中文、精準簡短，只根據提供的數字，不要加免責聲明。' }, { role: 'user', content: `${rv.period} 月營收（年增率、月增率、與過去平均年增率的差距）：\n${top.map(r => `${r.k} ${r.n}：年增 ${r.yoy}%、月增 ${r.mom}%、累計年增 ${r.cum}%${r.surprise != null ? `、比過去平均年增${r.surprise >= 0 ? '高' : '低'} ${Math.abs(r.surprise)} 個百分點` : ''}`).join('\n')}\n\n寫 4 行條列（每行「• 」開頭、40 字內）：哪些公司或族群營收明顯優於或低於平常、可能代表什麼。只輸出條列。` }], { lite: true, timeout: 60000 });
+            TD.revAI = { p: rv.period, text: String(txt).trim() };
+          } catch (e) { log('月營收 AI 摘要失敗', e.message); }
+        }
+        status.revenue = `${rv.period}（${Object.keys(rv.rows).length} 家）`;
+      } else status.revenue = 'fail: ' + (rv.errs || []).join('；').slice(0, 200);
+    }
+    if (fullTW) {
+      // 借券賣出（觀察清單）
+      TD.sbl = TD.sbl || {};
+      for (const k of wl.tw) { try { const x = await TWData.sbl(k, TOKEN); if (x) TD.sbl[k] = x; } catch (_) {} await sleep(200); }
+      // 法說會（每週一次，AI 搜尋）
+      if (!TD.confAt || Date.now() - TD.confAt > 6 * 86400000) {
+        try { TD.conf = await TWData.confCalls(wl.tw.map(k => ({ k, n: nm0[k] || k })), AI); TD.confAt = Date.now(); status.conf = `${TD.conf.length} 場`; } catch (e) { status.conf = 'fail: ' + e.message.slice(0, 150); }
+      }
+    }
+    // 籌碼異動（觀察清單）：投信連買、外資連賣、借券大增、融資增加但股價下跌
+    const chipAlerts = [];
+    for (const k of wl.tw) {
+      const it = items[k], c = it?.chip; if (!c) continue;
+      if (c.trustStreak >= 3) chipAlerts.push({ k, n: it.name, type: 'trustBuy', text: `投信連買 ${c.trustStreak} 天（近 5 日 ${c.trust5 > 0 ? '+' : ''}${c.trust5} 張）` });
+      if (c.foreignStreak <= -5) chipAlerts.push({ k, n: it.name, type: 'foreignSell', text: `外資連賣 ${-c.foreignStreak} 天（近 5 日 ${c.foreign5} 張）` });
+      if (c.foreignStreak >= 5) chipAlerts.push({ k, n: it.name, type: 'foreignBuy', text: `外資連買 ${c.foreignStreak} 天（近 5 日 +${c.foreign5} 張）` });
+      const sb = TD.sbl?.[k]; if (sb?.chg5 != null && sb.chg5 >= 20) chipAlerts.push({ k, n: it.name, type: 'sbl', text: `借券賣出餘額 5 日增加 ${sb.chg5}%（有人在放空）` });
+      if (c.margin?.chg5 != null && c.margin.chg5 >= 10 && (it.ta?.ret5 ?? 0) < -3) chipAlerts.push({ k, n: it.name, type: 'marginUp', text: `融資 5 日增加 ${c.margin.chg5}% 但股價跌 ${it.ta.ret5}%（散戶逢低承接，籌碼變亂）` });
+    }
+    // 大戶持股變化（千張大戶比例，對上一次公布）
+    const A0 = heavy.tw.tdccAll || {}, A1 = heavy.tw.tdccAllPrev || {};
+    const tdccChg = interest.filter(k => A0[k] != null && A1[k] != null).map(k => ({ k, n: nm0[k] || k, b1000: A0[k], chg: r2(A0[k] - A1[k], 2) })).sort((a, b) => b.chg - a.chg);
+    writeJSON(path.join(OUT, 'twdata.json'), {
+      at: new Date().toISOString(), chipDate: heavy.tw.chipMarket?.date || null,
+      revenue: { period: TD.revPeriod || null, rows: TD.revRows || [], ai: TD.revAI || null },
+      chips: { alerts: chipAlerts, watch: wl.tw.map(k => ({ k, n: items[k]?.name, ...(items[k]?.chip || {}), sbl: TD.sbl?.[k] || null })).filter(x => x.n) },
+      tdcc: { date: heavy.tw.tdccDate || null, prev: heavy.tw.tdccPrevDate || null, up: tdccChg.slice(0, 15), down: tdccChg.slice(-15).reverse() },
+      conf: TD.conf || [], confAt: TD.confAt ? new Date(TD.confAt).toISOString() : null,
+    });
+  } catch (e) { log('台股補充資料失敗', e.message); }
+
   // 產業分類：收盤後完整更新重抓該市場的成分股，其他時候沿用上一次（state/industries.json）
   try {
     const defs = readJSON(path.join(ROOT, 'config', 'industries.json'), { groups: [] });

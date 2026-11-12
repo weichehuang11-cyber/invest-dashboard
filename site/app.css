@@ -626,3 +626,9 @@ button, a, select, input, .btn { touch-action: manipulation; }
 .ixlive { min-height: 52px; }
 .expbar { height: 6px; background: var(--line2); border-radius: 3px; margin: 4px 0; overflow: hidden; }
 .expbar i { display: block; height: 100%; background: var(--acc); border-radius: 3px; }
+.tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.tool { display: flex; flex-direction: column; gap: 2px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); text-decoration: none; min-width: 0; }
+.tool:hover { background: var(--bg); }
+.tool .ti { font-size: 20px; }
+.twcol { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 420px) { .tools { grid-template-columns: 1fr 1fr; } }

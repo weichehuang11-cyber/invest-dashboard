@@ -19,7 +19,7 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.11.0';
+  const APP_VERSION = '1.12.0';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1465,8 +1465,11 @@ ${footer()}`;
     };
   }
 
+  const TOOLS = [['industry', '🏭', '產業分類', '族群強弱、輪動、成分股'], ['tw', '🇹🇼', '台股籌碼與營收', '法人、借券、大戶、月營收、法說會'], ['compare', '⚖️', '個股並排比較', '2–4 檔放一起比'], ['lab', '🧪', '策略實驗室', '自訂規則回測'], ['ask', '💬', '問問看', '用系統資料回答你的問題'],
+    ['tax', '🧾', '股利與稅費', '股利、健保補充保費、計稅方式'], ['habits', '🪞', '交易行為檢討', '你的習慣與盲點'], ['paper', '🤖', '虛擬跟單', '照訊號用假錢買賣'], ['decide', '🔧', '待你確認', '模型調整建議']];
+  const toolsHub = () => `<section class="card" aria-labelledby="tl-h"><div class="hd"><h2 id="tl-h">工具</h2></div><div class="tools">${TOOLS.map(([r, i, t, d]) => `<a class="tool" href="#/${r}"><span class="ti" aria-hidden="true">${i}</span><b>${t}</b><span class="small muted">${d}</span></a>`).join('')}</div></section>`;
   function viewJournal() {
-    return `${!SY.get().token ? `<a class="nudge" href="#/settings">⚠️ 論點與紀錄只存在這台裝置。點這裡開啟「加密備份與同步」。</a>` : ''}<section class="card"><div class="field"><label for="jn-q">搜尋我的紀錄</label><input id="jn-q" type="search" placeholder="代號、名稱、理由、結論…" autocomplete="off"><span class="hint">同時搜尋論點（含修改紀錄、已結案）與決策紀錄。持股、論點會自動加密備份（到「設定」開啟）。</span></div></section>
+    return `${toolsHub()}${!SY.get().token ? `<a class="nudge" href="#/settings">⚠️ 論點與紀錄只存在這台裝置。點這裡開啟「加密備份與同步」。</a>` : ''}<section class="card"><div class="field"><label for="jn-q">搜尋我的紀錄</label><input id="jn-q" type="search" placeholder="代號、名稱、理由、結論…" autocomplete="off"><span class="hint">同時搜尋論點（含修改紀錄、已結案）與決策紀錄。持股、論點會自動加密備份（到「設定」開啟）。</span></div></section>
 <section class="card" aria-labelledby="jn-h"><div class="hd"><h2 id="jn-h">我的成績單</h2><span class="note">依你記錄的決定，用之後的實際收盤結算・只存在這台裝置</span></div><div id="jn-body"><p class="loading">計算中…</p></div></section>
 <section class="card" aria-labelledby="md-h"><div class="hd"><h2 id="md-h">我的市場感覺準不準</h2><span class="note">每天在總覽記下感覺，依之後大盤實際走勢統計</span></div><div id="md-body"><p class="loading">計算中…</p></div></section>
 <section class="card" aria-labelledby="th2-h"><div class="hd"><h2 id="th2-h">我的論點</h2><span class="note">每次資料更新都會重新檢查</span></div>${viewThesisList()}</section>${footer()}`;
@@ -2257,10 +2260,11 @@ ${footer()}`;
   function bindIndustry() {
     const mn = $('#main'); if (!mn || mn._ind) return; mn._ind = true;
     mn.addEventListener('click', e => {
-      if (!S.route.startsWith('industry') && S.route !== 'home') return;
+      if (!S.route.startsWith('industry') && !['home', 'tw'].includes(S.route)) return;
       const row = e.target.closest('[data-ind]'); if (row && !e.target.closest('.ind-star, a')) { location.hash = '#/industry/' + encodeURIComponent(row.dataset.ind); return; }
       const st = e.target.closest('.ind-star'); if (st) { e.preventDefault(); const id = st.dataset.it, T = indTrack(); LS.set('indTrack', T.includes(id) ? T.filter(x => x !== id) : [...T, id]); toast(T.includes(id) ? '已取消追蹤' : '已追蹤，盤前資訊與週報會附上這個產業'); render(); return; }
       const so = e.target.closest('[data-of="indsort"]'); if (so) { LS.set('indSort', so.dataset.v); render(); return; }
+      const tr2 = e.target.closest('[data-of="twrev"]'); if (tr2) { LS.set('twRevSort', tr2.dataset.v); render(); return; }
       const dl = e.target.closest('[data-indel]'); if (dl) { if (!confirm('刪除這個自訂產業？')) return; LS.set('indCustom', indCustom().filter(g => g.id !== dl.dataset.indel)); render(); }
     });
     mn.addEventListener('submit', e => {
@@ -2325,6 +2329,29 @@ ${footer()}`;
       ${A.ai?.cloud?.recent?.length ? `<details><summary>AI 評論最近的傾向與結果</summary><div class="pp-list">${['cloud', 'pc'].filter(k => A.ai[k]?.recent?.length).map(k => A.ai[k].recent.map(r => `<div class="pp-row small">${k === 'cloud' ? '雲端' : '電腦'}・${esc(r.d.slice(5))}：台股<b>${esc(r.tw || '—')}</b>${r.twRet != null ? ` → ${pct(r.twRet)} ${r.twHit ? '<span class="ok-text">✓</span>' : '<span class="bad-text">✗</span>'}` : '（等待中）'}・美股<b>${esc(r.us || '—')}</b>${r.usRet != null ? ` → ${pct(r.usRet)} ${r.usHit ? '<span class="ok-text">✓</span>' : '<span class="bad-text">✗</span>'}` : ''}</div>`).join('')).join('')}</div></details>` : ''}
       ${dc ? `<details${dc.bad ? ' open' : ''}><summary>資料日期檢查${dc.bad ? `：<span class="bad-text">${dc.bad} 項過舊</span>` : '：全部一致'}</summary><div class="pp-list">${dc.rows.map(r => `<div class="pp-row small"><b>${esc(r.label)}</b> ${esc(r.date)}${r.ok ? ' <span class="ok-text">✓</span>' : ` <span class="bad-text">✗ 落後 ${r.lag} 個交易日</span>`} <span class="muted">（${esc(r.note)}，基準 ${esc(r.ref)}）</span></div>`).join('')}</div><p class="small muted" style="margin:0">避免拿不同時間點的數字互相比較（例如昨天的 VIX 對今天的即時價）。過舊的項目會照常顯示，但判斷時請留意。</p></details>` : ''}
     </section>`;
+  }
+  // ── 台股籌碼與營收 ──────────────────────────────────────────
+  let TWD = null;
+  async function loadTW() { if (TWD) return TWD; try { TWD = await getJSON(S.base + 'twdata.json'); } catch (_) { TWD = null; } return TWD; }
+  async function viewTW() {
+    const T = await loadTW(); if (!T) return `<div><a href="#/journal" class="small">← 工具</a></div><section class="card"><p class="empty">台股補充資料會在下一次收盤後更新出現。</p></section>`;
+    const sg = v => (v == null ? '—' : `${v > 0 ? '+' : ''}${v}`), stk = v => (!v ? '—' : v > 0 ? `連買 ${v} 天` : `連賣 ${-v} 天`), dt = d => String(d || '').replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3').slice(5).replace('-', '/');
+    const srt = LS.get('twRevSort', 'surprise'), R = [...(T.revenue?.rows || [])].sort((a, b) => (b[srt] ?? -999) - (a[srt] ?? -999));
+    const ICON = { trustBuy: '🟢', foreignBuy: '🟢', foreignSell: '🔴', sbl: '🔴', marginUp: '🟠' };
+    const link = k => (S.snap.items[k] ? `#/s/${encodeURIComponent(k)}` : `#/q/${encodeURIComponent(k)}`);
+    return `<div><a href="#/journal" class="small">← 工具</a></div>
+      <section class="card"><div class="hd"><h1 style="margin:0;font-size:20px">台股籌碼與營收</h1><span class="note">觀察清單與產業分類內的台股・資料 ${esc(tpeTime(T.at))}</span></div></section>
+      <section class="card"><div class="hd"><h2>籌碼異動</h2><span class="note">投信連買 3 天以上、外資連買／連賣 5 天以上、借券賣出 5 日增 20% 以上、融資增加但股價下跌</span></div>
+        ${(T.chips?.alerts || []).length ? `<div class="pp-list">${T.chips.alerts.map(a => `<a class="pp-row" href="${link(a.k)}">${ICON[a.type] || '•'} <b>${esc(a.n)}</b> <span class="small muted">${esc(a.k)}</span><div class="small">${esc(a.text)}</div></a>`).join('')}</div>` : '<p class="small muted" style="margin:0">今天沒有明顯的籌碼異動。</p>'}</section>
+      <section class="card"><div class="hd"><h2>觀察清單籌碼</h2><span class="note">5 日買賣超單位：張</span></div><div class="pp-list">${(T.chips?.watch || []).map(c => `<a class="pp-row" href="${link(c.k)}"><div class="pp-h"><span><b>${esc(c.n)}</b> <span class="small muted">${esc(c.k)}</span></span><span class="small">外資 <b class="${cls(c.foreignStreak)}">${stk(c.foreignStreak)}</b>・投信 <b class="${cls(c.trustStreak)}">${stk(c.trustStreak)}</b></span></div><div class="small muted">5 日：外資 <span class="${cls(c.foreign5)}">${sg(c.foreign5)}</span>、投信 <span class="${cls(c.trust5)}">${sg(c.trust5)}</span>${c.margin ? `・融資 5 日 ${sg(c.margin.chg5)}%` : ''}${c.sbl ? `・借券餘額 5 日 ${sg(c.sbl.chg5)}%` : ''}</div></a>`).join('')}</div></section>
+      <section class="card"><div class="hd"><h2>千張大戶持股變化</h2><span class="note">${T.tdcc?.prev ? `${esc(dt(T.tdcc.prev))} → ${esc(dt(T.tdcc.date))}，單位：百分點` : '需要兩週的集保資料，下週起顯示'}</span></div>
+        ${T.tdcc?.up?.length ? `<div class="twcol"><div><h3 class="pp-sub">增加最多</h3><div class="pp-list">${T.tdcc.up.slice(0, 8).map(x => `<a class="pp-row small" href="${link(x.k)}"><b>${esc(x.n)}</b> <span class="up">+${x.chg}</span> <span class="muted">（${x.b1000}%）</span></a>`).join('')}</div></div><div><h3 class="pp-sub">減少最多</h3><div class="pp-list">${T.tdcc.down.slice(0, 8).map(x => `<a class="pp-row small" href="${link(x.k)}"><b>${esc(x.n)}</b> <span class="down">${x.chg}</span> <span class="muted">（${x.b1000}%）</span></a>`).join('')}</div></div></div>` : ''}</section>
+      <section class="card"><div class="hd"><h2>月營收 ${esc(T.revenue?.period || '')}</h2><span class="note">「比平常」＝這個月年增率減去過去 12 個月平均年增率</span></div>
+        ${T.revenue?.ai?.text ? `<div class="ai"><b>AI 重點</b>${esc(T.revenue.ai.text).replace(/\n/g, '<br>')}</div>` : ''}
+        <div class="filters">${seg('twrev', srt, [['surprise', '比平常'], ['yoy', '年增'], ['mom', '月增']])}</div>
+        <div class="pp-list">${R.slice(0, 40).map(r => `<a class="pp-row" href="${link(r.k)}"><div class="pp-h"><span><b>${esc(r.n)}</b> <span class="small muted">${esc(r.k)}・${esc(r.p)}</span></span><span class="small">年增 <b class="${cls(r.yoy)}">${sg(r.yoy)}%</b></span></div><div class="small muted">月增 <span class="${cls(r.mom)}">${sg(r.mom)}%</span>・累計年增 <span class="${cls(r.cum)}">${sg(r.cum)}%</span>${r.surprise != null ? `・比平常 <b class="${cls(r.surprise)}">${sg(r.surprise)}</b> 個百分點` : ''}</div></a>`).join('')}</div></section>
+      <section class="card"><div class="hd"><h2>法說會</h2><span class="note">AI 用 Google 搜尋整理（前 14 天～後 21 天，每週更新）${T.confAt ? '・' + esc(tpeTime(T.confAt)) : ''}</span></div>
+        ${(T.conf || []).length ? `<div class="pp-list">${[...T.conf].sort((a, b) => a.date.localeCompare(b.date)).map(c => `<a class="pp-row" href="${link(c.k)}"><div class="pp-h"><span><b>${esc(c.n)}</b> <span class="small muted">${esc(c.k)}</span></span><span class="small">${esc(c.date.slice(5).replace('-', '/'))} ${c.held ? '已舉行' : '<b>即將舉行</b>'}</span></div>${(c.points || []).map(x => `<div class="small">・${esc(x)}</div>`).join('')}${c.source ? `<div class="small muted">來源：${esc(c.source)}</div>` : ''}</a>`).join('')}</div>` : '<p class="small muted" style="margin:0">近期沒有查到觀察清單的法說會。</p>'}</section>${footer()}`;
   }
   function viewScorecard() {
     const sc = S.snap.scorecard, st = S.snap.status || {};
@@ -2599,7 +2626,7 @@ ${footer()}`;
   async function render() {
     const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
     S.route = h.startsWith('s/') ? h : (h.split('/')[0] || 'home');
-    const nav = h.startsWith('s/') ? 'home' : S.route === 'all' ? 'home' : ['backtest', 'history', 'paper', 'decide'].includes(S.route) ? 'scorecard' : S.route;
+    const nav = h.startsWith('s/') ? 'home' : S.route === 'all' ? 'home' : ['backtest', 'history'].includes(S.route) ? 'scorecard' : ['paper', 'decide', 'tw', 'compare', 'lab', 'ask', 'tax', 'habits', 'industry'].includes(S.route) ? 'journal' : S.route;
     document.querySelectorAll('[data-nav]').forEach(a => { a.classList.toggle('act', a.dataset.nav === nav); if (a.dataset.nav === nav) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
     const main = $('#main');
     if (!S.snap) return;
@@ -2627,6 +2654,7 @@ ${footer()}`;
     else if (S.route === 'journal') { main.innerHTML = viewJournal(); document.title = '我的成績單・訊號終端'; afterJournal(); }
     else if (S.route === 'scorecard') { main.innerHTML = viewScorecard(); document.title = '模型成績・訊號終端'; if (SY.get().token) loadRemote().then(() => { if (S.route !== 'scorecard' || $('#pcs-h')) return; const h = viewPcScore(); if (h) main.querySelector('footer')?.insertAdjacentHTML('beforebegin', h); }); }
     else if (S.route === 'industry') { main.innerHTML = '<p class="loading">載入產業分類…</p>'; const html = await viewIndustry(decodeURIComponent(h.split('/')[1] || '')); if (S.route !== 'industry') return; main.innerHTML = html; bindIndustry(); document.title = '產業分類・訊號終端'; }
+    else if (S.route === 'tw') { main.innerHTML = '<p class="loading">載入台股資料…</p>'; const html = await viewTW(); if (S.route !== 'tw') return; main.innerHTML = html; bindIndustry(); document.title = '台股籌碼與營收・訊號終端'; }
     else if (S.route === 'decide') { main.innerHTML = viewDecide(); bindDecide(); document.title = '待你確認・訊號終端'; }
     else if (S.route === 'paper') { main.innerHTML = viewPaper(); document.title = '虛擬跟單・訊號終端'; }
     else if (S.route === 'settings') { main.innerHTML = viewSettings(); bindSettings(); document.title = '設定・訊號終端'; }
