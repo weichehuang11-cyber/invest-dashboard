@@ -143,10 +143,11 @@ ${ctx || '（無）'}
 觀察清單：
 ${facts}
 
-請輸出 JSON：{"verdict": "3 句話以內：①新聞或題材上今天真正在推動市場的是什麼、②規則判斷可能沒反映到的風險或機會、③今天最該注意的一件事（不超過 120 字，不要重複今日判斷的理由）", "stocks": {"代號（只寫代號，例如 2330、NVDA）": "一句話點評，30 字以內，說出最關鍵的一件事"}}，stocks 要涵蓋上面每一檔。`;
+請輸出 JSON：{"stance": {"tw": "台股未來一週你的傾向：偏多／偏空／中性 三選一", "us": "美股未來一週：偏多／偏空／中性"}, "verdict": "3 句話以內：①新聞或題材上今天真正在推動市場的是什麼、②規則判斷可能沒反映到的風險或機會、③今天最該注意的一件事（不超過 120 字，不要重複今日判斷的理由）", "stocks": {"代號（只寫代號，例如 2330、NVDA）": "一句話點評，30 字以內，說出最關鍵的一件事"}}，stocks 要涵蓋上面每一檔。`;
   const txt = await chat([{ role: 'system', content: sys }, { role: 'user', content: user }], { json: true });
   const j = JSON.parse((txt.match(/\{[\s\S]*\}/) || [txt])[0]);
-  return { model: chat.last || MODEL, at: new Date().toISOString(), verdict: String(j.verdict || '').trim(), stocks: Object.fromEntries(Object.entries(j.stocks || {}).map(([k, v]) => [aiKey(k), String(v).trim()])) };
+  const st = v => (/偏多|偏空|中性/.exec(String(v || '')) || [null])[0];
+  return { model: chat.last || MODEL, at: new Date().toISOString(), stance: { tw: st(j.stance?.tw), us: st(j.stance?.us) }, verdict: String(j.verdict || '').trim(), stocks: Object.fromEntries(Object.entries(j.stocks || {}).map(([k, v]) => [aiKey(k), String(v).trim()])) };
 }
 
 module.exports = { chat, grounded, commentary, MODEL };

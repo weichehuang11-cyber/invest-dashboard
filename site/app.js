@@ -19,7 +19,7 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.9.0';
+  const APP_VERSION = '1.10.0';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2131,7 +2131,17 @@ ${footer()}`;
     const PR = S.snap.proposals || {}, A = LS.get('approvals', {}), sy = SY.get();
     const pTxt = q => `買進 ≥ ${q.buyTh}、賣出 ≤ ${q.sellTh}、停損 ${q.stopK ? q.stopK + '×ATR' : '不設'}`;
     const m3 = r => r?.n ? `${r.n} 筆・勝率 ${r.win}%・贏大盤 ${r.beat}%・平均超額 <b class="${cls(r.exAvg)}">${pct(r.exAvg)}</b>・持有 ${r.days} 天` : '樣本不足';
+    const actBtns = p => `<div class="dc-act"><button type="button" class="btn primary" data-dc="approve" data-id="${esc(p.id)}">同意套用</button><button type="button" class="btn" data-dc="later" data-id="${esc(p.id)}">稍後再說</button><button type="button" class="btn danger" data-dc="reject" data-id="${esc(p.id)}">拒絕</button></div>`;
+    const wCard = p => {
+      const a = A[p.id], [rt, rc] = REC[p.rec] || ['', ''], k = p.skill || {};
+      const done = a && a.choice !== 'later' ? `<p class="small" style="margin:8px 0 0">你已選擇「${a.choice === 'approve' ? '同意' : '拒絕'}」（${esc(tpeTime(a.at))}）。<button type="button" class="btn sm" data-dc="undo" data-id="${esc(p.id)}">改變主意</button></p>` : '';
+      return `<section class="card dc-card"><div class="hd"><h2>${esc(p.title)}</h2><span class="tag ${rc}">${rt}・證據${esc(p.strength)}</span></div>
+        <div class="dc-change"><span class="small muted">模型</span><span>${Math.round(p.from.mlW * 100)}%</span><span class="dc-arrow">→</span><span><b>${Math.round(p.to.mlW * 100)}%</b></span><span class="small muted">技術面</span><span>${Math.round((1 - p.from.mlW) * 100)}%</span><span class="dc-arrow">→</span><span><b>${Math.round((1 - p.to.mlW) * 100)}%</b></span></div>
+        <ul class="dc-why">${(p.reasons || []).map(r => `<li>${esc(r)}</li>`).join('')}</ul>
+        ${done || actBtns(p) + '<p class="small muted" style="margin:6px 0 0">同意：下一次資料更新起，所有股票的綜合分數改用新比重（訊號可能因此改變）。拒絕：30 天內不再提同一個比重。</p>'}</section>`;
+    };
     const card = p => {
+      if (p.type === 'weights') return wCard(p);
       const a = A[p.id], [rt, rc] = REC[p.rec] || ['', ''];
       const bk = p.backtest || {}, L = p.live, im = p.impact || {};
       const live = L ? `<div class="pp-row"><b>實盤（${esc(L.since || '')} 起）</b>
@@ -2155,8 +2165,8 @@ ${footer()}`;
       </section>`;
     };
     const site = PR.site || {}, cur = Object.entries(site);
-    const now = `<section class="card"><div class="hd"><h2>網站目前的訊號參數</h2></div>${['tw', 'us'].map(m => { const q = site[m]; return `<div class="pp-row"><b>${PM[m]}</b>：${q ? `${pTxt(q)} <span class="small muted">（${esc(tpeTime(q.since))} 核准）</span> <button type="button" class="btn sm" data-dc="revert" data-id="${m}">恢復預設</button>` : `${pTxt(PR.defaults || { buyTh: 63, sellTh: 37, stopK: 2 })} <span class="small muted">（預設；買進門檻會隨 VIX 自動提高）</span>`}</div>`; }).join('')}</section>`;
-    const hist = (PR.recent || []).length ? `<details class="card"><summary>過去的建議</summary><div class="pp-list">${PR.recent.map(x => `<div class="pp-row small">${esc((x.decidedAt || x.at || '').slice(0, 10))}・${esc(x.type === 'revert' ? `${PM[x.m]}恢復預設` : x.title)}${x.to ? `（${pTxt(x.to)}）` : ''}・<b>${{ approved: '已同意', rejected: '已拒絕', superseded: '被新的建議取代' }[x.status] || x.status}</b></div>`).join('')}</div></details>` : '';
+    const now = `<section class="card"><div class="hd"><h2>網站目前的訊號參數</h2></div><div class="pp-row"><b>綜合分數比重</b>：技術面 ${Math.round((1 - (site.mlW ?? 0.5)) * 100)}%、模型 ${Math.round((site.mlW ?? 0.5) * 100)}%${site.mlW != null && site.mlW !== 0.5 ? ` <span class="small muted">（${esc(tpeTime(site.mlWSince))} 核准）</span> <button type="button" class="btn sm" data-dc="revert" data-id="w">恢復預設</button>` : ' <span class="small muted">（預設）</span>'}</div>${['tw', 'us'].map(m => { const q = site[m]; return `<div class="pp-row"><b>${PM[m]}</b>：${q ? `${pTxt(q)} <span class="small muted">（${esc(tpeTime(q.since))} 核准）</span> <button type="button" class="btn sm" data-dc="revert" data-id="${m}">恢復預設</button>` : `${pTxt(PR.defaults || { buyTh: 63, sellTh: 37, stopK: 2 })} <span class="small muted">（預設；買進門檻會隨 VIX 自動提高）</span>`}</div>`; }).join('')}</section>`;
+    const hist = (PR.recent || []).length ? `<details class="card"><summary>過去的建議</summary><div class="pp-list">${PR.recent.map(x => `<div class="pp-row small">${esc((x.decidedAt || x.at || '').slice(0, 10))}・${esc(x.type === 'revert' ? (x.m === 'all' ? '分數比重恢復預設' : `${PM[x.m]}恢復預設`) : x.title)}${x.type === 'weights' ? `（模型 ${Math.round(x.to.mlW * 100)}%）` : x.to ? `（${pTxt(x.to)}）` : ''}・<b>${{ approved: '已同意', rejected: '已拒絕', superseded: '被新的建議取代' }[x.status] || x.status}</b></div>`).join('')}</div></details>` : '';
     const warn = !sy.token || !sy.pass ? `<a class="nudge" href="#/settings">⚠️ 你的選擇要透過「加密備份與同步」送到雲端才會生效。點這裡設定（和持股同步用同一組）。</a>` : '';
     const list = (PR.pending || []).map(card).join('');
     return `<div><a href="#/scorecard" class="small">← 回系統</a></div>${warn}${list || '<section class="card"><p class="empty">目前沒有待確認的調整。每週回測校正後，如果有更好的參數，會在這裡請你確認並推播通知。</p></section>'}${now}${hist}${footer()}`;
@@ -2167,7 +2177,7 @@ ${footer()}`;
       const b = S.route === 'decide' && e.target.closest('[data-dc]'); if (!b) return;
       const A = LS.get('approvals', {}), id = b.dataset.id, k = b.dataset.dc, at = new Date().toISOString();
       if (k === 'undo') delete A[id];
-      else if (k === 'revert') { if (!confirm(`確定把${PM[id]}訊號參數恢復成預設？`)) return; A['revert-' + id + '-' + Date.now()] = { choice: 'approve', at }; }
+      else if (k === 'revert') { if (!confirm(id === 'w' ? '確定把綜合分數比重恢復成技術面、模型各半？' : `確定把${PM[id]}訊號參數恢復成預設？`)) return; A['revert-' + id + '-' + Date.now()] = { choice: 'approve', at }; }
       else { if (k === 'approve' && !confirm('確定套用這組參數？下一次資料更新起生效。')) return; A[id] = { choice: k, at }; }
       LS.set('approvals', A); syncNow(false);
       toast(k === 'approve' ? '已同意，正在同步；下一次資料更新會套用' : k === 'reject' ? '已拒絕，30 天內不再提這組參數' : k === 'later' ? '好，明天再提醒你' : k === 'revert' ? '已送出恢復預設' : '已取消選擇');
@@ -2273,10 +2283,33 @@ ${footer()}`;
     for (const g of indCustom()) if (g.keys.includes(key)) gs.push([{ id: 'c-' + g.id, name: g.name }, null]);
     el.innerHTML = gs.map(([g, sb]) => `<a class="chip" href="#/industry/${encodeURIComponent(g.id)}">${esc(g.name)}${sb && g.subs?.length > 1 ? '・' + esc(sb.name) : ''}</a>`).join('');
   }
+  // ── 準確度總表：所有判斷放在一起比，看該相信哪一套 ─────────────────
+  function accuracyBoard() {
+    const s = S.snap, sc = s.scorecard || {}, A = s.accuracy || {}, rows = [];
+    const add = (name, what, rate, n, base, note) => rows.push({ name, what, rate, n, base, note });
+    add('買賣訊號', '5 日後方向（近 90 天）', sc.d90?.h5?.rate, sc.d90?.h5?.n, 50, '網站的買進／賣出訊號');
+    add('技術面分數', '5 日後方向', A.skill?.ta?.rate, A.skill?.ta?.n, 50, '分數離 50 分 10 分以上才算');
+    add('模型分數', '5 日後方向', A.skill?.ml?.rate, A.skill?.ml?.n, 50, '同上；兩者比較決定建議比重');
+    { const hs = []; for (const m of ['tw', 'us']) for (const v of Object.values(s.conviction?.[m]?.table || {})) for (const t of ['ex5', 'ex20', 'up20']) if (v[t]?.high) hs.push(v[t].test); const n = hs.reduce((a, x) => a + x.n, 0); add('高信心訊號', '驗證期命中', n ? Math.round(hs.reduce((a, x) => a + x.hit * x.n, 0) / n) : null, n, 50, '只有驗證期也準的組合才會亮'); }
+    add('走勢推論', '5 日方向', sc.forecastLive?.h5?.dir, sc.forecastLive?.h5?.n, 50, `八成區間涵蓋 ${sc.forecastLive?.h5?.cov80 ?? '—'}%（應約 80%）`);
+    add('週報下週方向', '方向', s.weekCheck?.summary?.dirHit, s.weekCheck?.summary?.n, 50, `八成區間涵蓋 ${s.weekCheck?.summary?.inRange ?? '—'}%`);
+    { const b = s.paper?.tw?.base; add('虛擬跟單（台股）', '平倉勝率', b?.win, b?.closed, 50, b?.beat != null ? `贏大盤 ${b.beat}%` : ''); }
+    add('雲端 AI 評論', '台股 5 日傾向', A.ai?.cloud?.tw?.rate, A.ai?.cloud?.tw?.n, 50, A.ai?.cloud?.us?.n ? `美股 ${A.ai.cloud.us.rate}%（${A.ai.cloud.us.n}）` : '');
+    add('電腦 AI（反方）', '台股 5 日傾向', A.ai?.pc?.tw?.rate, A.ai?.pc?.tw?.n, 50, A.ai?.pc?.us?.n ? `美股 ${A.ai.pc.us.rate}%（${A.ai.pc.us.n}）` : '');
+    const verdict = r => (!(r.n >= 30) || r.rate == null ? '<span class="muted">累積中</span>' : r.rate >= r.base + 5 ? '<span class="ok-text">✓ 可參考</span>' : r.rate < r.base ? '<span class="bad-text">✗ 不如擲硬幣</span>' : '<span class="muted">普通</span>');
+    const dc = s.dataCheck;
+    return `<section class="card" aria-labelledby="ac0"><div class="hd"><h2 id="ac0">準確度總表</h2><span class="note">系統裡每一套判斷的實際命中率；樣本 30 筆以上才下結論</span></div>
+      <div class="pp-list">${rows.map(r => `<div class="pp-row"><div class="pp-h"><span><b>${esc(r.name)}</b> <span class="small muted">${esc(r.what)}</span></span><span>${r.rate != null ? `<b>${r.rate}%</b>` : '—'} <span class="small muted">${r.n ? r.n + ' 筆' : ''}</span> ${verdict(r)}</span></div>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ''}</div>`).join('')}</div>
+      <p class="small" style="margin:6px 0 0">綜合分數目前比重：技術面 ${Math.round((1 - (A.skill?.current ?? 0.5)) * 100)}%、模型 ${Math.round((A.skill?.current ?? 0.5) * 100)}%${A.skill?.suggest != null && A.skill.suggest !== (A.skill.current ?? 0.5) ? `；依命中率建議改為模型 ${Math.round(A.skill.suggest * 100)}%（到「<a href="#/decide">待確認</a>」決定）` : '；目前不需要調整'}</p>
+      ${A.ai?.cloud?.recent?.length ? `<details><summary>AI 評論最近的傾向與結果</summary><div class="pp-list">${['cloud', 'pc'].filter(k => A.ai[k]?.recent?.length).map(k => A.ai[k].recent.map(r => `<div class="pp-row small">${k === 'cloud' ? '雲端' : '電腦'}・${esc(r.d.slice(5))}：台股<b>${esc(r.tw || '—')}</b>${r.twRet != null ? ` → ${pct(r.twRet)} ${r.twHit ? '<span class="ok-text">✓</span>' : '<span class="bad-text">✗</span>'}` : '（等待中）'}・美股<b>${esc(r.us || '—')}</b>${r.usRet != null ? ` → ${pct(r.usRet)} ${r.usHit ? '<span class="ok-text">✓</span>' : '<span class="bad-text">✗</span>'}` : ''}</div>`).join('')).join('')}</div></details>` : ''}
+      ${dc ? `<details${dc.bad ? ' open' : ''}><summary>資料日期檢查${dc.bad ? `：<span class="bad-text">${dc.bad} 項過舊</span>` : '：全部一致'}</summary><div class="pp-list">${dc.rows.map(r => `<div class="pp-row small"><b>${esc(r.label)}</b> ${esc(r.date)}${r.ok ? ' <span class="ok-text">✓</span>' : ` <span class="bad-text">✗ 落後 ${r.lag} 個交易日</span>`} <span class="muted">（${esc(r.note)}，基準 ${esc(r.ref)}）</span></div>`).join('')}</div><p class="small muted" style="margin:0">避免拿不同時間點的數字互相比較（例如昨天的 VIX 對今天的即時價）。過舊的項目會照常顯示，但判斷時請留意。</p></details>` : ''}
+    </section>`;
+  }
   function viewScorecard() {
     const sc = S.snap.scorecard, st = S.snap.status || {};
+    const ACC = accuracyBoard();
     const STZ = { yahoo: 'Yahoo 報價', vix: 'VIX 恐慌指數', treasury: '美國公債殖利率', t86: '三大法人（TWSE）', finmind: 'FinMind 法人／營收', fundamentals: '美股基本面', breadth: '台股寬度（收盤歷史）', futures: '外資台指期', putcall: '選擇權 P/C 比', valuation: '台股估值', margin: '融資餘額', usValuation: '標普本益比', fred: 'FRED 信用／壓力', indices: '指數推論', ai: '雲端 AI 解讀', tdcc: '集保大戶', exdiv: '除權息', tpex: '上櫃行情', usUniverse: '美股清單', universe: '搜尋清單', usFinancials: '美股財報', twFinancials: '台股財報' };
-    return `
+    return `${ACC}
 <section class="card" aria-labelledby="bt0"><div class="hd"><h2 id="bt0">策略回測</h2><span class="note">過去 2 年照技術面訊號操作的結果，可自行調整門檻、停損、停利；另附 AI 模型的樣本外表現</span><a class="act btn primary sm" href="#/backtest" style="color:#fff">開始回測</a></div></section>
 ${(() => { const W = S.snap.weekCheck; if (!W?.weeks?.length) return ''; const s0 = W.summary || {};
         const wk = w => { const rows = w.rows; const base = rows[0]?.base || w.week; return `<div class="pp-row"><b>${esc(base.slice(5).replace('-', '/'))} 收盤後的預測</b>${rows.some(r => r.bf) ? ' <span class="small muted">回溯重算</span>' : ''}${rows.map(r => `<div class="small">${esc(r.name)}：預測<b>${r.view}</b>（${r.up}%）・區間 ${px(r.lo)}～${px(r.hi)} → ${r.done ? `實際 <b class="${cls(r.ret)}">${pct(r.ret)}</b> ${r.dirHit ? '<span class="up">✓</span>' : '<span class="down">✗</span>'}${r.inRange ? '' : '・<span class="muted">超出區間</span>'}${r.brokeSup ? '・跌破支撐' : ''}${r.brokeRes ? '・突破壓力' : ''}` : r.days ? `進行中（${r.days}/5 天，目前 <span class="${cls(r.ret)}">${pct(r.ret)}</span>）` : '等待中'}</div>`).join('')}</div>`; };

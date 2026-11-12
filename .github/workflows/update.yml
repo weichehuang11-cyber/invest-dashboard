@@ -114,6 +114,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           BACKUP_GIST_ID: ${{ secrets.BACKUP_GIST_ID }}
           BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          LOCAL_GIST_ID: ${{ secrets.LOCAL_GIST_ID }}
         run: |
           ARGS="--out=out/data --state=state"
           [ -n "${{ steps.mode.outputs.full }}" ] && ARGS="$ARGS --full=${{ steps.mode.outputs.full }} --archive-daily=state/archive"

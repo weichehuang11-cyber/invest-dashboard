@@ -32,11 +32,14 @@ function applyApprovals(st, approvals, log = () => {}) {
     if (st.applied[id] === a.at) continue;
     st.applied[id] = a.at;
     if (id.startsWith('revert-')) {
-      const m = id.split('-')[1]; if (st.site[m]) { st.list.push({ id, m, type: 'revert', status: 'approved', at: a.at, from: st.site[m] }); delete st.site[m]; changed = true; log('恢復網站預設', m); }
+      const m = id.split('-')[1];
+      if (m === 'w') { if (st.site.mlW != null) { st.list.push({ id, m: 'all', type: 'revert', status: 'approved', at: a.at, from: { mlW: st.site.mlW } }); delete st.site.mlW; delete st.site.mlWSince; changed = true; } continue; }
+      if (st.site[m]) { st.list.push({ id, m, type: 'revert', status: 'approved', at: a.at, from: st.site[m] }); delete st.site[m]; changed = true; log('恢復網站預設', m); }
       continue;
     }
     const p = st.list.find(x => x.id === id && x.status === 'pending'); if (!p) continue;
-    if (a.choice === 'approve') { st.site[p.m] = { ...p.to, since: a.at, from: id }; p.status = 'approved'; changed = true; log('已核准', id); }
+    if (a.choice === 'approve' && p.type === 'weights') { st.site.mlW = p.to.mlW; st.site.mlWSince = a.at; p.status = 'approved'; changed = true; log('已核准權重', id); }
+    else if (a.choice === 'approve') { st.site[p.m] = { ...p.to, since: a.at, from: id }; p.status = 'approved'; changed = true; log('已核准', id); }
     else if (a.choice === 'reject') { p.status = 'rejected'; changed = true; }
     p.decidedAt = a.at;
   }
@@ -47,7 +50,7 @@ function applyApprovals(st, approvals, log = () => {}) {
 function propose(st, m, { tune, paper, items, now = new Date().toISOString() }) {
   st.site = st.site || {}; st.list = st.list || [];
   const cand = tune?.params, cur = current(st.site, m);
-  const pend = st.list.filter(x => x.m === m && x.status === 'pending');
+  const pend = st.list.filter(x => x.m === m && x.status === 'pending' && x.type !== 'weights');
   if (!cand || same(cand, cur)) { for (const x of pend) { x.status = 'superseded'; x.decidedAt = now; } return null; }
   const id = pid(m, cand);
   const rej = st.list.find(x => x.id === id && x.status === 'rejected' && Date.now() - Date.parse(x.decidedAt || x.at) < 30 * 86400000);
@@ -88,10 +91,27 @@ function propose(st, m, { tune, paper, items, now = new Date().toISOString() }) 
 }
 const pick = b => ({ total: r2(b.total, 0), closed: b.closed, win: b.win, beat: b.beat, exAvg: b.exAvg, open: b.open?.length || 0 });
 
+/** 技術 vs 模型：命中率差距夠大時，建議調整模型權重（同樣要你確認） */
+function proposeWeights(st, skill, now = new Date().toISOString()) {
+  st.site = st.site || {}; st.list = st.list || [];
+  const cur = st.site.mlW ?? 0.5, to = skill?.suggest;
+  const pend = st.list.filter(x => x.type === 'weights' && x.status === 'pending');
+  if (to == null || Math.abs(to - cur) < 0.05) { for (const x of pend) { x.status = 'superseded'; x.decidedAt = now; } return null; }
+  const id = `w-${to}`;
+  if (st.list.find(x => x.id === id && x.status === 'rejected' && Date.now() - Date.parse(x.decidedAt || x.at) < 30 * 86400000)) return null;
+  for (const x of pend) if (x.id !== id) { x.status = 'superseded'; x.decidedAt = now; }
+  const better = (skill.ml.rate ?? 0) > (skill.ta.rate ?? 0) ? '模型' : '技術面';
+  const p = { id, type: 'weights', m: 'all', at: pend.find(x => x.id === id)?.at || now, updated: now, status: 'pending', title: '綜合分數的模型權重調整',
+    from: { mlW: cur }, to: { mlW: to }, rec: Math.min(skill.ta.n, skill.ml.n) >= 150 ? 'approve' : 'wait', strength: Math.min(skill.ta.n, skill.ml.n) >= 150 ? '強' : Math.min(skill.ta.n, skill.ml.n) >= 80 ? '中' : '弱',
+    reasons: [`近期方向命中率：技術面 ${skill.ta.rate}%（${skill.ta.n} 次）、模型 ${skill.ml.rate}%（${skill.ml.n} 次）`, `${better}比較準，建議模型權重 ${Math.round(cur * 100)}% → ${Math.round(to * 100)}%（技術面 ${Math.round((1 - to) * 100)}%）`, '只計算分數明顯偏多或偏空（離 50 分 10 分以上）、5 日後漲跌超過 0.5% 的紀錄'],
+    skill };
+  st.list = st.list.filter(x => !(x.id === id && x.status === 'pending')); st.list.push(p);
+  return p;
+}
 /** 給網站：待確認＋最近的紀錄＋目前參數 */
 function view(st) {
   const L = st.list || [];
   return { site: st.site || {}, defaults: DEF, pending: L.filter(x => x.status === 'pending'), recent: L.filter(x => x.status !== 'pending').slice(-8).reverse() };
 }
 
-module.exports = { applySignal, applyApprovals, propose, view, current, DEF };
+module.exports = { applySignal, applyApprovals, propose, proposeWeights, view, current, DEF };

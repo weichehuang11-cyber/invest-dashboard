@@ -136,6 +136,8 @@ async function events(snap, P, notified) {
   // 觀察清單訊號轉變（持股優先標示）
   for (const c of snap.changes || []) if (c.tag === '訊號') add(`sig:${c.key}:${c.title}:${day}`, held.has(c.key) ? 4 : 3, `${held.has(c.key) ? '⚠️ 持股 ' : '🔄 '}${c.title}（${c.detail}）`);
   // 市場
+  // 資料日期不一致或過舊（一天最多一次）
+  { const bad = (snap.dataCheck?.rows || []).filter(r => !r.ok); if (bad.length) add(`data:${bad.map(r => r.label).join('|')}:${day}`, 2, `⚙️ 資料過舊：${bad.map(r => `${r.label}（${r.date}，落後 ${r.lag} 個交易日）`).join('、')}，相關判斷可能不準`); }
   // 同一種警訊一天只通知一次（去掉數字當作類型，數字變動不算新警訊）
   for (const sgl of snap.health?.signals || []) if (sgl.sev >= 3) add(`mkt:${sgl.text.replace(/[-+]?[\d.,]+/g, '#')}:${day}`, 4, `🚨 ${sgl.text}`);
   if (snap.verdict?.trend && snap.verdict.trend !== '與前次相同') add(`verdict:${snap.verdict.headline}:${day}`, 3, `🧭 今日判斷${snap.verdict.trend}：${snap.verdict.headline}`);
@@ -495,7 +497,7 @@ function premarket(snap, N, P, market, live = {}) {
   if (IND && trk.length) { const Ind = require('./lib/industry'); const L = [...(IND.groups || []), ...(P.indCustom || []).map(c => ({ id: 'c-' + c.id, name: c.name, m: market, stats: Ind.groupStats(c.keys, IND.stocks || {}, IND.bench?.[market]) }))].filter(g => trk.includes(g.id) && g.m === market).map(g => Ind.line(g, IND.bench?.[g.m])).filter(Boolean); if (L.length) S.push({ h: '追蹤的產業', lines: L, priv: true }); }
   // 6b. 待你確認的調整
   const pend = snap.proposals?.pending || [];
-  if (pend.length) S.push({ h: '待你確認', lines: pend.map(p => `${p.title}：買進 ${p.from.buyTh}→${p.to.buyTh}、賣出 ${p.from.sellTh}→${p.to.sellTh}（${REC[p.rec] || ''}，證據${p.strength}）→ 網站「待確認」`) });
+  if (pend.length) S.push({ h: '待你確認', lines: pend.map(p => `${p.title}：${propTxt(p)}（${REC[p.rec] || ''}，證據${p.strength}）→ 網站「待確認」`) });
   // 7. 論點條件（個人）
   if (P) {
     const trig = Object.entries(P.journal?.theses || {}).map(([k, t]) => { const it = items[k]; if (!it || it.market !== market) return null; const h = (t.conds || []).map(c => condHit(c, it, P)).filter(x => x[0]).map(x => x[1]); return h.length ? `${k}：${h.join('、')}` : null; }).filter(Boolean);
@@ -532,14 +534,15 @@ async function sendMail(B) {
 
 // 調整建議：有新的（或內容更新的）待確認項目就通知
 const REC = { approve: '建議同意', wait: '建議再觀察', reject: '建議拒絕' };
+const propTxt = p => (p.type === 'weights' ? `模型權重 ${Math.round(p.from.mlW * 100)}% → ${Math.round(p.to.mlW * 100)}%` : `買進 ${p.from.buyTh}→${p.to.buyTh}、賣出 ${p.from.sellTh}→${p.to.sellTh}、停損 ${p.from.stopK}→${p.to.stopK}×ATR`);
 function proposalEvents(snap, notified) {
   return (snap.proposals?.pending || []).filter(p => !notified['prop:' + p.id]).map(p => ({
     id: 'prop:' + p.id, prio: 3, click: SITE ? SITE + '#/decide' : null,
-    text: `🔧 待你確認：${p.title}（買進 ${p.from.buyTh}→${p.to.buyTh}、賣出 ${p.from.sellTh}→${p.to.sellTh}、停損 ${p.from.stopK}→${p.to.stopK}×ATR）｜${REC[p.rec] || ''}・證據${p.strength}｜到網站「待確認」決定`,
+    text: `🔧 待你確認：${p.title}（${propTxt(p)}）｜${REC[p.rec] || ''}・證據${p.strength}｜到網站「待確認」決定`,
   }));
 }
 
-module.exports = { loadPersonal, proposalEvents, send, decrypt, inQuiet, healthEvents, newsEvents, monthly, premarket, weekly, briefText, briefHtml };
+module.exports = { loadLocal, loadPersonal, proposalEvents, send, decrypt, inQuiet, healthEvents, newsEvents, monthly, premarket, weekly, briefText, briefHtml };
 if (require.main === module) (async () => {
   const snap = readJSON(String(args.snap || 'out/data/snapshot.json'), null);
   if (!snap) { console.log('沒有快照，略過通知'); return; }

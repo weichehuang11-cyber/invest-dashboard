@@ -47,19 +47,20 @@ function evidence({ ta, tScore, chip, fund, ml, market }) {
   return ev;
 }
 
-function score({ ta, changePct, ml, chip, fund, market, vix }) {
+function score({ ta, changePct, ml, chip, fund, market, vix, mlW = 0.5 }) {
   const tScore = taScore(ta, changePct);
   let s = tScore;
   // 模型是三分類（賣/觀望/買），單看買進機率會把分數往下拉（基準約 33%）。
   // 改用「買進機率 − 賣出機率」以 50 為中心換算：模型沒有偏向時不影響分數。
+  let mlScore = null;
   if (ml && ml.buyProb != null && !ml.error) {
-    const mlScore = clamp(50 + (ml.buyProb - (ml.sellProb ?? 0)) * 100, 5, 95);
-    s = 0.5 * s + 0.5 * mlScore;
+    mlScore = clamp(50 + (ml.buyProb - (ml.sellProb ?? 0)) * 100, 5, 95);
+    s = (1 - mlW) * s + mlW * mlScore;   // 模型權重預設 0.5；依實際命中率建議調整，需你在「待確認」同意
   }
   s = clamp(s, 5, 95);
   const bt = buyThreshold(vix);
   const sig = s >= bt ? 'BUY' : s <= 37 ? 'SELL' : 'HOLD';
-  return { sig, score: Math.round(s), taScore: Math.round(tScore), buyThreshold: bt, evidence: evidence({ ta, tScore, chip, fund, ml, market }) };
+  return { sig, score: Math.round(s), taScore: Math.round(tScore), mlScore: mlScore == null ? null : Math.round(mlScore), mlW, buyThreshold: bt, evidence: evidence({ ta, tScore, chip, fund, ml, market }) };
 }
 
 module.exports = { score, taScore, buyThreshold, evidence };

@@ -35,6 +35,7 @@ const Paper = require('./lib/paper');
 const Proposals = require('./lib/proposals');
 const Industry = require('./lib/industry');
 const WeekCheck = require('./lib/weekcheck');
+const Quality = require('./lib/quality');
 const News = require('./lib/news');
 const Digest = require('./lib/digest');
 const NewsAI = require('./lib/newsai');
@@ -377,7 +378,7 @@ async function main() {
     // Beta：相對大盤（美股對標普 500、台股對加權指數），依共同交易日對齊，近 120 日
     const bench = daily[market === 'tw' ? '^TWII' : '^GSPC'];
     if (ta && bench) ta.beta = betaOf(d.bars, bench.bars, 120);
-    const sig = Proposals.applySignal(Signal.score({ ta, changePct: d.changePct, ml, chip, fund, market, vix: vix?.price }), propSt.site, market, d.price, ta?.atr);
+    const sig = Proposals.applySignal(Signal.score({ ta, changePct: d.changePct, ml, chip, fund, market, vix: vix?.price, mlW: propSt.site?.mlW ?? 0.5 }), propSt.site, market, d.price, ta?.atr);
     // 財報體質明確時，基本面證據以財報為準（月營收／分析師評等為輔）
     const finA = market === 'tw' ? heavy.tw.fin?.[key] : heavy.us.fin?.[key];
     if (finA && Math.abs(finA.score) >= 2) sig.evidence.fund = finA.score > 0 ? 'pos' : 'neg';
@@ -568,7 +569,7 @@ async function main() {
     const logIt = (it.market === 'tw' && fullTW) || (it.market === 'us' && fullUS);
     if (!logIt || it.signal.sig === 'HOLD') continue;
     if (predictions.some(p => p.key === it.key && p.date === it.marketDate)) continue;
-    predictions.push({ key: it.key, market: it.market, date: it.marketDate, timestamp: nowIso, signal: it.signal.sig, score: it.signal.score, price: it.price, buyProb: it.ml?.buyProb ?? null });
+    predictions.push({ key: it.key, market: it.market, date: it.marketDate, timestamp: nowIso, signal: it.signal.sig, score: it.signal.score, price: it.price, buyProb: it.ml?.buyProb ?? null, ta: it.signal.taScore ?? null, mls: it.signal.mlScore ?? null });
   }
   predictions = predictions.filter(p => Date.parse(p.timestamp) > Date.now() - 400 * 86400000);
   for (const p of predictions) {
@@ -696,6 +697,22 @@ async function main() {
     } else heavy.ai = aPrev;
   }
   snapshot.ai = heavy.ai || null;
+  // ── 準確度：AI 評論對答案、技術 vs 模型命中率（建議權重）、資料日期檢查 ──
+  try {
+    const aiFile = path.join(STATE, 'ai-stance.json'), aiLog = readJSON(aiFile, []), day = indices['^TWII']?.marketDate;
+    const pIdx = k => indices[k]?.price;
+    if (FULL && heavy.ai?.verdict) Quality.aiRecord(aiLog, { day, src: 'cloud', tw: heavy.ai.stance?.tw || Quality.stanceOf(heavy.ai.verdict), us: heavy.ai.stance?.us || Quality.stanceOf(heavy.ai.verdict), twii: pIdx('^TWII'), gspc: pIdx('^GSPC') });
+    if (FULL && process.env.LOCAL_GIST_ID) {
+      const PC = await require('./notify').loadLocal().catch(() => null), t = PC?.llm?.verdict;
+      if (t && Date.now() - Date.parse(PC.llm.at || PC.at || 0) < 36 * 3600000) { const st = Quality.stanceOf(t); Quality.aiRecord(aiLog, { day, src: 'pc', tw: st, us: st, twii: pIdx('^TWII'), gspc: pIdx('^GSPC') }); }
+    }
+    if (FULL) writeJSON(aiFile, aiLog);
+    const barsOf = k => (longDaily[k] || daily[k])?.bars;
+    const skill = Quality.componentSkill(predictions, barsOf);
+    snapshot.accuracy = { ai: Quality.aiEvaluate(aiLog, barsOf), skill: { ...skill, current: propSt.site?.mlW ?? 0.5 } };
+    if (FULL) { const pw = Proposals.proposeWeights(propSt, skill); if (pw) { log('權重建議', pw.id); snapshot.proposals = Proposals.view(propSt); } }
+  } catch (e) { log('準確度計算失敗', e.message); }
+  try { snapshot.dataCheck = Quality.dataCheck(snapshot); if (snapshot.dataCheck.bad) log('資料日期警告', snapshot.dataCheck.rows.filter(r => !r.ok).map(r => r.label).join('、')); } catch (e) { log('資料日期檢查失敗', e.message); }
   if (!FULL && propChanged) { writeJSON(propFile, propSt); console.log('DIGEST_CHANGED'); }   // 盤中讀到你的核准，也立刻存檔
   writeJSON(path.join(OUT, 'snapshot.json'), snapshot);
   for (const key of Object.keys(items)) {
