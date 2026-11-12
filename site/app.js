@@ -19,7 +19,7 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.13.0';
+  const APP_VERSION = '1.14.0';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -221,9 +221,13 @@
   // ── 持股（只存在瀏覽器）─────────────────────────────────────
   const H = { load: () => LS.get('holdings', { items: [], cash: 0 }), save: h => LS.set('holdings', h) };
   const fx = () => (S.snap.env.find(e => e.key === 'twd')?.value) || 32;
+  // 多帳戶：每筆持股可標帳戶；選了帳戶就只算那個帳戶（現金照比例不分，顯示全部現金）
+  const ACCT0 = '主帳戶';
+  const accounts = () => [...new Set(H.load().items.map(x => x.acct || ACCT0))];
+  const curAcct = () => { const a = LS.get('acct', ''); return a && accounts().includes(a) ? a : ''; };
   function holdings() {
-    const h = H.load(), rate = fx();
-    const rows = h.items.map(x => {
+    const h = H.load(), rate = fx(), A = curAcct();
+    const rows = h.items.filter(x => !A || (x.acct || ACCT0) === A).map(x => {
       let it = S.snap.items[x.key];
       if (!it && UNI) { const u = UNI.list.find(z => z.k === x.key); if (u && isNum(u.c)) it = { key: u.k, name: u.n, market: u.m, price: u.c, prevClose: isNum(u.p) ? u.c / (1 + u.p / 100) : u.c, changePct: u.p, quick: true, ta: {}, signal: { evidence: {} } }; }
       const k = it?.market === 'us' ? rate : 1;
@@ -1804,13 +1808,13 @@ ${footer()}`;
   }
   function viewPortfolio() {
     const h = H.load(), opts = Object.keys(S.snap.items).map(k => `<option value="${esc(k)}">${esc(k)} ${esc(nameOf(k))}</option>`).join('');
-    const rowHtml = (x, i) => `<div class="hrow" data-i="${i}"><input aria-label="代號" list="hold-list" value="${esc(x.key || '')}" placeholder="代號，如 2330、NVDA"><input aria-label="股數" type="number" inputmode="decimal" value="${x.shares ?? ''}" placeholder="股數"><input aria-label="平均成本" type="number" inputmode="decimal" step="any" value="${x.cost ?? ''}" placeholder="成本（原幣）"><button type="button" class="iconbtn" aria-label="刪除這一列" data-del="${i}">✕</button></div>`;
+    const rowHtml = (x, i) => `<div class="hrow" data-i="${i}"><input aria-label="代號" list="hold-list" value="${esc(x.key || '')}" placeholder="代號，如 2330、NVDA"><input aria-label="股數" type="number" inputmode="decimal" value="${x.shares ?? ''}" placeholder="股數"><input aria-label="平均成本" type="number" inputmode="decimal" step="any" value="${x.cost ?? ''}" placeholder="成本（原幣）"><input aria-label="帳戶" list="acct-list" value="${esc(x.acct || '')}" placeholder="帳戶（可不填）"><button type="button" class="iconbtn" aria-label="刪除這一列" data-del="${i}">✕</button></div>`;
     return `${!SY.get().token ? `<a class="nudge" href="#/settings">⚠️ 持股只存在這台裝置。點這裡開啟「加密備份與同步」，換手機或清除瀏覽器也不會遺失。</a>` : ''}${h.items.length ? `<section class="card" aria-labelledby="pa-h"><div class="hd"><h2 id="pa-h">組合分析</h2><span class="note">歸因、績效、回撤、相關性、曝險・只在你的裝置上計算</span></div><div id="pa-body"><p class="loading">計算中…</p></div></section>` : ''}
 <section class="card" aria-labelledby="pe-h">
   <div class="hd"><h2 id="pe-h">我的持股</h2><span class="note">只存在這台裝置的瀏覽器，不會上傳到網站。換裝置可用「匯出／匯入」（含論點、決策紀錄、自選、提醒）。</span></div>
   <datalist id="hold-list">${opts}</datalist>
   <form id="pf-form" class="form">
-    <div class="hrow small muted" aria-hidden="true"><span>代號</span><span>股數</span><span>平均成本（原幣）</span><span></span></div>
+    <div class="hrow small muted" aria-hidden="true"><span>代號</span><span>股數</span><span>平均成本（原幣）</span><span>帳戶</span><span></span></div><datalist id="acct-list">${[ACCT0, ...accounts()].filter((v, i, a) => a.indexOf(v) === i).map(a => `<option value="${esc(a)}">`).join('')}</datalist>
     <div id="hold-rows" class="form">${(h.items.length ? h.items : [{}]).map(rowHtml).join('')}</div>
     <div class="actions"><button type="button" class="btn" id="add-row">＋ 新增一列</button></div>
     <div class="field" style="max-width:280px"><label for="cash">現金（新台幣）</label><input id="cash" type="number" inputmode="decimal" value="${h.cash || ''}" placeholder="0"></div>
@@ -1836,7 +1840,7 @@ ${(h.log || []).length ? `<section class="card" aria-labelledby="hl2-h"><div cla
   }
   function bindPortfolio() {
     const rows = $('#hold-rows'), msg = $('#pf-msg');
-    const read = () => [...rows.querySelectorAll('.hrow')].map(r => { const [k, s, c] = r.querySelectorAll('input'); return { key: k.value.trim().toUpperCase().replace(/\.TWO?$/, ''), shares: parseFloat(s.value), cost: c.value === '' ? null : parseFloat(c.value) }; }).filter(x => x.key && x.shares > 0);
+    const read = () => [...rows.querySelectorAll('.hrow')].map(r => { const [k, s, c, a] = r.querySelectorAll('input'); const acct = (a?.value || '').trim(); return { key: k.value.trim().toUpperCase().replace(/\.TWO?$/, ''), shares: parseFloat(s.value), cost: c.value === '' ? null : parseFloat(c.value), ...(acct && acct !== ACCT0 ? { acct } : {}) }; }).filter(x => x.key && x.shares > 0);
     $('#add-row').onclick = () => { const i = rows.children.length; rows.insertAdjacentHTML('beforeend', `<div class="hrow" data-i="${i}"><input aria-label="代號" list="hold-list" placeholder="代號，如 2330、NVDA"><input aria-label="股數" type="number" inputmode="decimal" placeholder="股數"><input aria-label="平均成本" type="number" inputmode="decimal" step="any" placeholder="成本（原幣）"><button type="button" class="iconbtn" aria-label="刪除這一列">✕</button></div>`); rows.lastElementChild.querySelector('input').focus(); };
     rows.addEventListener('click', e => { const b = e.target.closest('.iconbtn'); if (b) b.closest('.hrow').remove(); });
     $('#pf-form').onsubmit = e => { e.preventDefault(); const items = read(), old = H.load(); const dec = (old.items || []).filter(o => o.shares > ((items.find(x => x.key === o.key) || {}).shares || 0)); const sold = dec.length && confirm(`有 ${dec.length} 檔股數減少（${dec.map(o => o.key).join('、')}）。這是賣出嗎？\n按「確定」會記一筆已實現損益（用目前價格估算）；只是修正輸入錯誤請按「取消」。`) ? recordSells(old.items || [], items) : []; const log = JSON.stringify(old.items) !== JSON.stringify(items) || old.cash !== (parseFloat($('#cash').value) || 0) ? [...(old.log || []), { at: new Date().toISOString(), items: old.items, cash: old.cash }].slice(-100) : (old.log || []); H.save({ items, cash: parseFloat($('#cash').value) || 0, log }); msg.className = 'small ok-text'; msg.textContent = `已儲存 ${items.length} 檔持股。${sold.length ? `已記錄 ${sold.length} 筆賣出（已實現損益，見下方）。` : ''}`; if (sold.length) setTimeout(render, 1200); };
@@ -2540,6 +2544,65 @@ ${footer()}`;
       $('#ask-q').value = ''; render();
     };
   }
+  // ── 股利與稅費試算 ──────────────────────────────────────────
+  const TAX_BR = [5, 12, 20, 30, 40];
+  function viewTax() {
+    const P = holdings(), rate = fx(), y0 = new Date().getFullYear();
+    const yr = +(LS.get('taxYear', y0)), br = +(LS.get('taxBr', 12));
+    // 今年已發＋（今年還沒發的用去年同期估）
+    const got = divsFor(yr, P), last = divsFor(yr - 1, P).map(d => ({ ...d, date: String(yr) + d.date.slice(4), est: true }));
+    const est = yr === y0 ? last.filter(d => d.date > new Date().toISOString().slice(0, 10) && !got.some(g => g.key === d.key && g.date.slice(5, 7) === d.date.slice(5, 7))) : yr > y0 ? last : [];
+    const all = [...got, ...est].sort((a, b) => a.date.localeCompare(b.date));
+    const tw = all.filter(d => d.cur === 'TWD'), us = all.filter(d => d.cur === 'USD');
+    const twSum = tw.reduce((a, d) => a + d.amt, 0), usSum = us.reduce((a, d) => a + d.amt * rate, 0);
+    const nhiRows = tw.filter(d => d.amt >= 20000), nhi = nhiRows.reduce((a, d) => a + Math.min(d.amt, 10000000) * 0.0211, 0);
+    const credit = Math.min(twSum * 0.085, 80000), A = Math.max(twSum * br / 100 - credit, -credit), B = twSum * 0.28;
+    const better = A <= B ? '合併計稅' : '分開計稅', save = Math.abs(A - B);
+    const usWh = usSum * 0.3;
+    return `<div><a href="#/journal" class="small">← 工具</a></div>
+      <section class="card"><div class="hd"><h1 style="margin:0;font-size:20px">股利與稅費試算</h1><span class="note">依你的持股與各檔配息紀錄估算；只是報稅參考</span></div>
+        <div class="form" style="max-width:520px"><div class="alform"><div class="field"><label for="tx-y">年度</label><select id="tx-y">${[y0 + 1, y0, y0 - 1].map(v => `<option${v === yr ? ' selected' : ''}>${v}</option>`).join('')}</select></div>
+        <div class="field"><label for="tx-br">你的綜所稅級距</label><select id="tx-br">${TAX_BR.map(v => `<option value="${v}"${v === br ? ' selected' : ''}>${v}%</option>`).join('')}</select></div></div></div></section>
+      <section class="card"><div class="hd"><h2>${yr} 年股利</h2><span class="note">${est.length ? `含 ${est.length} 筆依去年同期估算的未來配息` : '已發放的配息'}${yr > y0 ? '（明年全部用今年估）' : ''}</span></div>
+        <div class="ind-kpi"><div><span class="small muted">台股股利</span><b>${int(twSum)}</b></div><div><span class="small muted">美股股利（台幣）</span><b>${int(usSum)}</b></div><div><span class="small muted">健保補充保費</span><b class="bad-text">${nhi ? '−' : ''}${int(nhi)}</b><span class="small muted">${nhiRows.length} 筆單筆 ≥ 2 萬</span></div><div><span class="small muted">美股預扣 30%</span><b class="bad-text">${usWh ? '−' : ''}${int(usWh)}</b></div></div>
+        ${all.length ? `<details><summary>逐筆明細</summary><div class="pp-list">${all.map(d => `<div class="pp-row small">${esc(d.date.slice(5))} <b>${esc(nameOf(d.key))}</b> ${esc(d.key)}：每股 ${fix(d.ps, 2)} × ${int(d.shares)} 股 = <b>${d.cur === 'USD' ? 'US$' + fix(d.amt, 0) : int(d.amt)}</b>${d.est ? ' <span class="muted">（估）</span>' : ''}${d.cur === 'TWD' && d.amt >= 20000 ? ` <span class="bad-text">補充保費 ${int(d.amt * 0.0211)}</span>` : ''}</div>`).join('')}</div></details>` : '<p class="small muted">持股沒有配息紀錄。</p>'}</section>
+      <section class="card"><div class="hd"><h2>台股股利的兩種計稅方式</h2><span class="note">每年 5 月報稅時二選一（全戶）</span></div>
+        <div class="pp-list"><div class="pp-row"><div class="pp-h"><b>合併計稅</b><b class="${A > 0 ? 'bad-text' : 'ok-text'}">${A >= 0 ? '多繳' : '可退'} ${int(Math.abs(A))}</b></div><div class="small muted">股利併入所得，按 ${br}% 計稅，再抵減 8.5%（每戶上限 8 萬）：${int(twSum * br / 100)} − ${int(credit)}</div></div>
+        <div class="pp-row"><div class="pp-h"><b>分開計稅</b><b class="bad-text">多繳 ${int(B)}</b></div><div class="small muted">股利單獨按 28% 計稅</div></div></div>
+        <div class="cvnote small" style="margin-top:8px">${twSum ? `以你填的 ${br}% 級距，<b>${better}</b>比較划算，約省 ${int(save)} 元。` : '今年沒有台股股利。'}一般來說，級距 30% 以下選合併、40% 選分開比較划算；股利很多時，8 萬抵減上限會讓分界點往下移。</div>
+        <p class="small muted" style="margin:6px 0 0">補充保費：單筆股利 ≥ 2 萬元時，發放當下扣 2.11%（單筆上限 1,000 萬）。美股股利：預扣 30% 後就結束；全年海外所得 ≥ 100 萬要申報基本所得額，合計超過約 750 萬才會被課最低稅負。稅制以財政部當年度公告為準。</p></section>${footer()}`;
+  }
+
+  // ── 交易行為檢討 ────────────────────────────────────────────
+  async function viewHabits() {
+    const j = J.load(), D = (j.decisions || []).filter(d => d.action !== 'hold' && isNum(d.price));
+    const keys = [...new Set(D.map(d => d.key))];
+    const bars = Object.fromEntries(await Promise.all(keys.map(async k => [k, await loadBars(k).catch(() => null)])));
+    const after = (d, n) => { const b = bars[d.key]; if (!b) return null; const i = b.dates.findIndex(x => x >= d.at.slice(0, 10)); if (i < 0 || i + n >= b.close.length) return null; return (b.close[i + n] / d.price - 1) * 100; };
+    const rows = D.map(d => ({ ...d, r20: after(d, 20), r5: after(d, 5) })).filter(d => d.r20 != null || d.r5 != null);
+    const buys = rows.filter(d => d.action === 'buy'), sells = rows.filter(d => d.action === 'sell');
+    const avg = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+    const ins = [], stat = [];
+    const early = sells.filter(d => d.r20 != null), rose = early.filter(d => d.r20 > 5);
+    if (early.length >= 3) { const r = rose.length / early.length * 100; stat.push(['賣出後 20 天又漲 5% 以上', `${fix(r, 0)}%（${rose.length}/${early.length}）`]); if (r >= 40) ins.push(`你常常賣太早：${fix(r, 0)}% 的賣出之後 20 天又漲超過 5%，平均錯過 ${pct(avg(rose.map(d => d.r20)), 1)}。可以改成分批賣，或用移動停損取代直接賣出。`); }
+    const chase = buys.filter(d => (d.ctx?.rsi ?? 0) >= 70 || (d.ctx?.chg ?? 0) >= 3), calm = buys.filter(d => !chase.includes(d));
+    if (chase.length >= 2 && calm.length >= 2) { const a = avg(chase.map(d => d.r20 ?? d.r5)), b = avg(calm.map(d => d.r20 ?? d.r5)); stat.push(['追高買進（RSI≥70 或當天漲 3%）之後', `${pct(a, 1)}（其他買進 ${pct(b, 1)}）`]); if (a < b - 2) ins.push(`追高的買進表現較差：之後平均 ${pct(a, 1)}，比其他買進少 ${fix(b - a, 1)} 個百分點。等拉回再買通常比較好。`); }
+    const against = rows.filter(d => (d.action === 'buy' && d.ctx?.sig === 'SELL') || (d.action === 'sell' && d.ctx?.sig === 'BUY')), along = rows.filter(d => (d.action === 'buy' && d.ctx?.sig === 'BUY') || (d.action === 'sell' && d.ctx?.sig === 'SELL'));
+    const score = d => (d.action === 'buy' ? 1 : -1) * (d.r20 ?? d.r5);
+    if (against.length >= 2) { stat.push(['跟系統訊號反著做', `${against.length} 筆，平均 ${pct(avg(against.map(score)), 1)}`]); if (along.length >= 2) stat.push(['跟著訊號做', `${along.length} 筆，平均 ${pct(avg(along.map(score)), 1)}`]); if (along.length >= 2 && avg(against.map(score)) < avg(along.map(score)) - 2) ins.push('跟系統訊號反著做的決定，結果明顯比較差；下次反著做之前，先在「下單前檢查」確認理由。'); }
+    for (const [k, l] of Object.entries(BASIS)) { const a = rows.filter(d => d.basis === k); if (a.length >= 2) stat.push([l, `${a.length} 筆，平均 ${pct(avg(a.map(score)), 1)}`]); }
+    const F = rows.filter(d => d.basis === 'feel'), An = rows.filter(d => d.basis === 'analysis');
+    if (F.length >= 3 && An.length >= 3 && avg(F.map(score)) < avg(An.map(score)) - 2) ins.push('憑感覺的決定比依據分析的差；感覺很強烈時，可以先記一筆「決定不動」，隔天再看。');
+    const R = j.realized || [], W = R.filter(x => x.pnl > 0), Lo = R.filter(x => x.pnl < 0);
+    if (W.length >= 3 && Lo.length >= 3) { const aw = avg(W.map(x => x.pnl)), al = Math.abs(avg(Lo.map(x => x.pnl))); stat.push(['已實現：平均賺 vs 平均賠', `${int(aw)} vs ${int(al)}（勝率 ${fix(W.length / R.length * 100, 0)}%）`]); if (al > aw * 1.3) ins.push(`賠的時候賠比較多：平均虧 ${int(al)}、平均賺 ${int(aw)}。這通常代表停損拖太久、獲利太早落袋；照停損參考價執行可以改善。`); }
+    const md = rows.filter(d => d.mood != null);
+    if (md.length >= 4) { const hi = md.filter(d => d.mood >= 1), lo = md.filter(d => d.mood <= -1); if (hi.length >= 2) stat.push(['樂觀／過熱時的決定', `${hi.length} 筆，平均 ${pct(avg(hi.map(score)), 1)}`]); if (lo.length >= 2) stat.push(['悲觀／恐慌時的決定', `${lo.length} 筆，平均 ${pct(avg(lo.map(score)), 1)}`]); }
+    return `<div><a href="#/journal" class="small">← 工具</a></div>
+      <section class="card"><div class="hd"><h1 style="margin:0;font-size:20px">交易行為檢討</h1><span class="note">依你記錄的 ${D.length} 筆決定與 ${R.length} 筆已實現交易；結果用之後 5／20 個交易日的收盤計算</span></div>
+        ${ins.length ? ins.map(t => `<div class="cvnote small" style="margin-bottom:6px">🪞 ${esc(t)}</div>`).join('') : `<p class="small muted" style="margin:0">${rows.length < 5 ? '紀錄還不夠多（至少要幾筆已經過了 5～20 個交易日的決定）。在個股頁按「我買了／我賣了」記下來，這裡就會開始分析。' : '目前沒有發現明顯的壞習慣。'}</p>`}</section>
+      ${stat.length ? `<section class="card"><div class="hd"><h2>數據</h2><span class="note">買進看之後漲多少；賣出看之後跌多少（跌越多代表賣得越對）</span></div><div class="pp-list">${stat.map(([l, v]) => `<div class="pp-row"><div class="pp-h"><span>${esc(l)}</span><b>${v}</b></div></div>`).join('')}</div></section>` : ''}
+      <section class="card"><p class="small" style="margin:0">也可以看：<a href="#/journal">我的成績單與市場感覺準不準</a>。</p></section>${footer()}`;
+  }
   function viewScorecard() {
     const sc = S.snap.scorecard, st = S.snap.status || {};
     const ACC = accuracyBoard();
@@ -2835,7 +2898,7 @@ ${footer()}`;
       main.innerHTML = '<p class="loading">載入中…</p>';
       const html = await viewQuick(key); if (!location.hash.includes('/q/')) return;
       main.innerHTML = html; document.title = `${key}・訊號終端`;
-    } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); if (H.load().items.length) { main.insertAdjacentHTML('afterbegin', `<section class="card" id="pf-live" aria-labelledby="pfl-h">${livePortfolioHtml()}</section><section class="card" id="pf-exp" aria-labelledby="pfx-h"><p class="loading">計算產業曝險…</p></section>`); startLive(); fillExposure(); } bindPortfolio(); bindBrokerImport(); { const P0 = holdings(), anchor = main.querySelector('[aria-labelledby="pe-h"]'); if (anchor && P0.rows.length) { anchor.insertAdjacentHTML('beforebegin', viewRebalance(P0) + viewIncome(P0)); bindIncome(); } } if (SY.get().token) loadRemote().then(pcThesis).then(D => { if (S.route !== 'portfolio' || !D || $('#pth-h')) return; const h = viewPcThesis(D); if (h) { main.insertAdjacentHTML('beforeend', h); setupFolds(); } }); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
+    } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); { const AC = accounts(); if (AC.length > 1) { main.insertAdjacentHTML('afterbegin', `<section class="card acct-bar"><span class="small muted">帳戶</span>${seg('acct', curAcct(), [['', '全部合併'], ...AC.map(a => [a, a])])}</section>`); queueMicrotask(() => { const ab = main.querySelector('.acct-bar'); if (ab) main.prepend(ab); }); main.querySelector('.acct-bar').onclick = e => { const b = e.target.closest('[data-of="acct"]'); if (!b) return; LS.set('acct', b.dataset.v); render(); }; } } if (H.load().items.length) { main.insertAdjacentHTML('afterbegin', `<section class="card" id="pf-live" aria-labelledby="pfl-h">${livePortfolioHtml()}</section><section class="card" id="pf-exp" aria-labelledby="pfx-h"><p class="loading">計算產業曝險…</p></section>`); startLive(); fillExposure(); } bindPortfolio(); bindBrokerImport(); { const P0 = holdings(), anchor = main.querySelector('[aria-labelledby="pe-h"]'); if (anchor && P0.rows.length) { anchor.insertAdjacentHTML('beforebegin', viewRebalance(P0) + viewIncome(P0)); bindIncome(); } } if (SY.get().token) loadRemote().then(pcThesis).then(D => { if (S.route !== 'portfolio' || !D || $('#pth-h')) return; const h = viewPcThesis(D); if (h) { main.insertAdjacentHTML('beforeend', h); setupFolds(); } }); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
     else if (S.route === 'history') { main.innerHTML = '<p class="loading">載入歷史快照…</p>'; const html = await viewHistory(h.split('/')[1], h.split('/')[2]); if (S.route !== 'history') return; main.innerHTML = html; const sel = $('#hs-day'); if (sel) sel.onchange = () => { location.hash = '#/history/' + sel.value; }; const st = $('#hs-t'); if (st) st.onchange = () => { location.hash = '#/history/' + sel.value + (st.value ? '/' + st.value : ''); }; document.title = '歷史快照・訊號終端'; }
     else if (S.route === 'backtest') { const k = h.split('/')[1]; if (k) { BT.scope = decodeURIComponent(k).toUpperCase(); LS.set('bt', BT); } main.innerHTML = viewBacktest(); bindBacktest(); document.title = '策略回測・訊號終端'; }
     else if (S.route === 'news') { main.innerHTML = '<p class="loading">載入新聞…</p>'; const [N] = await Promise.all([loadNews(), loadUniverse()]); if (S.route !== 'news') return; main.innerHTML = viewNews(N); { const ev = viewPcEvents(); if (ev) main.querySelector('#dgs-h')?.closest('section')?.insertAdjacentHTML('afterend', ev); } bindDigest(); setupFolds(); document.title = '新聞・訊號終端'; }
@@ -2846,6 +2909,8 @@ ${footer()}`;
     else if (S.route === 'compare') { main.innerHTML = '<p class="loading">載入比較…</p>'; const html = await viewCompare(); if (S.route !== 'compare') return; main.innerHTML = html; const f = $('#cmp-form'); if (f) f.onsubmit = e => { e.preventDefault(); LS.set('cmpKeys', [...f.querySelectorAll('input')].map(x => x.value.trim().toUpperCase()).filter(Boolean).slice(0, 4)); render(); }; document.title = '個股比較・訊號終端'; }
     else if (S.route === 'lab') { main.innerHTML = viewLab(); bindLab(); document.title = '策略實驗室・訊號終端'; }
     else if (S.route === 'ask') { main.innerHTML = viewAsk(); bindAsk(); document.title = '問問看・訊號終端'; }
+    else if (S.route === 'tax') { main.innerHTML = viewTax(); ['#tx-y', '#tx-br'].forEach(id => { const x = $(id); if (x) x.onchange = () => { LS.set(id === '#tx-y' ? 'taxYear' : 'taxBr', +x.value); render(); }; }); document.title = '股利與稅費・訊號終端'; }
+    else if (S.route === 'habits') { main.innerHTML = '<p class="loading">分析中…</p>'; const html = await viewHabits(); if (S.route !== 'habits') return; main.innerHTML = html; document.title = '交易行為檢討・訊號終端'; }
     else if (S.route === 'decide') { main.innerHTML = viewDecide(); bindDecide(); document.title = '待你確認・訊號終端'; }
     else if (S.route === 'paper') { main.innerHTML = viewPaper(); document.title = '虛擬跟單・訊號終端'; }
     else if (S.route === 'settings') { main.innerHTML = viewSettings(); bindSettings(); document.title = '設定・訊號終端'; }
