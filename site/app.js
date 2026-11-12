@@ -19,7 +19,17 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.14.0';
+  // 主題（自動／淺色／深色）與字級
+  const mqDark = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+  function applyLook() {
+    const t = cfg.theme || 'auto', dark = t === 'dark' || (t === 'auto' && mqDark?.matches);
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0A0C0F' : '#15181D');
+    document.documentElement.style.zoom = String(cfg.fontScale || 1);
+  }
+  applyLook(); mqDark?.addEventListener?.('change', applyLook);
+  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  const APP_VERSION = '1.15.0';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -550,6 +560,7 @@ ${footer()}`;
   <section class="card side fold all" data-fold="scm" aria-labelledby="sc-h">${viewScoreMini()}</section>
 </div>
 ${s.chipMarket ? `<section class="card fold all" data-fold="cm" aria-labelledby="cm-h">${viewChipMarket()}</section>` : ''}
+<div class="lay-btn"><button type="button" class="btn sm" id="lay-open">⚙︎ 自訂總覽版面</button></div><section class="card" id="lay" hidden aria-labelledby="lay-h"></section>
 ${footer()}`;
   }
 
@@ -793,8 +804,43 @@ ${footer()}`;
     const mn = $('#main'); if (mn && !mn._lv) { mn._lv = true; mn.addEventListener('click', e => { const t = S.route === 'home' && e.target.closest('[data-lvidx]'); if (!t) return; const ik = t.dataset.lvidx; if (S.snap.indices?.[ik]) { S.idx = ik; LS.set('idx', ik); fillIndexSection().then(() => $('#idx')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); } }); }
     if (!LIVE.timer) { LIVE.timer = setInterval(pollLive, 10000); document.addEventListener('visibilitychange', () => { if (!document.hidden) pollLive(); }); }
   }
+  // ── 總覽自訂：區塊順序（手機版）與顯示／隱藏 ─────────────────────
+  function homeSections() {
+    const main = $('#main'); if (!main) return [];
+    return [...main.querySelectorAll(':scope > section, :scope > .row > section')].map(el => {
+      const key = el.id || el.getAttribute('aria-labelledby') || el.dataset.fold; if (!key || key === 'lay') return null;
+      const h = el.querySelector('h1, h2'); let label = (h?.textContent || '').trim();
+      if (el.classList.contains('verdict')) label = '今日判斷';
+      return label ? { key, el, label: label.slice(0, 20) } : null;
+    }).filter(Boolean);
+  }
+  function applyHomeLayout() {
+    const L = LS.get('homeLayout', { order: [], hidden: [] }), secs = homeSections();
+    secs.forEach(x => { x.el.classList.toggle('lay-hide', L.hidden.includes(x.key)); const i = L.order.indexOf(x.key); x.el.style.order = L.order.length && i >= 0 ? String(i + 1) : ''; });
+  }
+  function layoutPanel() {
+    const L = LS.get('homeLayout', { order: [], hidden: [] }), secs = homeSections();
+    const ord = [...secs].sort((a, b) => { const ia = L.order.indexOf(a.key), ib = L.order.indexOf(b.key); return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib); });
+    return `<div class="hd"><h2 id="lay-h">自訂總覽</h2><span class="note">順序調整在手機版生效；隱藏的區塊在電腦和手機都不顯示</span><button type="button" class="btn sm" data-lay="reset" style="margin-left:auto">恢復預設</button></div>
+      ${ord.map((x, i) => `<div class="lay-row${L.hidden.includes(x.key) ? ' lay-off' : ''}"><input type="checkbox" aria-label="顯示${esc(x.label)}" data-lay="show" data-k="${esc(x.key)}"${L.hidden.includes(x.key) ? '' : ' checked'}><span>${esc(x.label)}</span><button type="button" class="btn sm" data-lay="up" data-k="${esc(x.key)}"${i ? '' : ' disabled'} aria-label="上移">↑</button><button type="button" class="btn sm" data-lay="down" data-k="${esc(x.key)}"${i < ord.length - 1 ? '' : ' disabled'} aria-label="下移">↓</button></div>`).join('')}`;
+  }
+  function bindLayout() {
+    const btn = $('#lay-open'); if (!btn) return;
+    btn.onclick = () => { const p = $('#lay'); p.hidden = !p.hidden; if (!p.hidden) { p.innerHTML = layoutPanel(); p.scrollIntoView({ behavior: 'smooth', block: 'start' }); } };
+    $('#lay').onclick = $('#lay').onchange = e => {
+      const t = e.target.closest('[data-lay]'); if (!t || (e.type === 'click' && t.type === 'checkbox')) return;
+      const L = LS.get('homeLayout', { order: [], hidden: [] }), k = t.dataset.k, a = t.dataset.lay;
+      if (a === 'reset') { LS.set('homeLayout', { order: [], hidden: [] }); }
+      else if (a === 'show') { L.hidden = t.checked ? L.hidden.filter(x => x !== k) : [...new Set([...L.hidden, k])]; LS.set('homeLayout', L); }
+      else {
+        const secs = homeSections(); let ord = [...secs].sort((x, y) => { const ia = L.order.indexOf(x.key), ib = L.order.indexOf(y.key); return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib); }).map(x => x.key);
+        const i = ord.indexOf(k), j = a === 'up' ? i - 1 : i + 1; if (i < 0 || j < 0 || j >= ord.length) return; [ord[i], ord[j]] = [ord[j], ord[i]]; L.order = ord; LS.set('homeLayout', L);
+      }
+      applyHomeLayout(); $('#lay').innerHTML = layoutPanel();
+    };
+  }
   async function afterHome() {
-    fillIndexSection(); startLive(); bindIndustry(); fillIndHome();
+    fillIndexSection(); startLive(); bindIndustry(); fillIndHome(); applyHomeLayout(); bindLayout();
     const P = holdings();
     if (P.rows.length) {
       const v = await portfolioVaR(P);
@@ -2647,6 +2693,9 @@ ${footer()}`;
     <div class="field"><label for="st-disc">手續費折扣（折）</label><input id="st-disc" type="number" step="0.1" min="0.1" max="10" value="${esc(cfg.fees.disc)}"><span class="hint">例如 2.8 折填 2.8、沒有折扣填 10。看券商 App 的成交明細或對帳單。</span></div>
     <div class="field"><label for="st-feemin">手續費最低（元）</label><input id="st-feemin" type="number" step="1" min="0" value="${esc(cfg.fees.min)}"><span class="hint">電子下單多為 1 元，臨櫃多為 20 元。</span></div>
     <div class="field"><label for="st-colors">漲跌顏色</label><select id="st-colors"><option value="tw"${cfg.colors === 'tw' ? ' selected' : ''}>台股習慣：紅漲綠跌</option><option value="us"${cfg.colors === 'us' ? ' selected' : ''}>美股習慣：綠漲紅跌</option></select></div>
+    <div class="alform"><div class="field"><label for="st-theme">外觀</label><select id="st-theme">${[['auto', '跟著系統（自動）'], ['light', '淺色'], ['dark', '深色']].map(([v, l]) => `<option value="${v}"${(cfg.theme || 'auto') === v ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="field"><label for="st-font">字級</label><select id="st-font">${[[0.92, '小'], [1, '標準'], [1.1, '大'], [1.2, '特大']].map(([v, l]) => `<option value="${v}"${(cfg.fontScale || 1) === v ? ' selected' : ''}>${l}</option>`).join('')}</select></div></div>
+    <p class="small muted" style="margin:-4px 0 8px">加到手機主畫面：iPhone 用 Safari 開本站 → 分享 → 「加入主畫面」；Android 用 Chrome → 選單 → 「加到主畫面」。之後像 App 一樣全螢幕開啟，沒網路時會顯示上次的資料。</p>
     <div class="field"><label for="st-gkey">Gemini API 金鑰（問問看用，可不填）</label><input id="st-gkey" type="password" autocomplete="off" value="${esc(cfg.geminiKey || '')}" placeholder="AIza…"><span class="hint">只存在這台裝置，不會同步或上傳；「問問看」在電腦語言模型沒開時改用它。到 aistudio.google.com 免費申請。</span></div>
     <div class="field"><label for="st-nas">NAS 備援網址</label><input id="st-nas" type="url" value="${esc(cfg.nasUrl)}" placeholder="https://你的-nas.tailxxxx.ts.net"><span class="hint">GitHub 資料過舊或取不到時，改從這裡讀。必須是 https 開頭（例如 Tailscale 網址）。</span></div>
     <div class="field"><label><input id="st-local" type="checkbox"${cfg.localEnabled ? ' checked' : ''}> 啟用本機加速（自動偵測 NPU／CPU／語言模型）</label><span class="hint">在你的電腦上打開時，會連到本機的推論服務。第一次瀏覽器可能會詢問是否允許存取區域網路，請按允許。</span></div>
@@ -2692,8 +2741,8 @@ ${footer()}`;
     const lt = $('#lt-run'); if (lt) lt.onclick = localDiag;
     bindSyncSettings();
     const msg = $('#st-msg');
-    const readForm = () => { const q = { quietOn: $('#st-quiet').checked, quietStart: Math.min(23, Math.max(0, parseInt($('#st-qs').value) || 0)), quietEnd: Math.min(23, Math.max(0, parseInt($('#st-qe').value) || 0)) }; if (JSON.stringify(q) !== JSON.stringify({ quietOn: cfg.limits.quietOn !== false, quietStart: cfg.limits.quietStart ?? 23, quietEnd: cfg.limits.quietEnd ?? 7 })) { cfg.limits = Object.assign({}, cfg.limits, q); stamp('limits'); scheduleSync(); } cfg.fees = { broker: $('#st-broker').checked, disc: Math.min(10, Math.max(0.1, parseFloat($('#st-disc').value) || 10)), min: Math.max(0, parseFloat($('#st-feemin').value) || 0) }; cfg.colors = $('#st-colors').value; cfg.nasUrl = $('#st-nas').value.trim(); cfg.geminiKey = ($('#st-gkey')?.value || '').trim(); cfg.localEnabled = $('#st-local').checked; cfg.localHost = $('#st-host').value.trim() || '127.0.0.1'; };
-    $('#st-form').onsubmit = async e => { e.preventDefault(); readForm(); saveCfg(); applyColors(); msg.className = 'small ok-text'; msg.textContent = '已儲存。'; await probeLocal(); };
+    const readForm = () => { const q = { quietOn: $('#st-quiet').checked, quietStart: Math.min(23, Math.max(0, parseInt($('#st-qs').value) || 0)), quietEnd: Math.min(23, Math.max(0, parseInt($('#st-qe').value) || 0)) }; if (JSON.stringify(q) !== JSON.stringify({ quietOn: cfg.limits.quietOn !== false, quietStart: cfg.limits.quietStart ?? 23, quietEnd: cfg.limits.quietEnd ?? 7 })) { cfg.limits = Object.assign({}, cfg.limits, q); stamp('limits'); scheduleSync(); } cfg.fees = { broker: $('#st-broker').checked, disc: Math.min(10, Math.max(0.1, parseFloat($('#st-disc').value) || 10)), min: Math.max(0, parseFloat($('#st-feemin').value) || 0) }; cfg.colors = $('#st-colors').value; cfg.nasUrl = $('#st-nas').value.trim(); cfg.geminiKey = ($('#st-gkey')?.value || '').trim(); cfg.theme = $('#st-theme')?.value || 'auto'; cfg.fontScale = +($('#st-font')?.value || 1); cfg.localEnabled = $('#st-local').checked; cfg.localHost = $('#st-host').value.trim() || '127.0.0.1'; };
+    $('#st-form').onsubmit = async e => { e.preventDefault(); readForm(); saveCfg(); applyColors(); applyLook(); msg.className = 'small ok-text'; msg.textContent = '已儲存。'; await probeLocal(); };
     $('#st-test').onclick = async () => {
       readForm(); msg.className = 'small'; msg.textContent = '測試中…';
       const out = [];

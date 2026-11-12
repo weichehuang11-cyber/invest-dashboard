@@ -166,7 +166,7 @@ async function main() {
   let vix = await Macro.vix().catch(() => null);
   if (!vix) { const d = await Yahoo.daily('^VIX', '1mo'); if (d) vix = { price: d.price, prevClose: d.prevClose, changePct: d.changePct, date: d.marketDate }; }
   // CBOE 的歷史檔只有每天收盤一筆；盤中改用 Yahoo 的即時 VIX（日期較新或同一天時），歷史序列仍用 CBOE
-  { const y = daily['^VIX']; if (y?.price && (!vix || !vix.date || y.marketDate >= vix.date)) vix = { ...(vix || {}), price: y.price, prevClose: y.prevClose ?? vix?.prevClose, changePct: y.changePct, date: y.marketDate, src: 'yahoo' }; }
+  { const y = daily['^VIX']; if (y?.price && y.price > 5 && y.price < 150 && (!vix?.price || Math.abs(y.price / vix.price - 1) < 0.6) && (!vix || !vix.date || y.marketDate >= vix.date)) vix = { ...(vix || {}), price: y.price, prevClose: y.prevClose ?? vix?.prevClose, changePct: y.changePct, date: y.marketDate, src: 'yahoo' }; }
   const tsy = await Macro.treasury().catch(() => null);
   status.vix = vix ? 'ok' : 'fail'; status.treasury = tsy ? 'ok' : 'fail';
 
