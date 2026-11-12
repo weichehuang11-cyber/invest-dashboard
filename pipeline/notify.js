@@ -104,7 +104,8 @@ async function events(snap, P, notified) {
   const add = (id, prio, text) => { if (notified[id]) return; ev.push({ id, prio, text }); };
   const items = snap.items || {}, held = new Set((P?.holdings?.items || []).map(x => x.key));
   // 你的價格提醒
-  for (const [k, a] of Object.entries(P?.alerts || {})) {
+  // NAS 即時警報開著時，提醒價改由 NAS 即時推播（這裡就不重複）
+  for (const [k, a] of Object.entries(P?.limits?.nasAlerts ? {} : P?.alerts || {})) {
     const it = items[k]; if (!it) continue;
     if (isNum(a.above) && it.price >= a.above) add(`alert:${k}:above:${a.above}:${day}`, 4, `🔔 ${k} ${it.name} 漲到 ${px(it.price)}（提醒價 ${a.above}）`);
     if (isNum(a.below) && it.price <= a.below) add(`alert:${k}:below:${a.below}:${day}`, 4, `🔔 ${k} ${it.name} 跌到 ${px(it.price)}（提醒價 ${a.below}）`);
@@ -118,7 +119,7 @@ async function events(snap, P, notified) {
   // 持股
   for (const k of held) {
     const it = items[k]; if (!it) continue;
-    if (Math.abs(it.changePct || 0) >= 4) add(`move:${k}:${day}`, 3, `${it.changePct > 0 ? '📈' : '📉'} 持股 ${k} ${it.name} ${pct(it.changePct)}（${px(it.price)}）`);
+    if (!P?.limits?.nasAlerts && Math.abs(it.changePct || 0) >= 4) add(`move:${k}:${day}`, 3, `${it.changePct > 0 ? '📈' : '📉'} 持股 ${k} ${it.name} ${pct(it.changePct)}（${px(it.price)}）`);
     const e = it.fund?.earningsDate; if (e) { const d = Math.round((Date.parse(e) - Date.parse(day)) / 86400000); if (d === 1 || d === 0) add(`earn:${k}:${e}`, 3, `🗓 持股 ${k} ${it.name} 財報${d === 0 ? '今天' : '明天'}（${e}）`); }
     const x = it.fund?.exDividendDate; if (x) { const d = Math.round((Date.parse(x) - Date.parse(day)) / 86400000); if (d === 1) add(`exdiv:${k}:${x}`, 2, `💰 持股 ${k} ${it.name} 明天除權息${it.fund.exDividendCash ? `（現金 ${it.fund.exDividendCash} 元）` : ''}`); }
   }

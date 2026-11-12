@@ -77,8 +77,9 @@ async function twse(items) {
   }
   const out = {};
   for (const m of j?.msgArray || []) {
-    const it = items.find(x => x.ch.split('_')[1].startsWith(m.c)); if (!it) continue;
-    const last = num(m.z) ?? num(m.o) ?? null, prev = num(m.y);
+    const it = items.find(x => x.ch.split('_')[1].replace(/\.tw$/, '') === m.c); if (!it) continue;
+    const bid = num(String(m.b || '').split('_')[0]), ask = num(String(m.a || '').split('_')[0]);
+    const last = num(m.z) ?? (bid && ask ? (bid + ask) / 2 : bid ?? ask) ?? num(m.o) ?? null, prev = num(m.y);
     const d = String(m.d || ''), t = String(m.t || '');
     const time = d.length === 8 && t ? new Date(`${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)}T${t}+08:00`).toISOString() : null;
     out[it.key] = { price: last ?? prev, prev, high: num(m.h), low: num(m.l), time, delay: 0 };
@@ -179,8 +180,37 @@ function snapshotJSON() {
     const pts = (v.spark && v.spark.length ? v.spark : (v.sparkOwn || []).length >= 10 ? v.sparkOwn : v.sparkY?.length ? v.sparkY : v.sparkOwn || []).slice(-300);
     items[it.key] = { name: v.name, price: v.price, prev: v.prev, chg: v.chg, chgPct: v.chgPct, high: v.high, low: v.low, time: v.time, delay: v.delay || 0, state: v.state, src: v.src, ok: v.ok, err: v.ok ? undefined : v.err, spark: pts.map(p => p[1]), t0: pts[0]?.[0] || null };
   }
-  return JSON.stringify({ at: live.at, order: LIST.map(x => x.key), items });
+  const st = {}; for (const [k, v] of Object.entries(stocks)) st[k] = { price: v.price, prev: v.prev, chgPct: v.chgPct, high: v.high, low: v.low, time: v.time, delay: v.delay || 0, state: v.state };
+  return JSON.stringify({ at: live.at, order: LIST.map(x => x.key), items, stocks: st, alerts: ALERTS_ON });
 }
 
-module.exports = { tick, snapshotJSON, session, LIST, live };
+// ── 個股（觀察清單＋持股）：台股證交所每 10 秒一批、美股 Yahoo 每 60 秒 ─────────
+let STOCKS = [];   // [{ key, m: 'tw'|'us', ex: 'tse'|'otc' }]
+const stocks = {}, sDue = {}, sAfter = { tw: 0, us: 0 };
+function setStocks(list) { STOCKS = list; }
+async function tickStocks(force) {
+  const now = Date.now();
+  for (const m of ['tw', 'us']) {
+    const L = STOCKS.filter(x => x.m === m); if (!L.length) continue;
+    const sess = session(m === 'tw' ? 'tw' : 'us');
+    if (sess !== 'closed') sAfter[m] = 0; else if (sAfter[m] >= 2 && !force && L.every(x => stocks[x.key])) continue;
+    if (!force && sDue[m] && now < sDue[m]) continue;
+    sDue[m] = now + (sess === 'closed' ? 600 : m === 'tw' ? 10 : 60) * 1000; if (sess === 'closed') sAfter[m]++;
+    try {
+      if (m === 'tw') {
+        for (let i = 0; i < L.length; i += 50) {
+          const part = L.slice(i, i + 50).map(x => ({ key: x.key, ch: `${x.ex || 'tse'}_${x.key}.tw` }));
+          const r = await twse(part); for (const [k, v] of Object.entries(r)) stocks[k] = { ...v, state: sess };
+        }
+      } else {
+        for (const x of L) { try { const r = await yahoo(x.key); stocks[x.key] = { price: r.price, prev: r.prev, high: r.high, low: r.low, time: r.time, delay: r.delay, state: sess }; } catch (_) { /* 下一輪再試 */ } }
+      }
+    } catch (e) { console.log('個股即時失敗', m, e.message); }
+  }
+  for (const v of Object.values(stocks)) if (v.price != null && v.prev) v.chgPct = +((v.price / v.prev - 1) * 100).toFixed(2);
+}
+let ALERTS_ON = false;
+function setAlertsOn(v) { ALERTS_ON = !!v; }
+
+module.exports = { tick, tickStocks, setStocks, setAlertsOn, stocks, snapshotJSON, session, LIST, live };
 if (require.main === module) (async () => { await tick(true); const j = JSON.parse(snapshotJSON()); for (const k of j.order) { const v = j.items[k]; console.log(`::notice::${k} ${v?.ok ? `${v.price}（${v.chgPct}%）${v.time} 延遲${v.delay} ${v.state} 點數${v.spark.length}` : '失敗 ' + (v?.err || '')}`); } })();

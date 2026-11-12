@@ -35,9 +35,10 @@ function req(method, url, { headers = {}, body } = {}) {
     r.on('error', reject); r.on('timeout', () => r.destroy(new Error('timeout'))); if (body) r.write(body); r.end();
   });
 }
-async function ntfy(title, msg) {
+async function ntfy(title, msg, priority = 3, click) {
   if (!ENV.NTFY_TOPIC) return false;
-  const r = await req('POST', 'https://ntfy.sh', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: ENV.NTFY_TOPIC, title, message: msg, priority: 3, tags: ['satellite'] }) });
+  const server = (ENV.NTFY_SERVER || 'https://ntfy.sh').replace(/\/+$/, '');
+  const r = await req('POST', server, { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: ENV.NTFY_TOPIC, title, message: msg, priority, tags: ['satellite'], ...(click || ENV.SITE_URL ? { click: click || ENV.SITE_URL } : {}) }) });
   return r.status < 300;
 }
 async function dispatch() {
@@ -90,10 +91,38 @@ setInterval(() => {
   if (m % 15 === 5) watchGithub();
 }, 20000);
 
-// 即時行情：每 5 秒檢查哪些市場該抓了（各市場自己的頻率）
-let liveBusy = false, liveReq = 0;
-setInterval(async () => { if (liveBusy) return; liveBusy = true; try { await Live.tick(); } catch (e) { console.log('即時行情失敗', e.message); } liveBusy = false; }, 5000);
+// 即時行情：每 5 秒檢查哪些市場該抓了（各市場自己的頻率）；抓完比對即時警報
+for (const k of ['BACKUP_GIST_ID', 'BACKUP_PASSPHRASE', 'GITHUB_TOKEN']) if (ENV[k] && !process.env[k]) process.env[k] = ENV[k];
+let loadPersonal = null; try { loadPersonal = require('../pipeline/notify').loadPersonal; } catch (_) {}
+const Alerts = require('./alerts').create({ base: BASE, send: (t, m, p) => ntfy(t, m, p), loadPersonal: process.env.BACKUP_GIST_ID ? loadPersonal : null });
+Live.setAlertsOn(!!ENV.NTFY_TOPIC);
+let liveBusy = false, liveReq = 0, stockListAt = 0;
+setInterval(async () => {
+  if (liveBusy) return; liveBusy = true;
+  try {
+    await Alerts.refresh();
+    if (Date.now() - stockListAt > 5 * 60000) { stockListAt = Date.now(); let U = []; try { U = JSON.parse(fs.readFileSync(path.join(SITE, 'data', 'universe.json'), 'utf8')).list || []; } catch (_) {} Live.setStocks(Alerts.stockList(U)); }
+    await Live.tick(); await Live.tickStocks();
+    if (ENV.NTFY_TOPIC) await Alerts.check(Live.live, Live.stocks);
+  } catch (e) { console.log('即時行情失敗', e.message); }
+  liveBusy = false;
+}, 5000);
 Live.tick(true).catch(() => {});
+
+// 每週日 20:30 自動體檢（nas/check.sh），有問題就推播
+let lastCheck = '';
+setInterval(() => {
+  const t = new Date(Date.now() + 8 * 3600000), day = t.toISOString().slice(0, 10);
+  if (t.getUTCDay() !== 0 || t.getUTCHours() !== 20 || t.getUTCMinutes() < 30 || lastCheck === day) return;
+  lastCheck = day;
+  const p = spawn('bash', [path.join(DIR, 'nas', 'check.sh')], { cwd: DIR, env: { ...process.env, CHECK_AUTO: '1' } }); let out = '';
+  p.stdout.on('data', d => (out += d)); p.stderr.on('data', d => (out += d));
+  p.on('close', () => {
+    const bad = out.split('\n').filter(l => /✕/.test(l)).map(l => l.trim());
+    console.log(new Date().toISOString(), 'NAS 每週體檢', bad.length ? bad.length + ' 項有問題' : '全部正常');
+    if (bad.length) ntfy('NAS 每週體檢：' + bad.length + ' 項有問題', bad.slice(0, 8).join('\n') + '\n→ SSH 到 NAS 執行 bash nas/check.sh 看修正方法', 4);
+  });
+}, 60000);
 
 // 程式更新（git pull）後自動重新啟動，讓 pm2 載入新版本（備援更新進行中就等它跑完）
 const SELF = [__filename, path.join(__dirname, 'livefeed.js')], mtime0 = SELF.map(f => { try { return fs.statSync(f).mtimeMs; } catch (_) { return 0; } });

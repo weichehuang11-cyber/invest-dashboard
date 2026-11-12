@@ -52,10 +52,17 @@ L=$(curl -fsS -m 5 http://127.0.0.1:8765/live.json 2>/dev/null | head -c 200)
 echo "$L" | grep -q '"items"' && ok "即時行情 /live.json 正常" || bad "即時行情 /live.json 沒有資料"
 [ -f "$BASE/site/data/snapshot.json" ] && { A=$(( ($(date +%s) - $(stat -c %Y "$BASE/site/data/snapshot.json")) / 3600 )); [ $A -lt 72 ] && ok "備援資料 $A 小時前更新" || bad "備援資料已 $A 小時沒更新" "bash \"$APP/nas/run-backup.sh\" all"; } || bad "沒有備援資料（site/data/snapshot.json）" "bash \"$APP/nas/run-backup.sh\" all"
 
+echo "▶ 即時警報（nas/.env）"
+ENVF="$APP/nas/.env"
+grep -q "^NTFY_TOPIC=." "$ENVF" 2>/dev/null && ok "推播已設定（NTFY_TOPIC）" || bad "nas/.env 沒有 NTFY_TOPIC，NAS 即時警報不會推播" "echo 'NTFY_TOPIC=你的主題' >> \"$ENVF\" && $PM2 restart signal-backup"
+grep -q "^BACKUP_PASSPHRASE=." "$ENVF" 2>/dev/null && grep -q "^BACKUP_GIST_ID=." "$ENVF" 2>/dev/null && ok "已設定個人資料（持股停損、提醒價會即時通知）" || info "nas/.env 沒有 BACKUP_GIST_ID／BACKUP_PASSPHRASE：只會通知指數，不含持股與提醒價"
 echo "▶ 獨立網址（Docker：ts-signal）"
 TS="$APP/nas/tailscale"
 SD="sudo"; [ "$(id -u)" = 0 ] && SD=""
-if $SD "$DOCKER" inspect ts-signal >/dev/null 2>&1; then
+[ -n "$CHECK_AUTO" ] && [ -n "$SD" ] && SD="sudo -n"   # 自動體檢不能輸入密碼
+DOCKER_OK=1; if [ "$SD" = "sudo -n" ] && ! sudo -n true 2>/dev/null; then DOCKER_OK=0; fi
+if [ $DOCKER_OK = 0 ]; then info "自動體檢沒有 sudo 權限，略過 Docker 檢查（手動執行時會檢查）"
+elif $SD "$DOCKER" inspect ts-signal >/dev/null 2>&1; then
   RUN=$($SD "$DOCKER" inspect -f '{{.State.Running}}' ts-signal)
   [ "$RUN" = "true" ] && ok "容器執行中" || bad "容器沒有在執行" "cd \"$TS\" && sudo docker compose up -d"
   SRC=$($SD "$DOCKER" inspect -f '{{range .Mounts}}{{.Source}} {{end}}' ts-signal)
@@ -70,7 +77,7 @@ else
 fi
 
 echo "▶ 不再需要的東西"
-$SD "$DOCKER" inspect github-runner >/dev/null 2>&1 && bad "舊的 github-runner 容器還在" "sudo docker rm -f github-runner" || ok "沒有舊的 github-runner 容器"
+[ $DOCKER_OK = 1 ] && { $SD "$DOCKER" inspect github-runner >/dev/null 2>&1 && bad "舊的 github-runner 容器還在" "sudo docker rm -f github-runner" || ok "沒有舊的 github-runner 容器"; }
 
 echo
 echo "結果：$OK 項正常、$BAD 項有問題"

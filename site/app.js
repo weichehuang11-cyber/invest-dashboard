@@ -19,7 +19,7 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.8.4';
+  const APP_VERSION = '1.9.0';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -757,12 +757,29 @@ ${footer()}`;
       if (o.className !== t.className) { o.className = t.className.replace(' lv-flash', ''); if (t.classList.contains('lv-flash')) { void o.offsetWidth; o.classList.add('lv-flash'); } }
     }
   }
+  /** 持股即時損益（NAS 每 10 秒的個股報價；台股含券商算法的手續費與稅） */
+  function livePortfolioHtml() {
+    const ST = LIVE.data?.stocks || {}, P = holdings(), rate = fx();
+    const agg = new Map(); for (const r of P.rows) { const a = agg.get(r.key) || { key: r.key, it: r.it, shares: 0, cost: 0 }; a.shares += +r.shares || 0; a.cost += r.cost || 0; agg.set(r.key, a); }
+    const rows = [...agg.values()].map(a => { const v = ST[a.key], k = a.it?.market === 'us' ? rate : 1; if (!v || !isNum(v.price)) return null; const mv = v.price * a.shares * k; return { ...a, v, mv, day: isNum(v.prev) ? (v.price - v.prev) * a.shares * k : null, pnl: a.cost ? mv - a.cost : null }; }).filter(Boolean);
+    if (!rows.length) return `<div class="hd"><h2 id="pfl-h">即時損益</h2><span class="note">${!nasBase() ? '在「設定」填入 NAS 網址後，開盤中每 10 秒更新持股市值與當日損益' : LIVE.err ? `NAS 連不到（${esc(LIVE.err)}）` : !LIVE.data ? '連線 NAS…' : 'NAS 還沒有你的持股報價（NAS 的 .env 需要 BACKUP_GIST_ID／BACKUP_PASSPHRASE，或持股都在觀察清單內）'}</span></div>`;
+    const T = rows.reduce((a, r) => ({ mv: a.mv + r.mv, day: a.day + (r.day || 0), pnl: a.pnl + (r.pnl || 0) }), { mv: 0, day: 0, pnl: 0 });
+    const open = rows.some(r => r.v.state === 'open');
+    return `<div class="hd"><h2 id="pfl-h">即時損益</h2><span class="note">${open ? `NAS 即時・${hms(LIVE.data.at)}` : '休市中（最後成交價）'}・未扣手續費與稅的市值</span></div>
+      <div class="ind-kpi"><div><span class="small muted">持股市值</span><b>${int(T.mv)}</b></div><div><span class="small muted">今日損益</span><b class="${cls(T.day)}">${T.day > 0 ? '+' : ''}${int(T.day)}</b></div><div><span class="small muted">未實現損益</span><b class="${cls(T.pnl)}">${T.pnl > 0 ? '+' : ''}${int(T.pnl)}</b></div><div><span class="small muted">檔數</span><b>${rows.length}</b></div></div>
+      <div class="pp-list">${rows.sort((a, b) => b.mv - a.mv).map(r => `<div class="pp-row"><div class="pp-h"><span><b>${esc(r.it?.name || r.key)}</b> <span class="small muted">${esc(r.key)}・${int(r.shares)} 股</span></span><span class="mono">${px(r.v.price)} <b class="${cls(r.v.chgPct)}">${pct(r.v.chgPct)}</b></span></div><div class="small muted">今日 <span class="${cls(r.day)}">${r.day > 0 ? '+' : ''}${int(r.day)}</span>・未實現 <span class="${cls(r.pnl)}">${r.pnl > 0 ? '+' : ''}${int(r.pnl)}</span>${r.v.time ? `・${hms(r.v.time)}` : ''}${r.v.delay ? `・延遲約 ${r.v.delay} 分` : ''}</div></div>`).join('')}</div>`;
+  }
   const liveAllClosed = () => { const it = Object.values(LIVE.data?.items || {}); return it.length > 0 && it.every(v => v.state === 'closed'); };
   async function pollLive() {
-    if (S.route !== 'home' || document.hidden || !nasBase() || !/^https:\/\//.test(nasBase())) return;
+    if (!['home', 'portfolio'].includes(S.route) || document.hidden || !nasBase() || !/^https:\/\//.test(nasBase())) return;
     if (liveAllClosed() && Date.now() - LIVE.at < 10 * 60000) return;   // 全部休市：不更新，每 10 分鐘看一次有沒有開盤
-    try { const d = await getJSON(nasBase() + '/live.json?t=' + Date.now(), 6000); LIVE.prev = Object.fromEntries(Object.entries(LIVE.data?.items || {}).map(([k, v]) => [k, v.price])); LIVE.data = d; LIVE.at = Date.now(); LIVE.err = null; }
+    try {
+      const d = await getJSON(nasBase() + '/live.json?t=' + Date.now(), 6000); LIVE.prev = Object.fromEntries(Object.entries(LIVE.data?.items || {}).map(([k, v]) => [k, v.price])); LIVE.data = d; LIVE.at = Date.now(); LIVE.err = null;
+      // NAS 會即時推播提醒價／停損時，告訴 GitHub 那邊不要再重複推（跟著加密備份同步）
+      if (!!d.alerts !== !!cfg.limits.nasAlerts) { cfg.limits = Object.assign({}, cfg.limits, { nasAlerts: !!d.alerts }); saveCfg(); stamp('limits'); scheduleSync(); }
+    }
     catch (e) { LIVE.err = e.name === 'AbortError' ? '逾時' : e.message; }
+    if (S.route === 'portfolio') { patchKeep($('#pf-live'), el => { const h = livePortfolioHtml(); if (el.innerHTML !== h) el.innerHTML = h; }); return; }
     if (S.route !== 'home') return;
     patchKeep($('#live'), el => patchLive(el));
     const il = $('#ix-live'); if (il) patchKeep(il, el => { const h = liveIdxHtml(S.idx); if (el.innerHTML !== h) el.innerHTML = h; });
@@ -2549,7 +2566,7 @@ ${footer()}`;
       main.innerHTML = '<p class="loading">載入中…</p>';
       const html = await viewQuick(key); if (!location.hash.includes('/q/')) return;
       main.innerHTML = html; document.title = `${key}・訊號終端`;
-    } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); bindPortfolio(); bindBrokerImport(); { const P0 = holdings(), anchor = main.querySelector('[aria-labelledby="pe-h"]'); if (anchor && P0.rows.length) { anchor.insertAdjacentHTML('beforebegin', viewRebalance(P0) + viewIncome(P0)); bindIncome(); } } if (SY.get().token) loadRemote().then(pcThesis).then(D => { if (S.route !== 'portfolio' || !D || $('#pth-h')) return; const h = viewPcThesis(D); if (h) { main.insertAdjacentHTML('beforeend', h); setupFolds(); } }); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
+    } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); if (H.load().items.length) { main.insertAdjacentHTML('afterbegin', `<section class="card" id="pf-live" aria-labelledby="pfl-h">${livePortfolioHtml()}</section>`); startLive(); } bindPortfolio(); bindBrokerImport(); { const P0 = holdings(), anchor = main.querySelector('[aria-labelledby="pe-h"]'); if (anchor && P0.rows.length) { anchor.insertAdjacentHTML('beforebegin', viewRebalance(P0) + viewIncome(P0)); bindIncome(); } } if (SY.get().token) loadRemote().then(pcThesis).then(D => { if (S.route !== 'portfolio' || !D || $('#pth-h')) return; const h = viewPcThesis(D); if (h) { main.insertAdjacentHTML('beforeend', h); setupFolds(); } }); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
     else if (S.route === 'history') { main.innerHTML = '<p class="loading">載入歷史快照…</p>'; const html = await viewHistory(h.split('/')[1], h.split('/')[2]); if (S.route !== 'history') return; main.innerHTML = html; const sel = $('#hs-day'); if (sel) sel.onchange = () => { location.hash = '#/history/' + sel.value; }; const st = $('#hs-t'); if (st) st.onchange = () => { location.hash = '#/history/' + sel.value + (st.value ? '/' + st.value : ''); }; document.title = '歷史快照・訊號終端'; }
     else if (S.route === 'backtest') { const k = h.split('/')[1]; if (k) { BT.scope = decodeURIComponent(k).toUpperCase(); LS.set('bt', BT); } main.innerHTML = viewBacktest(); bindBacktest(); document.title = '策略回測・訊號終端'; }
     else if (S.route === 'news') { main.innerHTML = '<p class="loading">載入新聞…</p>'; const [N] = await Promise.all([loadNews(), loadUniverse()]); if (S.route !== 'news') return; main.innerHTML = viewNews(N); { const ev = viewPcEvents(); if (ev) main.querySelector('#dgs-h')?.closest('section')?.insertAdjacentHTML('afterend', ev); } bindDigest(); setupFolds(); document.title = '新聞・訊號終端'; }
