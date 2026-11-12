@@ -624,3 +624,5 @@ button, a, select, input, .btn { touch-action: manipulation; }
 .lv-pos { height: 15px; }
 .lv-m { height: 15px; }
 .ixlive { min-height: 52px; }
+.expbar { height: 6px; background: var(--line2); border-radius: 3px; margin: 4px 0; overflow: hidden; }
+.expbar i { display: block; height: 100%; background: var(--acc); border-radius: 3px; }

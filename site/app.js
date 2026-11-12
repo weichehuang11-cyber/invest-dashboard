@@ -19,7 +19,7 @@
   // 「localhost」在 Windows 可能先連 IPv6（::1），本機服務只聽 IPv4，改用 127.0.0.1
   if (!cfg.localHost || cfg.localHost === 'localhost') cfg.localHost = '127.0.0.1';
   const saveCfg = () => LS.set('cfg', cfg);
-  const APP_VERSION = '1.10.0';
+  const APP_VERSION = '1.11.0';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2227,6 +2227,7 @@ ${footer()}`;
     return `<div><a href="#/" class="small">← 回總覽</a></div>
       <section class="card"><div class="hd"><h1 style="margin:0;font-size:20px">產業分類</h1><span class="note">等權平均；實線＝產業近 60 日走勢，虛線＝大盤（${esc(I.bench?.tw?.name || '加權指數')}／${esc(I.bench?.us?.name || '標普 500')}）・資料 ${I.at ? esc(tpeTime(I.at)) : '—'}</span></div>
       <div class="filters">${seg('indsort', srt, [['chg', '今日'], ['r5', '5 日'], ['r20', '20 日']])}</div></section>
+      ${(I.rotationRecent || []).length ? `<section class="card"><div class="hd"><h2>最近的產業輪動</h2><span class="note">和 5 個交易日前比較；追蹤中的產業會推播</span></div><div class="pp-list">${I.rotationRecent.slice(0, 10).map(r => `<a class="pp-row small" href="#/industry/${encodeURIComponent(r.id)}">${{ up: '🔥', thrust: '🔥', top: '🏆', down: '🧊', break: '🧊' }[r.type] || '🔄'} ${esc(r.d.slice(5).replace('-', '/'))} ${esc(r.text)}</a>`).join('')}</div></section>` : ''}
       ${sec('★ 我追蹤的產業', tr)}${sec('台股產業', by('tw'))}${sec('美股產業', by('us'))}
       <section class="card"><div class="hd"><h2>建立自訂產業</h2><span class="note">例如自己的「AI 伺服器 PCB 概念股」；存在這台裝置並跟著加密備份同步</span></div>
         <form id="ind-new" class="form" style="max-width:520px"><div class="field"><label for="ind-name">名稱</label><input id="ind-name" required maxlength="20" placeholder="例如：高層數板"></div>
@@ -2268,6 +2269,26 @@ ${footer()}`;
       if (!name || !keys.length) return;
       const id = Date.now().toString(36); LS.set('indCustom', [...indCustom(), { id, name, keys }]); LS.set('indTrack', [...indTrack(), 'c-' + id]); toast('已建立並追蹤'); render();
     });
+  }
+  /** 持股產業曝險：持股市值依產業分組，集中度高或重壓的產業轉弱時提醒 */
+  function indOf(I, key) {
+    for (const g of I.groups || []) for (const sb of g.subs) if (sb.keys.includes(key)) return { id: g.id, name: g.name, stats: g.stats, m: g.m };
+    for (const c of indCustom()) if (c.keys.includes(key)) return { id: 'c-' + c.id, name: c.name, stats: null };
+    return null;
+  }
+  async function fillExposure() {
+    const box = $('#pf-exp'); if (!box) return;
+    const I = await loadInd(); if (S.route !== 'portfolio') return;
+    const P = holdings(), tot = P.rows.reduce((a, r) => a + (r.mv || 0), 0); if (!tot) { box.remove(); return; }
+    const G = new Map();
+    for (const r of P.rows) { if (!r.mv) continue; const g = indOf(I, r.key) || { id: '_', name: /^00/.test(r.key) ? 'ETF' : '其他（未分類）', stats: null }; const x = G.get(g.id) || { ...g, mv: 0, keys: [] }; x.mv += r.mv; if (!x.keys.includes(r.key)) x.keys.push(r.key); G.set(g.id, x); }
+    const list = [...G.values()].sort((a, b) => b.mv - a.mv).map(x => ({ ...x, w: x.mv / tot * 100 }));
+    const warns = [];
+    const top = list[0]; if (top && top.id !== '_' && top.name !== 'ETF' && top.w >= 40) warns.push(`${top.name} 佔持股 ${fix(top.w, 0)}%，集中度高；這個產業一起跌時，整體部位會跟著大跌`);
+    for (const x of list) if (x.w >= 20 && x.stats?.rs20 != null && x.stats.rs20 < -3) warns.push(`你重壓的 ${x.name}（${fix(x.w, 0)}%）近 20 日弱於大盤 ${fix(Math.abs(x.stats.rs20), 1)} 個百分點`);
+    box.innerHTML = `<div class="hd"><h2 id="pfx-h">持股產業曝險</h2><span class="note">依持股市值；產業分類見「<a href="#/industry">產業</a>」</span></div>
+      ${warns.map(w => `<div class="cvnote small" style="margin-bottom:6px">⚠️ ${esc(w)}</div>`).join('')}
+      <div class="pp-list">${list.map(x => `<div class="pp-row"><div class="pp-h"><span><b>${esc(x.name)}</b> <span class="small muted">${x.keys.map(esc).join('、')}</span></span><b>${fix(x.w, 1)}%</b></div><div class="expbar"><i style="width:${Math.min(100, x.w).toFixed(1)}%"></i></div>${x.stats ? `<div class="small muted">產業今日 <span class="${cls(x.stats.chg)}">${pct(x.stats.chg)}</span>・20 日 <span class="${cls(x.stats.r20)}">${pct(x.stats.r20, 1)}</span>${x.stats.rs20 != null ? `（${x.stats.rs20 >= 0 ? '強' : '弱'}於大盤 ${fix(Math.abs(x.stats.rs20), 1)}）` : ''}</div>` : ''}</div>`).join('')}</div>`;
   }
   async function fillIndHome() {
     const box = $('#indhome'); if (!box) return;
@@ -2599,7 +2620,7 @@ ${footer()}`;
       main.innerHTML = '<p class="loading">載入中…</p>';
       const html = await viewQuick(key); if (!location.hash.includes('/q/')) return;
       main.innerHTML = html; document.title = `${key}・訊號終端`;
-    } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); if (H.load().items.length) { main.insertAdjacentHTML('afterbegin', `<section class="card" id="pf-live" aria-labelledby="pfl-h">${livePortfolioHtml()}</section>`); startLive(); } bindPortfolio(); bindBrokerImport(); { const P0 = holdings(), anchor = main.querySelector('[aria-labelledby="pe-h"]'); if (anchor && P0.rows.length) { anchor.insertAdjacentHTML('beforebegin', viewRebalance(P0) + viewIncome(P0)); bindIncome(); } } if (SY.get().token) loadRemote().then(pcThesis).then(D => { if (S.route !== 'portfolio' || !D || $('#pth-h')) return; const h = viewPcThesis(D); if (h) { main.insertAdjacentHTML('beforeend', h); setupFolds(); } }); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
+    } else if (S.route === 'portfolio') { main.innerHTML = viewPortfolio(); if (H.load().items.length) { main.insertAdjacentHTML('afterbegin', `<section class="card" id="pf-live" aria-labelledby="pfl-h">${livePortfolioHtml()}</section><section class="card" id="pf-exp" aria-labelledby="pfx-h"><p class="loading">計算產業曝險…</p></section>`); startLive(); fillExposure(); } bindPortfolio(); bindBrokerImport(); { const P0 = holdings(), anchor = main.querySelector('[aria-labelledby="pe-h"]'); if (anchor && P0.rows.length) { anchor.insertAdjacentHTML('beforebegin', viewRebalance(P0) + viewIncome(P0)); bindIncome(); } } if (SY.get().token) loadRemote().then(pcThesis).then(D => { if (S.route !== 'portfolio' || !D || $('#pth-h')) return; const h = viewPcThesis(D); if (h) { main.insertAdjacentHTML('beforeend', h); setupFolds(); } }); (async () => { const P = holdings(); const A = await portfolioAnalytics(P); const el = $('#pa-body'); if (el && S.route === 'portfolio') el.innerHTML = viewAnalytics(A, P) || '<p class="empty">持股不在觀察清單，無法分析。</p>'; })(); document.title = '持股・訊號終端'; }
     else if (S.route === 'history') { main.innerHTML = '<p class="loading">載入歷史快照…</p>'; const html = await viewHistory(h.split('/')[1], h.split('/')[2]); if (S.route !== 'history') return; main.innerHTML = html; const sel = $('#hs-day'); if (sel) sel.onchange = () => { location.hash = '#/history/' + sel.value; }; const st = $('#hs-t'); if (st) st.onchange = () => { location.hash = '#/history/' + sel.value + (st.value ? '/' + st.value : ''); }; document.title = '歷史快照・訊號終端'; }
     else if (S.route === 'backtest') { const k = h.split('/')[1]; if (k) { BT.scope = decodeURIComponent(k).toUpperCase(); LS.set('bt', BT); } main.innerHTML = viewBacktest(); bindBacktest(); document.title = '策略回測・訊號終端'; }
     else if (S.route === 'news') { main.innerHTML = '<p class="loading">載入新聞…</p>'; const [N] = await Promise.all([loadNews(), loadUniverse()]); if (S.route !== 'news') return; main.innerHTML = viewNews(N); { const ev = viewPcEvents(); if (ev) main.querySelector('#dgs-h')?.closest('section')?.insertAdjacentHTML('afterend', ev); } bindDigest(); setupFolds(); document.title = '新聞・訊號終端'; }

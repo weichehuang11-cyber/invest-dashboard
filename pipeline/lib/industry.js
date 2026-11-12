@@ -91,4 +91,26 @@ function line(g, bench) {
   return `${g.name}：今日 ${sg(s.chg)}（漲 ${s.up}／跌 ${s.down}）、5 日 ${sg(s.r5)}、20 日 ${sg(s.r20)}（${s.rs20 != null ? (s.rs20 >= 0 ? `強於${bench?.name || '大盤'} ${s.rs20.toFixed(1)}` : `弱於${bench?.name || '大盤'} ${Math.abs(s.rs20).toFixed(1)}`) + ' 個百分點' : ''}）、站上月線 ${s.above20}%`;
 }
 
-module.exports = { compute, line, groupStats };
+/** 產業輪動：和 5 個交易日前比，相對大盤由弱轉強（或反過來）、站上月線比例急升急降、進入前三強 */
+function rotation(hist, res, day) {
+  if (!day) return [];
+  for (const g of res.groups) { if (!g.stats) continue; const H = hist[g.id] = (hist[g.id] || []).filter(x => x.d !== day); H.push({ d: day, rs20: g.stats.rs20, above20: g.stats.above20, r20: g.stats.r20 }); if (H.length > 120) H.shift(); }
+  const rank = m => res.groups.filter(g => g.m === m && g.stats?.r20 != null).sort((a, b) => b.stats.r20 - a.stats.r20).map(g => g.id);
+  const out = [];
+  for (const g of res.groups) {
+    const H = hist[g.id] || [], now = H[H.length - 1], ago = H[H.length - 6]; if (!now || !ago) continue;
+    const bn = res.bench?.[g.m]?.name || '大盤';
+    if (ago.rs20 != null && now.rs20 != null && ago.rs20 < 0 && now.rs20 > 0) out.push({ id: g.id, name: g.name, m: g.m, type: 'up', text: `${g.name} 由弱轉強：20 日表現從弱於${bn} ${Math.abs(ago.rs20).toFixed(1)} 個百分點，翻成強於 ${now.rs20.toFixed(1)}` });
+    if (ago.rs20 != null && now.rs20 != null && ago.rs20 > 0 && now.rs20 < 0) out.push({ id: g.id, name: g.name, m: g.m, type: 'down', text: `${g.name} 由強轉弱：20 日表現從強於${bn} ${ago.rs20.toFixed(1)} 個百分點，翻成弱於 ${Math.abs(now.rs20).toFixed(1)}` });
+    if (ago.above20 != null && now.above20 != null && ago.above20 <= 30 && now.above20 >= 60) out.push({ id: g.id, name: g.name, m: g.m, type: 'thrust', text: `${g.name} 廣度急升：站上月線的比例 5 天內從 ${ago.above20}% 升到 ${now.above20}%（常見於族群起漲）` });
+    if (ago.above20 != null && now.above20 != null && ago.above20 >= 70 && now.above20 <= 40) out.push({ id: g.id, name: g.name, m: g.m, type: 'break', text: `${g.name} 廣度轉弱：站上月線的比例 5 天內從 ${ago.above20}% 降到 ${now.above20}%` });
+  }
+  for (const m of ['tw', 'us']) {
+    const now = rank(m).slice(0, 3), prev = (hist._rank?.[m] || []);
+    for (const id of now) if (prev.length && !prev.includes(id)) { const g = res.groups.find(x => x.id === id); out.push({ id, name: g.name, m, type: 'top', text: `${g.name} 進入${m === 'tw' ? '台股' : '美股'} 20 日最強前三名（${g.stats.r20 > 0 ? '+' : ''}${g.stats.r20.toFixed(1)}%）` }); }
+    hist._rank = { ...(hist._rank || {}), [m]: now };
+  }
+  return out.map(x => ({ ...x, d: day }));
+}
+
+module.exports = { compute, line, groupStats, rotation };

@@ -768,6 +768,14 @@ async function main() {
     const res = await Industry.compute({ defs, prev: iPrev, refresh: { tw: fullTW, us: fullUS }, names: nmI, log,
       getDaily: async k => daily[k] || await Yahoo.daily(k, '1y').catch(() => null),
       benchOf: m => longDaily[m === 'tw' ? '^TWII' : '^GSPC'] || daily[m === 'tw' ? '^TWII' : '^GSPC'] });
+    // 產業輪動（收盤後完整更新才判斷）
+    const rhFile = path.join(STATE, 'industry-hist.json'), rh = readJSON(rhFile, {});
+    if (FULL) {
+      res.rotation = Industry.rotation(rh, res, indices?.['^TWII']?.marketDate || new Date().toISOString().slice(0, 10));
+      rh._events = [...(rh._events || []).filter(e => !res.rotation.some(r => r.id === e.id && r.type === e.type && r.d === e.d)), ...res.rotation].slice(-60);
+      writeJSON(rhFile, rh);
+    } else res.rotation = (iPrev?.rotation || []);
+    res.rotationRecent = (rh._events || []).filter(e => Date.now() - Date.parse(e.d) < 8 * 86400000).reverse();
     writeJSON(path.join(OUT, 'industries.json'), res);
     if (FULL || !iPrev) writeJSON(iFile, res);
     if (!iPrev && !FULL) console.log('DIGEST_CHANGED');

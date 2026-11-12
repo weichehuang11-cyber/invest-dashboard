@@ -264,6 +264,7 @@ function weekly(snap, N, P, barsDir, aiDir) {
   // 追蹤的產業
   {
     const IND = readJSON(path.join(path.dirname(barsDir), 'industries.json'), null), trk = P?.indTrack || [];
+    if (IND?.rotationRecent?.length) S.push({ h: '本週產業輪動', lines: IND.rotationRecent.slice(0, 10).map(r => `• ${r.d.slice(5).replace('-', '/')} ${r.text}`) });
     if (IND && trk.length) { const Ind = require('./lib/industry'); const L = [...(IND.groups || []), ...(P.indCustom || []).map(c => ({ id: 'c-' + c.id, name: c.name, m: 'tw', stats: Ind.groupStats(c.keys, IND.stocks || {}, IND.bench?.tw) }))].filter(g => trk.includes(g.id)).map(g => Ind.line(g, IND.bench?.[g.m])).filter(Boolean).map(x => '• ' + x); if (L.length) S.push({ h: '追蹤的產業', lines: L, priv: true }); }
   }
   // 虛擬跟單
@@ -534,6 +535,12 @@ async function sendMail(B) {
 
 // 調整建議：有新的（或內容更新的）待確認項目就通知
 const REC = { approve: '建議同意', wait: '建議再觀察', reject: '建議拒絕' };
+// 追蹤產業的輪動（由弱轉強、廣度急升…）
+function rotationEvents(IND, P, notified) {
+  const trk = new Set(P?.indTrack || []); if (!IND?.rotation?.length || !trk.size) return [];
+  const icon = { up: '🔥', thrust: '🔥', top: '🏆', down: '🧊', break: '🧊' };
+  return IND.rotation.filter(r => trk.has(r.id)).map(r => ({ id: `rot:${r.id}:${r.type}:${r.d}`, prio: 3, text: `${icon[r.type] || '🔄'} 追蹤產業：${r.text}` })).filter(e => !notified[e.id]);
+}
 const propTxt = p => (p.type === 'weights' ? `模型權重 ${Math.round(p.from.mlW * 100)}% → ${Math.round(p.to.mlW * 100)}%` : `買進 ${p.from.buyTh}→${p.to.buyTh}、賣出 ${p.from.sellTh}→${p.to.sellTh}、停損 ${p.from.stopK}→${p.to.stopK}×ATR`);
 function proposalEvents(snap, notified) {
   return (snap.proposals?.pending || []).filter(p => !notified['prop:' + p.id]).map(p => ({
@@ -588,7 +595,7 @@ if (require.main === module) (async () => {
     }
   }
   const dataDir = path.dirname(String(args.snap || 'out/data/snapshot.json'));
-  const ev = [...await events(snap, P, notified), ...healthEvents(readJSON(path.join(dataDir, 'status.json'), null), snap, notified), ...newsEvents(readJSON(path.join(dataDir, 'news.json'), null), snap, P, notified), ...proposalEvents(snap, notified)].sort((a, b) => b.prio - a.prio);
+  const ev = [...await events(snap, P, notified), ...healthEvents(readJSON(path.join(dataDir, 'status.json'), null), snap, notified), ...newsEvents(readJSON(path.join(dataDir, 'news.json'), null), snap, P, notified), ...proposalEvents(snap, notified), ...rotationEvents(readJSON(path.join(dataDir, 'industries.json'), null), P, notified)].sort((a, b) => b.prio - a.prio);
   const save = () => { const cut = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10); for (const [k, v] of Object.entries(notified)) if (!k.startsWith('_') && v < cut) delete notified[k]; fs.mkdirSync(path.dirname(stFile), { recursive: true }); fs.writeFileSync(stFile, JSON.stringify(notified)); console.log('NOTIFIED_CHANGED'); };
   // 勿擾時段：只送重大（優先 4 以上），其他先存起來，時段結束後一次送出
   const L = P?.limits || {}, quiet = L.quietOn !== false && inQuiet(L.quietStart ?? 23, L.quietEnd ?? 7);
