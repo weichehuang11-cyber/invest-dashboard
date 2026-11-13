@@ -29,7 +29,7 @@
   }
   applyLook(); mqDark?.addEventListener?.('change', applyLook);
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  const APP_VERSION = '1.15.1';
+  const APP_VERSION = '1.15.2';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2843,7 +2843,7 @@ ${footer()}`;
       <p class="small" style="margin:0">在瀏覽器裡用你的<b>密語</b>加密後，存到你 GitHub 帳號的私密 Gist。手機、電腦設定同一組權杖和密語就會自動同步；沒有密語的人（包括 GitHub）都看不到內容。</p>
       <form id="sy-form" class="form" style="max-width:520px">
         <div class="field"><label for="sy-token">GitHub 權杖（只需 Gist 權限）</label><input id="sy-token" type="password" autocomplete="off" value="${esc(s.token)}" placeholder="github_pat_… 或 ghp_…"><span class="hint">建立方式見下方說明。權杖只存在這台裝置。</span></div>
-        <div class="field"><label for="sy-pass">加密密語</label><input id="sy-pass" type="password" autocomplete="new-password" value="${esc(s.pass)}" placeholder="自己設一組，至少 10 個字"><span class="hint">忘記就無法解開備份，請記在密碼管理器。每台裝置要輸入同一組。</span></div>
+        <div class="field"><label for="sy-pass">加密密語</label><div style="display:flex;gap:8px"><input id="sy-pass" type="password" autocomplete="new-password" value="${esc(s.pass)}" placeholder="自己設一組，至少 10 個字" style="flex:1;min-width:0"><button type="button" class="btn sm" id="sy-show">顯示</button></div><span class="hint">忘記就無法解開備份，請記在密碼管理器。每台裝置要輸入同一組。</span></div>
         <div class="actions"><button class="btn primary" type="submit">儲存並同步</button>${s.token ? '<button type="button" class="btn" id="sy-now">立即同步</button><button type="button" class="btn danger" id="sy-off">停用</button>' : ''}</div>
         ${s.gist ? `<div class="field"><label>備份編號（設定推播時用）</label><div style="display:flex;gap:8px"><input readonly value="${esc(s.gist)}" id="sy-gid"><button type="button" class="btn sm" id="sy-copy">複製</button></div></div>` : ''}
         <p id="sy-msg" class="small ${s.err ? 'bad-text' : 'muted'}" role="status">${s.err ? esc(s.err) : s.last ? `上次同步：${esc(tpeTime(new Date(s.last).toISOString()))}` : ''}</p>
@@ -2877,7 +2877,7 @@ ${footer()}`;
       await syncNow(true); render();
     };
     const n = $('#sy-now'); if (n) n.onclick = async () => { await syncNow(true); render(); };
-    const cp = $('#sy-copy'); if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText($('#sy-gid').value); toast('已複製'); } catch (_) { $('#sy-gid').select(); } };
+    const cp = ($('#sy-show') && ($('#sy-show').onclick = () => { const i = $('#sy-pass'), on = i.type === 'password'; i.type = on ? 'text' : 'password'; $('#sy-show').textContent = on ? '隱藏' : '顯示'; }), $('#sy-copy')); if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText($('#sy-gid').value); toast('已複製'); } catch (_) { $('#sy-gid').select(); } };
     const tp = $('#nt-topic');
     $('#nt-gen').onclick = () => { const r = crypto.getRandomValues(new Uint8Array(9)); tp.value = 'st-' + [...r].map(b => b.toString(36).padStart(2, '0')).join('').slice(0, 16); LS.set('ntfyTopic', tp.value); };
     tp.onchange = () => LS.set('ntfyTopic', tp.value.trim());
