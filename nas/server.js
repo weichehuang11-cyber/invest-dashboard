@@ -109,24 +109,33 @@ setInterval(async () => {
 }, 5000);
 Live.tick(true).catch(() => {});
 
-// 每週日 20:30 自動體檢（nas/check.sh），有問題就推播
-let lastCheck = '';
+// 每週日 20:30 自動體檢（nas/check.sh --fix）：能修的直接修，修完重新檢查，再推播結果
+let lastCheck = '', checking = false;
 setInterval(() => {
   const t = new Date(Date.now() + 8 * 3600000), day = t.toISOString().slice(0, 10);
-  if (t.getUTCDay() !== 0 || t.getUTCHours() !== 20 || t.getUTCMinutes() < 30 || lastCheck === day) return;
-  lastCheck = day;
-  const p = spawn('bash', [path.join(DIR, 'nas', 'check.sh')], { cwd: DIR, env: { ...process.env, CHECK_AUTO: '1' } }); let out = '';
+  if (t.getUTCDay() !== 0 || t.getUTCHours() !== 20 || t.getUTCMinutes() < 30 || lastCheck === day || state.running) return;
+  lastCheck = day; checking = true;
+  const p = spawn('bash', [path.join(DIR, 'nas', 'check.sh'), '--fix'], { cwd: DIR, env: { ...process.env, CHECK_AUTO: '1' } }); let out = '';
   p.stdout.on('data', d => (out += d)); p.stderr.on('data', d => (out += d));
   p.on('close', () => {
-    const bad = out.split('\n').filter(l => /✕/.test(l)).map(l => l.trim());
-    console.log(new Date().toISOString(), 'NAS 每週體檢', bad.length ? bad.length + ' 項有問題' : '全部正常');
-    if (bad.length) ntfy('NAS 每週體檢：' + bad.length + ' 項有問題', bad.slice(0, 8).join('\n') + '\n→ SSH 到 NAS 執行 bash nas/check.sh 看修正方法', 4);
+    checking = false;
+    const [first, again] = out.split('=== 重新檢查 ===');
+    const lines = s => (s || '').split('\n').map(l => l.trim());
+    const before = lines(first).filter(l => l.startsWith('✕'));
+    const fixed = lines(first).filter(l => l.startsWith('🔧')).map(l => l.replace('🔧 已修正：', '✓ '));
+    const failed = lines(first).filter(l => l.startsWith('⚠') || (l.startsWith('·') && /手動修/.test(l)));
+    const left = again == null ? before : lines(again).filter(l => l.startsWith('✕'));
+    console.log(new Date().toISOString(), 'NAS 每週體檢', `發現 ${before.length} 項、修好 ${fixed.length} 項、剩 ${left.length} 項`);
+    if (!before.length) return;
+    const title = left.length ? `NAS 每週體檢：修好 ${fixed.length} 項，${left.length} 項要手動處理` : `NAS 每週體檢：${fixed.length} 項問題已自動修好`;
+    const body = [...(fixed.length ? ['已自動修正：', ...fixed] : []), ...(left.length ? ['還需要處理：', ...left.slice(0, 6), ...failed.slice(0, 3), '→ SSH 到 NAS 執行 bash nas/check.sh 看修正指令'] : [])].join('\n');
+    ntfy(title, body, left.length ? 4 : 3);
   });
 }, 60000);
 
 // 程式更新（git pull）後自動重新啟動，讓 pm2 載入新版本（備援更新進行中就等它跑完）
 const SELF = [__filename, path.join(__dirname, 'livefeed.js')], mtime0 = SELF.map(f => { try { return fs.statSync(f).mtimeMs; } catch (_) { return 0; } });
-setInterval(() => { const now = SELF.map(f => { try { return fs.statSync(f).mtimeMs; } catch (_) { return 0; } }); if (!state.running && now.some((t, i) => t !== mtime0[i])) { console.log(new Date().toISOString(), '程式已更新，重新啟動'); process.exit(0); } }, 60000);
+setInterval(() => { const now = SELF.map(f => { try { return fs.statSync(f).mtimeMs; } catch (_) { return 0; } }); if (!state.running && !checking && now.some((t, i) => t !== mtime0[i])) { console.log(new Date().toISOString(), '程式已更新，重新啟動'); process.exit(0); } }, 60000);
 
 http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
