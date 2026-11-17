@@ -29,7 +29,7 @@
   }
   applyLook(); mqDark?.addEventListener?.('change', applyLook);
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  const APP_VERSION = '1.16.0';
+  const APP_VERSION = '1.16.1';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -996,7 +996,7 @@ ${footer()}`;
     const why = whyIdx(S.idx, I, N, U);
     return `<div class="hd"><h2 id="ix-h">指數走勢與推論</h2><span class="note">${it.years ? `以 ${it.years} 年日 K 回測` : ''}・${esc(it.marketDate || '')}</span></div>
       ${seg('idx', S.idx, ks.map(k => [k, ix[k].name]))}
-      <div class="ixgrid"><div class="chart"><div class="ixq"><b class="mono" style="font-size:22px">${px(it.price)}</b><span class="mono ${cls(it.changePct)}">${pct(it.changePct)}</span><span class="small muted">網站資料</span></div>${why ? `<p class="why"><b>漲跌原因</b>${esc(why)}</p>` : ''}<div id="ix-live">${liveIdxHtml(S.idx)}</div>${b ? chartHtml('idx', b, { outlook: it.outlook, label: it.name, kind: 'idx' }) : '<p class="empty">走勢資料載入失敗</p>'}<div class="fh">${outlookLeft(it.outlook)}</div></div>
+      <div class="ixgrid"><div class="chart"><div class="ixq"><b class="mono" style="font-size:22px">${px(it.price)}</b><span class="mono ${cls(it.changePct)}">${pct(it.changePct)}</span><span class="small muted">網站資料</span></div>${whyHtml(why)}<div id="ix-live">${liveIdxHtml(S.idx)}</div>${b ? chartHtml('idx', b, { outlook: it.outlook, label: it.name, kind: 'idx' }) : '<p class="empty">走勢資料載入失敗</p>'}<div class="fh">${outlookLeft(it.outlook)}</div></div>
       <div class="opanel fh">${outlookPanel(it.outlook, it.price)}</div></div>`;
   }
   async function fillIndexSection() {
@@ -1221,7 +1221,7 @@ ${footer()}`;
   <div id="ind-chips" class="ind-chips"></div>
   <div class="quote">
     <div><div style="display:flex;align-items:baseline;gap:12px"><span class="px">${px(it.price)}</span><span class="ch ${cls(it.changePct)}">${sign(it.price - it.prevClose)}${fix(Math.abs(it.price - it.prevClose), it.price >= 100 ? 1 : 2)}（${pct(it.changePct)}）</span></div>
-      <div class="small muted">${esc(it.marketDate)}・成交量為 20 日均量 ${isNum(ta.relVolume) ? ta.relVolume.toFixed(1) : '—'} 倍</div><p id="s-why" class="why" hidden></p></div>
+      <div class="small muted">${esc(it.marketDate)}・成交量為 20 日均量 ${isNum(ta.relVolume) ? ta.relVolume.toFixed(1) : '—'} 倍</div><div id="s-why" hidden></div></div>
     <div style="display:flex;align-items:center;gap:12px"><span class="tag ${sigCls(g.sig)}" style="font-size:14px;padding:6px 14px">${SIG[g.sig]}</span><div><div class="small muted">綜合分數</div><div class="mono" style="font-size:20px;font-weight:600">${g.score} / 100</div></div></div>
     <div class="evbig" role="img" aria-label="${EVK.map(([k, l]) => `${l}${g.evidence[k] ? EVW[g.evidence[k]] : '無資料'}`).join('、')}">${EVK.map(([k, l]) => `<span><i class="${g.evidence[k] || 'na'}" style="width:10px;height:10px;border-radius:50%;border:1px solid var(--faint);display:inline-block;background:${g.evidence[k] === 'pos' ? 'var(--up)' : g.evidence[k] === 'neg' ? 'var(--down)' : '#fff'}"></i>${l}：${g.evidence[k] ? EVW[g.evidence[k]] : '無資料'}</span>`).join('')}</div>
   </div>
@@ -2404,95 +2404,113 @@ ${footer()}`;
     const A = N?.digest?.ai; if (!A?.headline || Date.now() - Date.parse(A.at) > 20 * 3600000) return '';
     return clip(A.headline.split(/[，。；]/)[0], 30);
   }
+  const pp = v => pct(v, 1);
+  /** 個股：先下結論（大盤／族群／個股自己），再列依據（個股・同業・大盤三個數字＋消息、法人） */
   function whyStock(it, I, N, U) {
-    const p = it.changePct; if (!isNum(p)) return '';
-    const dir = Math.sign(p), word = p > 0 ? '漲' : '跌', tw = it.market === 'tw';
-    if (Math.abs(p) < 0.3) return `今天幾乎平盤（${pct(p)}）。`;
+    const p = it.changePct; if (!isNum(p)) return null;
+    const dir = Math.sign(p), up = p > 0, W = up ? '漲' : '跌', tw = it.market === 'tw', bn = tw ? '大盤' : '美股大盤';
     const bk = tw ? '^TWII' : '^GSPC', bx = S.snap.indices?.[bk], m = isNum(bx?.changePct) && d10(bx.marketDate) === d10(it.marketDate) ? bx.changePct : null;
-    const beta = isNum(it.ta?.beta) ? Math.min(2, Math.max(0.5, it.ta.beta)) : 1, exp = isNum(m) ? beta * m : 0;
-    const R = [];   // [分量, 文字]
-    if (tw && Math.abs(p) >= 9.4) R.push([99, p > 0 ? '漲停' : '跌停']);
-    const f = it.fund || {};
-    if (f.exDividendDate && d10(f.exDividendDate) === d10(it.marketDate) && p < 0) R.push([98, `今天除${f.exDividendType === '權' ? '權' : '息'}${isNum(f.exDividendCash) ? `（${fix(f.exDividendCash, 2)} 元）` : ''}，跌幅含除息`]);
-    // 大盤
-    const bn = tw ? '大盤' : '美股大盤';
-    if (isNum(m) && Math.abs(m) >= 0.3) {
-      if (Math.sign(m) === dir && Math.abs(p) < Math.abs(m) * 0.6 && Math.abs(m) >= 1) R.push([Math.abs(m), `${word}幅比${bn}小（${tw ? '加權' : '標普'} ${pct(m)}），相對${p < 0 ? '抗跌' : '落後'}`]);
-      else if (Math.sign(m) === dir && Math.abs(exp) >= Math.abs(p) * 0.35) R.push([Math.min(Math.abs(exp), Math.abs(p)), `跟著${bn}${word}（${tw ? '加權' : '標普'} ${pct(m)}）`]);
-      else if (Math.sign(m) !== dir && Math.abs(p) >= 1) R.push([Math.abs(p) * 0.6, `逆勢${word}（${bn} ${pct(m)}）`]);
-    }
-    // 族群（同一個細分類、至少 2 檔）
     let sub = null;
-    for (const g of I?.groups || []) for (const s of g.subs || []) if (!sub && s.keys.includes(it.key) && s.keys.length > 1 && isNum(s.stats?.chg)) sub = s;
-    if (sub) {
-      const others = sub.keys.filter(k => k !== it.key).map(k => I.stocks?.[k]?.p).filter(isNum), gc = others.length ? others.reduce((a, b) => a + b, 0) / others.length : null;
-      if (isNum(gc) && Math.sign(gc) === dir && Math.abs(gc) >= 1) R.push([Math.min(Math.abs(gc), Math.abs(p)) + 0.2, `${sub.name}族群一起${word}（同業平均 ${pct(gc)}）`]);
-      else if (isNum(gc) && Math.abs(p) >= 2 && Math.abs(p - gc) >= 2) R.push([Math.abs(p - gc) * 0.5, `${sub.name}同業平均 ${pct(gc)}，主要是個股因素`]);
-    }
-    // 台股科技股：前一晚費半（美股收盤日早於台股）
-    const TECH = ['semi', 'memory', 'aiserver', 'pcb', 'network', 'passive'];
-    const sox = S.snap.indices?.['^SOX'];
-    if (tw && isNum(sox?.changePct) && Math.sign(sox.changePct) === dir && Math.abs(sox.changePct) >= 1.5 && d10(sox.marketDate) < d10(it.marketDate) && (I?.groups || []).some(g => TECH.includes(g.id) && g.subs.some(s => s.keys.includes(it.key)))) R.push([Math.abs(sox.changePct) * 0.7, `前一晚費半 ${pct(sox.changePct, 1)}`]);
-    // 法人（只用同一天的資料）
-    const c = it.chip;
+    for (const g of I?.groups || []) for (const s of g.subs || []) if (!sub && s.keys.includes(it.key) && s.keys.length > 1) sub = s;
+    const peers = sub ? sub.keys.filter(k => k !== it.key).map(k => I.stocks?.[k]?.p).filter(isNum) : [];
+    const gc = peers.length ? peers.reduce((a, b) => a + b, 0) / peers.length : null;
+    const nums = [[it.name, p], ...(isNum(gc) ? [[`${sub.name}同業`, gc]] : []), ...(isNum(m) ? [[tw ? '加權指數' : '標普 500', m]] : [])];
+    // 其他線索
+    const E = [], f = it.fund || {};
+    if (tw && Math.abs(p) >= 9.4) E.push(up ? '漲停' : '跌停');
+    const exDiv = f.exDividendDate && d10(f.exDividendDate) === d10(it.marketDate) && p < 0;
+    const nw = newsFor(it.key, N, dir);
+    if (nw) E.push(`新聞：「${clip(nw.zh || nw.title, 30)}」`);
+    const c = it.chip; let chipTxt = '';
     if (tw && c && d10(c.date) === d10(it.marketDate)) {
       const avgVol = isNum(c.volume5) ? c.volume5 / 5 : null;
       const big = [['外資', c.foreign1], ['投信', c.trust1]].filter(([, v]) => isNum(v) && Math.sign(v) === dir && (!avgVol || Math.abs(v) >= avgVol * 0.05)).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
-      if (big) R.push([Math.abs(p) * 0.45, `${big[0]}${big[1] > 0 ? '買超' : '賣超'} ${lotsTxt(big[1])}`]);
+      if (big) { chipTxt = `${big[0]}${big[1] > 0 ? '買超' : '賣超'} ${lotsTxt(big[1])}`; E.push(chipTxt); }
     }
-    // 新聞
-    const nw = newsFor(it.key, N, dir);
-    if (nw) R.push([Math.abs(p - exp) * 0.8 + 0.3, `消息：「${clip(nw.zh || nw.title)}」`]);
-    // 量能
-    const rv = it.ta?.relVolume;
-    if (isNum(rv) && rv >= 1.8 && Math.abs(p) >= 2) R.push([0.4, `成交量放大到均量 ${fix(rv, 1)} 倍`]);
-    const pick = R.sort((a, b) => b[0] - a[0]).slice(0, 3).map(x => x[1]);
-    if (!pick.length || (pick.length === 1 && /^(漲停|跌停)$/.test(pick[0]))) pick.push(Math.abs(p - exp) >= 1.5 ? '沒有找到明確消息，偏個股資金面' : `大致跟隨${bn}`);
-    return `${tw ? '今天' : '最近一個交易日'}${word} ${pct(Math.abs(p)).replace(/^[+−]/, '')}：${pick.join('，')}。`;
+    const TECH = ['semi', 'memory', 'aiserver', 'pcb', 'network', 'passive'], sox = S.snap.indices?.['^SOX'];
+    const soxHit = tw && isNum(sox?.changePct) && Math.sign(sox.changePct) === dir && Math.abs(sox.changePct) >= 1.5 && d10(sox.marketDate) < d10(it.marketDate) && (I?.groups || []).some(g => TECH.includes(g.id) && g.subs.some(s => s.keys.includes(it.key)));
+    if (soxHit) E.push(`前一晚費半 ${pp(sox.changePct)}`);
+    const rv = it.ta?.relVolume; if (isNum(rv) && rv >= 1.8 && Math.abs(p) >= 2) E.push(`成交量是均量 ${fix(rv, 1)} 倍`);
+    // 結論
+    let c1, c2;
+    const why = nw ? '新聞見下方' : chipTxt ? chipTxt : '沒有找到相關新聞，偏資金面';
+    if (exDiv) { c1 = '除息造成的價格調整，不是真的下跌'; c2 = `今天除${f.exDividendType === '權' ? '權' : '息'}${isNum(f.exDividendCash) ? ` ${fix(f.exDividendCash, 2)} 元` : ''}，股價扣掉配息後自然變低`; }
+    else if (Math.abs(p) < 0.3) { c1 = '今天幾乎沒動'; c2 = isNum(m) ? `${bn} ${pp(m)}` : ''; }
+    else if (isNum(m) && Math.abs(m) >= 0.5 && Math.sign(m) !== dir && Math.abs(p) >= 1) { c1 = `逆勢${W}：${bn}${m > 0 ? '漲' : '跌'}它${W}，是個股自己的${up ? '利多' : '利空'}`; c2 = why; }
+    else if (isNum(gc) && Math.abs(p - gc) >= Math.max(2, Math.abs(p) * 0.4)) {
+      if (Math.sign(p - gc) === dir) { c1 = `個股自己的${up ? '利多' : '利空'}：比同業多${W} ${fix(Math.abs(p - gc), 1)} 個百分點`; c2 = why; }
+      else { c1 = up ? `漲得比同業少，${sub.name}裡相對落後` : `比同業抗跌，${sub.name}裡相對強`; c2 = `同業平均 ${pp(gc)}，它只${W} ${fix(Math.abs(p), 1)}%`; }
+    }
+    else if (!isNum(gc) && isNum(m) && Math.abs(p - m) >= Math.max(2.5, Math.abs(p) * 0.5) && Math.sign(p - m) === dir) { c1 = `${W}得比${bn}多，偏個股因素`; c2 = why; }
+    else if (isNum(gc) && Math.sign(gc) === dir && Math.abs(gc) >= 1 && (!isNum(m) || Math.abs(gc - m) >= 1.5 && Math.abs(gc) > Math.abs(m))) { c1 = `${sub.name}整個族群在${W}，它只是跟著族群`; c2 = soxHit ? `族群${W}的原因：前一晚費半 ${pp(sox.changePct)}` : `族群${W}得比${bn}${Math.abs(gc) > Math.abs(m ?? 0) ? '多' : '少'}`; }
+    else if (isNum(m) && Math.sign(m) === dir && Math.abs(m) >= 0.5) {
+      if (Math.abs(p) < Math.abs(m) * 0.6) { c1 = up ? `跟著${bn}漲，但漲得比大盤少` : `跟著${bn}跌，但跌得比大盤少，相對抗跌`; c2 = ''; }
+      else if (nw && Math.sign(nw.imp || nw.tone || 0) === dir) { c1 = `主要是跟著${bn}一起${W}，個股另有${up ? '利多' : '利空'}消息但影響不大`; c2 = `${W}幅和${isNum(gc) ? '同業' : '大盤'}差不多`; }
+      else { c1 = `跟著${bn}一起${W}，不是個股本身的問題`; c2 = `${W}幅和${isNum(gc) ? '同業' : '大盤'}差不多，也沒有個股${up ? '利多' : '利空'}新聞`; }
+    }
+    else { c1 = `小幅${W}，沒有明確的單一原因`; c2 = why; }
+    return { c1, c2, nums, E: E.filter(x => !c2.includes(x)).slice(0, 3) };
   }
+  /** 指數：結論（全面性／權值股主導／族群帶動）＋起因＋依據 */
   function whyIdx(ik, I, N, U) {
-    const x = S.snap.indices?.[ik]; if (!x || !isNum(x.changePct)) return '';
-    const p = x.changePct, dir = Math.sign(p), word = p > 0 ? '漲' : '跌', md = d10(x.marketDate);
-    if (Math.abs(p) < 0.15) return `${x.name}幾乎平盤（${pct(p)}）。`;
-    const parts = [], same = v => isNum(v) && Math.sign(v) === dir;
-    if (ik === '^TWII') {
-      const hv = TW_HEAVY.map(k => ({ k, ...chgOf(k, U) })).filter(h => isNum(h.p));
-      const lead = hv.filter(h => same(h.p) && Math.abs(h.p) >= 0.5).sort((a, b) => Math.abs(b.p) - Math.abs(a.p));
-      const tsmc = hv.find(h => h.k === '2330');
-      const heavy = [...new Map([tsmc, ...lead].filter(h => h && same(h.p)).map(h => [h.k, h])).values()].slice(0, 3);
-      if (heavy.length) parts.push(`權值股${word}：${heavy.map(h => `${h.n} ${pct(h.p, 1)}`).join('、')}`);
-      else if (tsmc) parts.push(`台積電 ${pct(tsmc.p, 1)} 沒跟上`);
-    } else {
-      const big = [...uniMap(U).values()].filter(u => u.m === 'us' && isNum(u.p) && u.mc > 0 && (ik !== '^SOX' || /semi/i.test(u.s || '') || ['NVDA', 'AMD', 'AVGO', 'TSM', 'MU', 'QCOM', 'ASML', 'AMAT', 'LRCX', 'INTC', 'MRVL', 'TXN', 'KLAC'].includes(u.k)))
-        .map(u => ({ ...u, ct: u.mc * u.p })).filter(u => same(u.p)).sort((a, b) => Math.abs(b.ct) - Math.abs(a.ct)).slice(0, 3);
-      if (big.length) parts.push(`${ik === '^SOX' ? '主要成分股' : '大型股'}${word}：${big.map(u => `${S.snap.items[u.k]?.name || u.n} ${pct(u.p, 1)}`).join('、')}`);
-    }
+    const x = S.snap.indices?.[ik]; if (!x || !isNum(x.changePct)) return null;
+    const p = x.changePct, dir = Math.sign(p), up = p > 0, W = up ? '漲' : '跌', md = d10(x.marketDate), same = v => isNum(v) && Math.sign(v) === dir;
+    const tw = ik === '^TWII', mk = tw ? 'tw' : 'us';
+    if (Math.abs(p) < 0.15) return { c1: '今天幾乎平盤', c2: digestCause(N), nums: [[x.name, p]], E: [] };
+    // 漲跌家數
+    const L = [...uniMap(U).values()].filter(u => u.m === mk && isNum(u.p));
+    const brd = L.length >= 100 ? L.filter(u => Math.sign(u.p) === dir).length / L.length : null;
+    // 主要拉抬／拖累的股票
+    let movers = [];
+    if (tw) movers = TW_HEAVY.map(k => ({ k, ...chgOf(k, U) })).filter(h => same(h.p) && Math.abs(h.p) >= 0.5);
+    else movers = L.filter(u => u.mc > 0 && same(u.p) && (ik !== '^SOX' || /semi/i.test(u.s || '') || ['NVDA', 'AMD', 'AVGO', 'TSM', 'MU', 'QCOM', 'ASML', 'AMAT', 'LRCX', 'INTC', 'MRVL', 'TXN', 'KLAC'].includes(u.k))).map(u => ({ k: u.k, n: S.snap.items[u.k]?.name || u.n, p: u.p, ct: u.mc * u.p })).sort((a, b) => Math.abs(b.ct) - Math.abs(a.ct));
+    if (tw) movers.sort((a, b) => (a.k === '2330' ? -1 : b.k === '2330' ? 1 : Math.abs(b.p) - Math.abs(a.p)));
+    movers = movers.slice(0, 3);
     // 產業／類股
-    if (ik === '^TWII') {
-      const gs = (I?.groups || []).filter(g => g.m === 'tw' && isNum(g.stats?.chg));
-      const lead = gs.filter(g => same(g.stats.chg)).sort((a, b) => Math.abs(b.stats.chg) - Math.abs(a.stats.chg)).slice(0, 2);
-      const vs = gs.filter(g => isNum(g.stats.chg) && Math.sign(g.stats.chg) === -dir && Math.abs(g.stats.chg) >= 0.5).sort((a, b) => Math.abs(b.stats.chg) - Math.abs(a.stats.chg))[0];
-      if (lead.length) parts.push(`${lead.map(g => `${g.name} ${pct(g.stats.chg, 1)}`).join('、')}${p > 0 ? '領漲' : '領跌'}${vs ? `，只有${vs.name}逆勢 ${pct(vs.stats.chg, 1)}` : ''}`);
-    } else if (ik === '^GSPC' || ik === '^IXIC') {
-      const sec = (S.snap.sectors || []).filter(s => isNum(s.changePct)).sort((a, b) => dir * (b.changePct - a.changePct));
-      if (sec.length) parts.push(`類股${p > 0 ? '以' : '以'}${sec.slice(0, 2).map(s => `${s.name} ${pct(s.changePct, 1)}`).join('、')}${p > 0 ? '最強' : '最弱'}`);
+    let lead = [], opp = null;
+    if (tw) {
+      const gs = (I?.groups || []).filter(g => g.m === 'tw' && isNum(g.stats?.chg)).map(g => ({ n: g.name, p: g.stats.chg }));
+      lead = gs.filter(g => same(g.p)).sort((a, b) => Math.abs(b.p) - Math.abs(a.p)).slice(0, 2);
+      opp = gs.filter(g => Math.sign(g.p) === -dir && Math.abs(g.p) >= 0.5).sort((a, b) => Math.abs(b.p) - Math.abs(a.p))[0] || null;
+      if (brd == null && gs.length) { const k = gs.filter(g => same(g.p)).length / gs.length; if (k >= 0.85) movers.broad = true; }
+    } else if (ik !== '^SOX') {
+      const sec = (S.snap.sectors || []).filter(s => isNum(s.changePct)).map(s => ({ n: s.name, p: s.changePct }));
+      lead = sec.filter(s => same(s.p)).sort((a, b) => Math.abs(b.p) - Math.abs(a.p)).slice(0, 2);
+      opp = sec.filter(s => Math.sign(s.p) === -dir && Math.abs(s.p) >= 0.5).sort((a, b) => Math.abs(b.p) - Math.abs(a.p))[0] || null;
+      if (brd == null && sec.length && sec.filter(s => same(s.p)).length / sec.length >= 0.85) movers.broad = true;
     }
-    // 台股：隔夜費半、外資
-    if (ik === '^TWII') {
-      const sox = S.snap.indices?.['^SOX'];
-      if (same(sox?.changePct) && Math.abs(sox.changePct) >= 1.5 && d10(sox.marketDate) < md) parts.push(`前一晚費半 ${pct(sox.changePct, 1)}`);
-      const cm = S.snap.chipMarket;
-      if (cm && d10(cm.date) === md && isNum(cm.foreignValueEst) && Math.sign(cm.foreignValueEst) === dir && Math.abs(cm.foreignValueEst) >= 50e8) parts.push(`外資${cm.foreignValueEst > 0 ? '買超' : '賣超'}約 ${int(Math.abs(cm.foreignValueEst) / 1e8)} 億`);
-    }
+    const tsmc = tw ? chgOf('2330', U) : null;
+    const leadTxt = lead.length ? `${lead.map(g => g.n).join('、')}${W}最多` : '';
+    const strong = Math.abs(p) >= 2 ? (up ? '大漲' : '重挫') : Math.abs(p) >= 1 ? (up ? '上漲' : '下跌') : (up ? '小漲' : '小跌');
+    let c1;
+    if ((brd != null && brd >= 0.75) || movers.broad) c1 = `全面性${strong} ${fix(Math.abs(p), 2)}%${brd != null ? `：約 ${Math.round(brd * 10)} 成股票${W}` : '：幾乎所有產業都在' + W}${leadTxt ? `，${leadTxt}` : ''}`;
+    else if (tw && tsmc && same(tsmc.p) && Math.abs(tsmc.p) >= Math.abs(p) * 0.9 && (brd == null || brd < 0.55)) c1 = `${strong} ${fix(Math.abs(p), 2)}% 主要是台積電${up ? '拉抬' : '拖累'}（${pp(tsmc.p)}），多數股票其實沒跟${brd != null ? `（只有 ${Math.round(brd * 100)}% ${W}）` : ''}`;
+    else if (ik === '^SOX') c1 = `半導體股${strong} ${fix(Math.abs(p), 2)}%${movers.length >= 3 ? '，大型半導體股全部一起' + W : ''}`;
+    else if (lead.length) c1 = `${strong} ${fix(Math.abs(p), 2)}%，由${lead.map(g => `${g.n}（${pp(g.p)}）`).join('、')}帶頭${opp ? `；${opp.n}逆勢${opp.p > 0 ? '漲' : '跌'}` : ''}`;
+    else c1 = `${strong} ${fix(Math.abs(p), 2)}%`;
     const cause = digestCause(N);
-    return `${x.name}${/[\x00-\x7F]$/.test(x.name) ? ' ' : ''}${word} ${pct(Math.abs(p)).replace(/^[+−]/, '')}${cause ? `，起因：${cause}` : ''}${parts.length ? '；' + parts.slice(0, 3).join('；') : ''}。`;
+    const E = [];
+    if (movers.length) E.push(`${tw ? '權值股' : '影響最大'}：${movers.map(h => `${h.n} ${pp(h.p)}`).join('、')}`);
+    if (tw) {
+      const sox = S.snap.indices?.['^SOX'];
+      if (same(sox?.changePct) && Math.abs(sox.changePct) >= 1.5 && d10(sox.marketDate) < md) E.push(`前一晚費半 ${pp(sox.changePct)}`);
+      const cm = S.snap.chipMarket;
+      if (cm && d10(cm.date) === md && isNum(cm.foreignValueEst) && Math.abs(cm.foreignValueEst) >= 50e8) E.push(`外資${cm.foreignValueEst > 0 ? '買超' : '賣超'}約 ${int(Math.abs(cm.foreignValueEst) / 1e8)} 億`);
+    }
+    return { c1, c2: cause ? `起因：${cause}` : '', nums: [], E };
+  }
+  function whyHtml(w) {
+    if (!w) return '';
+    return `<div class="why"><div class="why-c"><span class="why-t">結論</span>${esc(w.c1)}${w.c2 ? `<span class="why-c2">，${esc(w.c2)}</span>` : ''}。</div>`
+      + (w.nums.length > 1 ? `<div class="why-n">${w.nums.map(([n, v]) => `<span><em>${esc(n)}</em><b class="mono ${cls(v)}">${pp(v)}</b></span>`).join('')}</div>` : '')
+      + (w.E.length ? `<ul class="why-e">${w.E.map(e => `<li>${esc(e)}</li>`).join('')}</ul>` : '') + '</div>';
   }
   async function fillWhy(key) {
     const el = $('#s-why'); if (!el) return;
     const it = S.snap.items[key]; if (!it) return;
     const [I, N, U] = await Promise.all([loadInd(), loadNews().catch(() => null), loadUniverse()]);
     if (S.route !== 's/' + key || !$('#s-why')) return;
-    const t = whyStock(it, I, N, U); el.innerHTML = t ? `<b>漲跌原因</b>${esc(t)}` : ''; el.hidden = !t;
+    const h = whyHtml(whyStock(it, I, N, U)); el.innerHTML = h; el.hidden = !h;
   }
   // ── 準確度總表：所有判斷放在一起比，看該相信哪一套 ─────────────────
   function accuracyBoard() {

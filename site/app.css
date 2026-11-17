@@ -688,7 +688,14 @@ button, a, select, input, .btn { touch-action: manipulation; }
 .lay-btn { text-align: center; order: 98; }
 .main > #lay { order: 98; }
 /* 一句話：今天在漲／跌什麼 */
-.why { margin: 8px 0 0; padding: 7px 10px; border-radius: 8px; background: var(--bg); color: var(--ink2); line-height: 1.55; font-size: 14px; }
-.why b { color: var(--ink); margin-right: 6px; }
-.why[hidden] { display: none; }
-.quote .why { max-width: 460px; }
+.why { margin: 10px 0 0; padding: 9px 12px; border-radius: 10px; background: var(--bg); border-left: 3px solid var(--acc); line-height: 1.55; }
+.why-c { font-size: 15px; font-weight: 600; color: var(--ink); }
+.why-c2 { font-weight: 400; color: var(--ink2); }
+.why-t { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 7px; margin-right: 6px; border-radius: 99px; background: var(--ink); color: var(--card, #fff); vertical-align: 1px; }
+.why-n { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 13px; }
+.why-n span { display: inline-flex; gap: 5px; align-items: baseline; }
+.why-n em { font-style: normal; color: var(--ink2); }
+.why-e { margin: 5px 0 0; padding-left: 18px; font-size: 13px; color: var(--ink2); }
+.why-e li { margin: 1px 0; }
+#s-why[hidden] { display: none; }
+.quote #s-why { max-width: 480px; }
