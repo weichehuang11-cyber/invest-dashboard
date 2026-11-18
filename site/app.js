@@ -29,7 +29,7 @@
   }
   applyLook(); mqDark?.addEventListener?.('change', applyLook);
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  const APP_VERSION = '1.16.1';
+  const APP_VERSION = '1.17.0';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2512,6 +2512,184 @@ ${footer()}`;
     if (S.route !== 's/' + key || !$('#s-why')) return;
     const h = whyHtml(whyStock(it, I, N, U)); el.innerHTML = h; el.hidden = !h;
   }
+  // ── 圖表頁：把必要的資訊畫成圖（每張圖上方一句結論） ─────────────────────
+  const CH_COL = ['var(--acc)', '#E07B39', '#8B5CF6', '#0EA5A4', '#D9468F', '#7A8699'];
+  const ymdShort = d => { const s = d10(d); return s ? +s.slice(5, 7) + '/' + +s.slice(8, 10) : ''; };
+  /** 折線圖：series=[{name, col, v:[…]}]，labels=日期；refs=[{y, label}] 參考線；可在圖上滑動看數值 */
+  function lineChart(id, labels, series, { h = 170, fmt = v => num(v, 1), refs = [], zero = false, kind = 'num', w = null } = {}) {
+    const all = series.flatMap(s => s.v).filter(isNum).concat(refs.map(r => r.y));
+    if (!all.length) return '<p class="empty">沒有資料</p>';
+    let lo = Math.min(...all), hi = Math.max(...all); if (zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+    const pad = (hi - lo) * 0.08 || 1; lo -= pad; hi += pad;
+    const W = w || (innerWidth >= 1000 ? 540 : 360), H = w ? h : innerWidth >= 1000 ? Math.round(h * 1.25) : h, L = 6, R = 10 + 6.2 * Math.max(...[hi - pad, lo + pad, (hi + lo) / 2].map(v => String(fmt(v)).length)), T = 10, B = 20;
+    const n = labels.length, X = i => L + (W - L - R) * (n > 1 ? i / (n - 1) : 0.5), Y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+    const path = v => { let d = '', pen = false; v.forEach((y, i) => { if (!isNum(y)) { pen = false; return; } d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(y).toFixed(1); pen = true; }); return d; };
+    const ticks = [hi - pad, (hi + lo) / 2, lo + pad];
+    const xt = [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i);
+    const data = JSON.stringify({ labels: labels.map(ymdShort), s: series.map(s => ({ n: s.name, c: s.col, v: s.v })), L, R, W, fmt: kind });
+    return `<div class="lc" data-lc='${esc(data)}'><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="折線圖">
+      ${ticks.map(t => `<line x1="${L}" x2="${W - R}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}" class="lc-g"/><text x="${W - R + 4}" y="${(Y(t) + 3.5).toFixed(1)}" class="lc-t">${esc(fmt(t))}</text>`).join('')}
+      ${zero && lo < 0 && hi > 0 ? `<line x1="${L}" x2="${W - R}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" class="lc-z"/>` : ''}
+      ${refs.map(r => `<line x1="${L}" x2="${W - R}" y1="${Y(r.y).toFixed(1)}" y2="${Y(r.y).toFixed(1)}" class="lc-r"/><text x="${L + 2}" y="${(Y(r.y) - 3).toFixed(1)}" class="lc-t lc-rt">${esc(r.label)}</text>`).join('')}
+      ${xt.map(i => `<text x="${X(i).toFixed(1)}" y="${H - 5}" class="lc-t" text-anchor="${i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}">${esc(ymdShort(labels[i]))}</text>`).join('')}
+      ${series.map(s => `<path d="${path(s.v)}" fill="none" stroke="${s.col}" stroke-width="${s.w || 1.8}" stroke-linejoin="round" stroke-linecap="round"/>`).join('')}
+      <line class="lc-x" x1="0" x2="0" y1="${T}" y2="${H - B}" visibility="hidden"/>
+    </svg><div class="lc-tip" hidden></div></div>`;
+  }
+  function bindLineCharts(root = document) {
+    root.querySelectorAll('.lc').forEach(el => {
+      if (el._b) return; el._b = true;
+      const D = JSON.parse(el.dataset.lc), svg = el.querySelector('svg'), ln = el.querySelector('.lc-x'), tip = el.querySelector('.lc-tip'), n = D.labels.length;
+      const f = v => (!isNum(v) ? '—' : D.fmt === 'pct' ? pp(v) : D.fmt === 'int' ? int(v) : num(v, 1));
+      const move = e => {
+        const r = svg.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * D.W;
+        const i = Math.max(0, Math.min(n - 1, Math.round((x - D.L) / (D.W - D.L - D.R) * (n - 1))));
+        const gx = D.L + (D.W - D.L - D.R) * (n > 1 ? i / (n - 1) : 0.5);
+        ln.setAttribute('x1', gx); ln.setAttribute('x2', gx); ln.setAttribute('visibility', 'visible');
+        tip.hidden = false; tip.innerHTML = `<b>${esc(D.labels[i])}</b>` + D.s.map(s => `<span><i style="background:${s.c}"></i>${esc(s.n)} <b class="mono">${f(s.v[i])}</b></span>`).join('');
+        const px = gx / D.W * r.width; tip.style.left = Math.min(Math.max(px - tip.offsetWidth / 2, 0), r.width - tip.offsetWidth) + 'px';
+      };
+      svg.addEventListener('pointermove', move); svg.addEventListener('pointerdown', move);
+      svg.addEventListener('pointerleave', () => { ln.setAttribute('visibility', 'hidden'); tip.hidden = true; });
+    });
+  }
+  const legend = series => `<div class="lc-lg">${series.map(s => `<span><i style="background:${s.col}"></i>${esc(s.name)}${s.tail ? ` <b class="mono ${s.tailCls || ''}">${esc(s.tail)}</b>` : ''}</span>`).join('')}</div>`;
+  /** 正負長條（HTML）：rows=[{label, v, href?, note?}] */
+  function divBars(rows, { fmt = pp, max = null, inverse = false } = {}) {
+    const m = max || Math.max(...rows.map(r => Math.abs(r.v)).filter(isNum), 0.01);
+    return `<div class="db">${rows.map(r => {
+      const w = Math.min(50, Math.abs(r.v) / m * 50), c = cls(r.v, inverse);
+      return `<div class="db-r"><span class="db-l">${r.href ? `<a href="${r.href}">${esc(r.label)}</a>` : esc(r.label)}${r.note ? `<em>${esc(r.note)}</em>` : ''}</span><span class="db-t"><i class="db-b ${c}" style="${r.v >= 0 ? `left:50%` : `right:50%`};width:${w.toFixed(1)}%"></i></span><b class="db-v mono ${c}">${esc(fmt(r.v))}</b></div>`;
+    }).join('')}</div>`;
+  }
+  /** 環圈圖＋圖例 */
+  function donut(parts, center = '') {
+    const tot = parts.reduce((s, p) => s + p.v, 0); if (!tot) return '';
+    let a = -Math.PI / 2; const R = 52, r = 34, C = 60;
+    const arc = (a0, a1) => { const l = a1 - a0 > Math.PI ? 1 : 0, p = (rr, t) => `${(C + rr * Math.cos(t)).toFixed(2)} ${(C + rr * Math.sin(t)).toFixed(2)}`; return `M${p(R, a0)}A${R} ${R} 0 ${l} 1 ${p(R, a1)}L${p(r, a1)}A${r} ${r} 0 ${l} 0 ${p(r, a0)}Z`; };
+    const segs = parts.map((p, i) => { const a0 = a, a1 = a + p.v / tot * Math.PI * 2 - (parts.length > 1 ? 0.012 : 0.0001); a += p.v / tot * Math.PI * 2; return `<path d="${arc(a0, a1)}" fill="${p.col || CH_COL[i % CH_COL.length]}"/>`; }).join('');
+    return `<div class="dn"><svg viewBox="0 0 120 120" role="img" aria-label="比例圖">${segs}<text x="60" y="64" text-anchor="middle" class="dn-c">${esc(center)}</text></svg>
+      <div class="dn-lg">${parts.map((p, i) => `<span><i style="background:${p.col || CH_COL[i % CH_COL.length]}"></i>${esc(p.label)}<b class="mono">${fix(p.v / tot * 100, 1)}%</b></span>`).join('')}</div></div>`;
+  }
+  const chCard = (id, title, concl, body, sub = '') => `<section class="card ch" aria-labelledby="${id}"><div class="ch-h"><h2 id="${id}">${esc(title)}</h2>${sub ? `<span class="small muted">${esc(sub)}</span>` : ''}</div>${concl ? `<p class="ch-c">${esc(concl)}</p>` : ''}${body}</section>`;
+  const pctile = (a, v) => { const x = a.filter(isNum); return x.length ? Math.round(x.filter(y => y <= v).length / x.length * 100) : null; };
+
+  async function viewCharts() {
+    const s = S.snap, mk = LS.get('chMk') || 'tw', rng = +(LS.get('chRng') || 60);
+    const IX = [['^TWII', '加權'], ['^GSPC', '標普 500'], ['^IXIC', '那斯達克'], ['^SOX', '費半']];
+    const [I, ...bars] = await Promise.all([loadInd(), ...IX.map(([k]) => loadBars(k)), loadBars('^VIX'), loadBars('USDTWD=X')]);
+    const vixB = bars[4], fxB = bars[5];
+    const out = [];
+    out.push(`<div class="ch-top"><h1 class="ch-title">圖表</h1>${seg('chRng', String(rng), [['20', '1 個月'], ['60', '3 個月'], ['120', '半年'], ['250', '1 年']])}</div>`);
+
+    // 1. 指數走勢（起點＝0%）
+    {
+      const ok = IX.map(([k, n], i) => ({ k, n, b: bars[i] })).filter(x => x.b?.close?.length);
+      if (ok.length) {
+        const base = ok.find(x => x.k === '^TWII') || ok[0], dates = base.b.dates.slice(-rng);
+        const ser = ok.map((x, i) => {
+          const m = new Map(x.b.dates.map((d, j) => [d, x.b.close[j]])); let last = null; const v0 = [];
+          for (const d of dates) { if (m.has(d)) last = m.get(d); v0.push(last); }
+          const f = v0.find(isNum); const v = v0.map(y => (isNum(y) && f ? (y / f - 1) * 100 : null));
+          const t = v.filter(isNum).pop();
+          return { name: x.n, col: CH_COL[i], v, tail: pp(t), tailCls: cls(t), t };
+        });
+        const srt = ser.filter(x => isNum(x.t)).sort((a, b) => b.t - a.t);
+        const concl = srt.length > 1 ? `${srt[0].name}最強（${pp(srt[0].t)}），${srt[srt.length - 1].name}最弱（${pp(srt[srt.length - 1].t)}）${srt.every(x => x.t < 0) ? '，四大指數全部收黑' : srt.every(x => x.t > 0) ? '，四大指數全部上漲' : ''}` : '';
+        out.push(chCard('ch-ix', '指數走勢', concl, legend(ser) + lineChart('ix', dates, ser, { fmt: pp, zero: true, kind: 'pct' }), `${rng} 個交易日，以起點為 0%`));
+      }
+    }
+    // 2. 今日產業漲跌
+    {
+      const gs = (I.groups || []).filter(g => g.m === mk && isNum(g.stats?.chg)).map(g => ({ label: g.name, v: g.stats.chg, href: '#/industry/' + encodeURIComponent(g.id), note: `漲 ${g.stats.up}／跌 ${g.stats.down}` })).sort((a, b) => b.v - a.v);
+      const bx = s.indices?.[mk === 'tw' ? '^TWII' : '^GSPC'];
+      if (gs.length) {
+        const dn = gs.filter(g => g.v < 0).length;
+        const concl = `${gs.length} 個產業中 ${gs.length - dn} 個上漲、${dn} 個下跌；${gs[0].v >= 0 ? '最強' : '跌最少'} ${gs[0].label} ${pp(gs[0].v, 1)}，${gs[gs.length - 1].v < 0 ? '最弱' : '漲最少'} ${gs[gs.length - 1].label} ${pp(gs[gs.length - 1].v, 1)}`;
+        out.push(chCard('ch-ind', '今日產業漲跌', concl, `<div class="ch-seg">${seg('chMk', mk, [['tw', '台股'], ['us', '美股']])}${bx ? `<span class="small muted">${esc(bx.name)} <b class="mono ${cls(bx.changePct)}">${pp(bx.changePct)}</b></span>` : ''}</div>` + divBars(gs.map(g => ({ ...g, v: +g.v.toFixed(2) })), { fmt: v => pp(v, 1) }), '等權平均'));
+        // 3. 20 日相對大盤
+        const rs = (I.groups || []).filter(g => g.m === mk && isNum(g.stats?.rs20)).map(g => ({ label: g.name, v: g.stats.rs20, href: '#/industry/' + encodeURIComponent(g.id), note: `站上月線 ${g.stats.above20}%` })).sort((a, b) => b.v - a.v);
+        if (rs.length) {
+          const st = rs.filter(r => r.v > 0).slice(0, 2).map(r => r.label), wk = rs.filter(r => r.v < 0).slice(-2).reverse().map(r => r.label);
+          out.push(chCard('ch-rs', '產業強弱（近 20 日，相對大盤）', `${st.length ? `強於大盤：${st.join('、')}` : '沒有產業強於大盤'}；${wk.length ? `弱於大盤：${wk.join('、')}` : '沒有產業弱於大盤'}`, divBars(rs, { fmt: v => (v > 0 ? '+' : '−') + fix(v, 1) }), '單位：百分點'));
+        }
+      }
+    }
+    // 4. 台股市場廣度
+    {
+      const b = s.health?.tw?.breadth;
+      if (b) {
+        const tot = (b.adv || 0) + (b.dec || 0) + (b.unch || 0);
+        const ser = (b.series || []).slice(-rng);
+        const a20 = { name: '站上月線比例', col: 'var(--acc)', v: ser.map(x => x.above20), tail: fix(b.above20, 0) + '%' };
+        const a60 = { name: '站上季線比例', col: '#E07B39', v: ser.map(x => x.above60), tail: fix(b.above60, 0) + '%' };
+        const lvl = b.above20 < 20 ? '極弱，接近超賣區' : b.above20 < 40 ? '偏弱' : b.above20 > 80 ? '極強，接近過熱' : b.above20 > 60 ? '偏強' : '中性';
+        const bar = tot ? `<div class="stk"><i class="up" style="width:${(b.adv / tot * 100).toFixed(1)}%"></i><i class="flat" style="width:${(b.unch / tot * 100).toFixed(1)}%"></i><i class="down" style="width:${(b.dec / tot * 100).toFixed(1)}%"></i></div><div class="stk-l small"><span class="up">上漲 ${int(b.adv)}（漲停 ${int(b.upLimit)}）</span><span class="muted">平盤 ${int(b.unch)}</span><span class="down">下跌 ${int(b.dec)}（跌停 ${int(b.downLimit)}）</span></div>` : '';
+        out.push(chCard('ch-br', '台股市場廣度', `今天上漲 ${int(b.adv)} 家、下跌 ${int(b.dec)} 家；站上月線的股票只有 ${fix(b.above20, 0)}%，${lvl}`, bar + legend([a20, a60]) + lineChart('br', ser.map(x => x.date), [a20, a60], { fmt: v => fix(v, 0) + '%', refs: [{ y: 20, label: '20% 超賣' }, { y: 80, label: '80% 過熱' }] }), d10(b.date)));
+      }
+    }
+    // 5. 籌碼：外資期貨淨部位、選擇權 P/C
+    {
+      const fu = s.health?.tw?.futures, pc = s.health?.tw?.putcall, cm = s.chipMarket;
+      if (fu?.hist?.length) {
+        const h = fu.hist.slice(-rng), v = { name: '外資台指期淨部位（口）', col: 'var(--acc)', v: h.map(x => x.net), w: 2 };
+        const ch5 = fu.chg5;
+        out.push(chCard('ch-fu', '外資期貨部位', `外資${fu.net < 0 ? '淨空單' : '淨多單'} ${int(Math.abs(fu.net))} 口${isNum(ch5) ? `，5 天內${(fu.net < 0) === (ch5 < 0) ? '增加' : '減少'} ${int(Math.abs(ch5))} 口` : ''}${fu.net < 0 && ch5 > 0 ? '（空單回補）' : fu.net < 0 && ch5 < 0 ? '（持續加空）' : ''}${cm && isNum(cm.foreignValueEst) ? `；現貨${cm.foreignValueEst > 0 ? '買超' : '賣超'}約 ${int(Math.abs(cm.foreignValueEst) / 1e8)} 億` : ''}`, lineChart('fu', h.map(x => x.date), [v], { fmt: int, kind: 'int' }), d10(fu.date)));
+      }
+      if (pc?.hist?.length) {
+        const h = pc.hist.slice(-rng), v = { name: '未平倉 P/C 比', col: '#8B5CF6', v: h.map(x => x.oi), w: 2 };
+        out.push(chCard('ch-pc', '選擇權 Put/Call 比', `目前 ${fix(pc.oi, 1)}%，在近一年的第 ${fix(pc.pct, 0)} 百分位${pc.pct <= 20 ? '（偏低：賣權未平倉少，下檔支撐較弱）' : pc.pct >= 80 ? '（偏高：賣權未平倉多，下檔支撐較強）' : ''}`, lineChart('pc', h.map(x => x.date), [v], { fmt: v => fix(v, 0), refs: [{ y: 100, label: '100' }] }), d10(pc.date)));
+      }
+    }
+    // 6. 風險溫度計：VIX、高收益債利差、台幣
+    {
+      const parts = [];
+      if (vixB?.close?.length) {
+        const c = vixB.close.slice(-rng), d = vixB.dates.slice(-rng), last = c[c.length - 1];
+        parts.push(`<div class="ch-mini"><div class="ch-mh"><b>VIX 恐慌指數</b><b class="mono ${last >= 25 ? 'bad-t' : last >= 20 ? 'warn-t' : ''}">${num(last, 1)}</b></div>${lineChart('vix', d, [{ name: 'VIX', col: '#D9468F', v: c }], { h: 120, w: 360, refs: [{ y: 20, label: '20' }, { y: 30, label: '30' }] })}<p class="small muted">${last >= 30 ? '恐慌' : last >= 20 ? '高於 20：波動升溫' : last < 15 ? '波動很低' : '正常區間'}</p></div>`);
+      }
+      const hy = s.health?.us?.hy;
+      if (hy?.hist?.length) {
+        const c = hy.hist.slice(-rng);
+        parts.push(`<div class="ch-mini"><div class="ch-mh"><b>高收益債利差</b><b class="mono">${num(hy.v, 2)}%</b></div>${lineChart('hy', c.map((_, i) => ''), [{ name: '利差', col: '#E07B39', v: c }], { h: 120, w: 360, fmt: v => num(v, 2) })}<p class="small muted">近一年第 ${fix(hy.pct, 0)} 百分位${hy.pct >= 80 ? '：信用風險升溫' : hy.pct <= 20 ? '：信用環境寬鬆' : ''}</p></div>`);
+      }
+      if (fxB?.close?.length) {
+        const c = fxB.close.slice(-rng), d = fxB.dates.slice(-rng), ch = (c[c.length - 1] / c[0] - 1) * 100;
+        parts.push(`<div class="ch-mini"><div class="ch-mh"><b>美元兌台幣</b><b class="mono">${num(c[c.length - 1], 2)}</b></div>${lineChart('fx', d, [{ name: '匯率', col: '#0EA5A4', v: c }], { h: 120, w: 360, fmt: v => num(v, 2) })}<p class="small muted">期間台幣${ch > 0 ? '貶值' : '升值'} ${fix(Math.abs(ch), 1)}%${ch > 1.5 ? '：外資匯出壓力' : ch < -1.5 ? '：資金流入' : ''}</p></div>`);
+      }
+      if (parts.length) {
+        const v = vixB?.close?.at(-1), hot = [v >= 20, hy?.pct >= 80].filter(Boolean).length;
+        out.push(chCard('ch-risk', '風險溫度計', hot >= 2 ? '恐慌指數和信用利差同時偏高，市場處於避險狀態' : hot === 1 ? '有一項風險指標偏高，留意波動' : '風險指標都在正常範圍', `<div class="ch-grid">${parts.join('')}</div>`));
+      }
+    }
+    // 7. 觀察清單綜合分數
+    {
+      const its = Object.values(s.items || {}).filter(i => i.market === mk && isNum(i.signal?.score)).sort((a, b) => b.signal.score - a.signal.score);
+      if (its.length) {
+        const n = k => its.filter(i => i.signal.sig === k).length, bt = its[0].signal.buyThreshold ?? 63, st = its[0].signal.sellThreshold ?? 37;
+        const rows = its.map(i => { const sc = i.signal.score, c = i.signal.sig === 'BUY' ? 'up' : i.signal.sig === 'SELL' ? 'down' : 'flat'; return `<div class="sc-r"><a class="sc-l" href="#/s/${encodeURIComponent(i.key)}">${esc(i.name)}</a><span class="sc-t"><i class="sc-b ${c}" style="width:${sc}%"></i><i class="sc-m" style="left:${st}%"></i><i class="sc-m" style="left:${bt}%"></i></span><b class="mono">${Math.round(sc)}</b></div>`; }).join('');
+        out.push(chCard('ch-sc', `觀察清單綜合分數（${mk === 'tw' ? '台股' : '美股'}）`, `${its.length} 檔：買進 ${n('BUY')}、持有 ${n('HOLD')}、賣出 ${n('SELL')}；最高 ${its[0].name} ${Math.round(its[0].signal.score)} 分`, `<div class="sc">${rows}</div><p class="small muted">直線是賣出門檻 ${st} 分與買進門檻 ${bt} 分</p>`));
+      }
+    }
+    // 8. 我的持股（只在你的瀏覽器計算）
+    {
+      const P = holdings(); const agg = new Map();
+      for (const r of P.rows) { if (!(r.mv > 0)) continue; const a = agg.get(r.key) || { key: r.key, name: r.it?.name || r.key, mv: 0, cost: 0, pnl: 0, day: 0 }; a.mv += r.mv; a.cost += r.cost || 0; a.pnl += r.pnl || 0; a.day += r.day || 0; agg.set(r.key, a); }
+      const A = [...agg.values()].sort((a, b) => b.mv - a.mv);
+      if (A.length) {
+        const top = A.slice(0, 7), rest = A.slice(7).reduce((s, x) => s + x.mv, 0);
+        const parts = [...top.map(x => ({ label: x.name, v: x.mv })), ...(rest > 0 ? [{ label: '其他', v: rest }] : []), ...(P.cash > 0 ? [{ label: '現金', v: P.cash, col: '#B9C0CC' }] : [])];
+        const big = A[0], bigPct = big.mv / P.total * 100;
+        out.push(chCard('ch-pf', '我的持股配置', `最大部位 ${big.name} 占 ${fix(bigPct, 1)}%${bigPct > (cfg.limits?.maxPos || 25) ? '，超過單一持股上限' : ''}；總未實現損益 ${P.pnl >= 0 ? '+' : '−'}${int(Math.abs(P.pnl))} 元（${pp(P.pnlPct)}）`, donut(parts, P.total >= 1e8 ? fix(P.total / 1e8, 2) + ' 億' : P.total >= 1e4 ? int(P.total / 1e4) + ' 萬' : int(P.total)) + `<h3 class="ch-h3">各檔未實現損益（%）</h3>` + divBars(A.filter(x => x.cost > 0).map(x => ({ label: x.name, v: x.pnl / x.cost * 100, href: '#/s/' + encodeURIComponent(x.key), note: `今日 ${x.day >= 0 ? '+' : '−'}${int(Math.abs(x.day))}` })).sort((a, b) => b.v - a.v), { fmt: v => pp(v, 1) }), '只在這台裝置計算'));
+      } else out.push(chCard('ch-pf', '我的持股配置', '', '<p class="empty">還沒有輸入持股。到「持股」頁新增後，這裡會畫出配置與損益。</p>'));
+    }
+    const head = out.shift();
+    return head + `<div class="ch-wrap">${out.join('')}</div>` + footer();
+  }
+  function bindCharts2() {
+    bindLineCharts($('#main'));
+    $('#main').onclick = e => { if (S.route !== 'charts') return; const b = e.target.closest('[data-of="chRng"],[data-of="chMk"]'); if (!b) return; LS.set(b.dataset.of, b.dataset.v); render(); };
+  }
   // ── 準確度總表：所有判斷放在一起比，看該相信哪一套 ─────────────────
   function accuracyBoard() {
     const s = S.snap, sc = s.scorecard || {}, A = s.accuracy || {}, rows = [];
@@ -3088,6 +3266,7 @@ ${footer()}`;
     else if (S.route === 'habits') { main.innerHTML = '<p class="loading">分析中…</p>'; const html = await viewHabits(); if (S.route !== 'habits') return; main.innerHTML = html; document.title = '交易行為檢討・訊號終端'; }
     else if (S.route === 'decide') { main.innerHTML = viewDecide(); bindDecide(); document.title = '待你確認・訊號終端'; }
     else if (S.route === 'paper') { main.innerHTML = viewPaper(); document.title = '虛擬跟單・訊號終端'; }
+    else if (S.route === 'charts') { main.innerHTML = '<p class="loading">畫圖中…</p>'; const html = await viewCharts(); if (S.route !== 'charts') return; main.innerHTML = html; bindCharts2(); document.title = '圖表・訊號終端'; }
     else if (S.route === 'settings') { main.innerHTML = viewSettings(); bindSettings(); document.title = '設定・訊號終端'; }
     else if (S.route === 'all') { main.innerHTML = `<div><a href="#/" class="small">← 回總覽</a></div><section class="card" id="opps">${viewOpps(0)}</section>${footer()}`; document.title = '全部標的・訊號終端'; }
     else { main.innerHTML = viewHome(); document.title = '訊號終端'; afterHome(); if (SY.get().token) loadRemote().then(() => { if (S.route !== 'home' || $('#pck-h') || $('#ms-h')) return; const h = viewPcReview() + viewPcChecks(), h2 = viewPcScan(); if (h) $('#opps')?.insertAdjacentHTML('beforebegin', h); if (h2) $('#opps')?.insertAdjacentHTML('afterend', h2); if (h || h2) setupFolds(); }); loadNews().then(N => { if (S.route !== 'home') return; const el = $('#themes'); if (el) el.innerHTML = viewThemesMini(N); const d = $('#digest'); if (d) d.innerHTML = viewDigestMini(N); setupFolds(); }); }

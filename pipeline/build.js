@@ -731,7 +731,7 @@ async function main() {
     });
   }
   // 大盤日 K（個人決策紀錄用來比較「同期大盤」）
-  for (const key of [...IDX, 'USDTWD=X']) {
+  for (const key of [...IDX, 'USDTWD=X', '^VIX']) {
     const d = longDaily[key] || daily[key]; if (!d) continue;
     const sl = a => a.slice(-1260);
     writeJSON(path.join(OUT, 'bars', `${key.replace(/[^A-Za-z0-9_.-]/g, '_')}.json`), {
