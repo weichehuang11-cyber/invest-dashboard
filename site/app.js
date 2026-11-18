@@ -29,7 +29,7 @@
   }
   applyLook(); mqDark?.addEventListener?.('change', applyLook);
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  const APP_VERSION = '1.20.1';
+  const APP_VERSION = '1.20.2';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2659,12 +2659,30 @@ ${footer()}`;
     let groups = [], note = '';
     if (hset === 'hot') {
       const all = [...U.values()];
-      let tw = all.filter(u => u.m === 'tw' && u.v > 0).sort((a, b) => b.v - a.v).slice(0, 20);
-      const byVal = tw.length > 0;
-      if (!byVal) tw = all.filter(u => u.m === 'tw' && isNum(u.p) && u.c >= 10 && !/^0/.test(u.k)).sort((a, b) => Math.abs(b.p) - Math.abs(a.p)).slice(0, 20);
+      // 候選：昨天成交值前 40 名（還沒有成交值資料時用漲跌幅最大的 40 檔）
+      let pool = all.filter(u => u.m === 'tw' && u.v > 0).sort((a, b) => b.v - a.v).slice(0, 40);
+      const byVal = pool.length > 0;
+      if (!byVal) pool = all.filter(u => u.m === 'tw' && isNum(u.p) && u.c >= 10 && !/^0/.test(u.k)).sort((a, b) => Math.abs(b.p) - Math.abs(a.p)).slice(0, 40);
+      const yRank = new Map(pool.map((u, i) => [u.k, i + 1]));
+      // 今天的即時成交值（NAS：累積成交張數 × 現價），只認今天的資料
+      const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+      const turn = new Map();
+      if (nasLive()) for (const u of pool) { const lv = LIVE.data.stocks?.[u.k]; if (lv?.vol > 0 && isNum(lv.price) && lv.time && new Date(Date.parse(lv.time) + 8 * 3600000).toISOString().slice(0, 10) === today) turn.set(u.k, lv.vol * 1000 * lv.price / 1e8); }
+      const liveMode = turn.size >= Math.min(10, Math.ceil(pool.length * 0.5));
+      // 每分鐘最多重排一次，避免格子一直換位置
+      const sig = pool.map(u => u.k).join();
+      if (!S.hotOrd || S.hotOrd.sig !== sig || S.hotOrd.live !== liveMode || Date.now() - S.hotOrd.at > 60000) {
+        const keys = liveMode ? [...pool].sort((a, b) => (turn.get(b.k) ?? -1) - (turn.get(a.k) ?? -1)).map(u => u.k) : pool.map(u => u.k);
+        S.hotOrd = { sig, live: liveMode, at: Date.now(), keys: keys.slice(0, 20) };
+      }
+      const tw = S.hotOrd.keys.map(rowOf);
+      tw.forEach((r, i) => {
+        const yr = yRank.get(r.k), mv = !liveMode ? '' : yr > 20 ? '新進' : yr - (i + 1) > 0 ? `↑${yr - (i + 1)}` : yr - (i + 1) < 0 ? `↓${i + 1 - yr}` : '';
+        const t = liveMode ? turn.get(r.k) : r.v;
+        r.tag = [isNum(t) && t >= 0.1 ? `${liveMode ? '今 ' : ''}${fix(t, t >= 100 ? 0 : 1)} 億` : '', mv].filter(Boolean).join(' ');
+      });
       const us = all.filter(u => u.m === 'us' && u.mc > 0 && isNum(u.p)).sort((a, b) => b.mc - a.mc).slice(0, 300).sort((a, b) => Math.abs(b.p) - Math.abs(a.p)).slice(0, 12);
-      groups = [{ title: `台股熱門 ${tw.length} 檔`, sub: byVal ? '依上一個交易日成交值' : '漲跌幅最大（成交值資料下次收盤更新後提供）', rows: tw.map(u => rowOf(u.k)) }, { title: `美股大型股異動 ${us.length} 檔`, sub: '市值前 300 大中漲跌幅最大', rows: us.map(u => rowOf(u.k)) }].filter(g => g.rows.length);
-      if (byVal) groups[0].rows.forEach(r => (r.tag = r.v >= 1 ? `${fix(r.v, r.v >= 100 ? 0 : 1)} 億` : ''));
+      groups = [{ title: `台股熱門 ${tw.length} 檔`, sub: liveMode ? '依今天即時成交值排序（每分鐘重排）・↑↓ 是和昨天名次比' : byVal ? '依上一個交易日成交值（開盤後改依今天即時成交值排序）' : '漲跌幅最大（成交值資料下次收盤更新後提供）', rows: tw }, { title: `美股大型股異動 ${us.length} 檔`, sub: '市值前 300 大中漲跌幅最大', rows: us.map(u => rowOf(u.k)) }].filter(g => g.rows.length);
     } else if (hset === 'theme') {
       const T = (S.news?.themes || []).map(t => ({ t, rows: (t.stocks || []).map(x => x.key).filter(k => s.items?.[k] || U.has(k)).slice(0, 8).map(rowOf) })).filter(x => x.rows.length >= 2).slice(0, 6);
       groups = T.map(({ t, rows }) => { const cs = rows.map(r => r.q.c).filter(isNum), av = cs.length ? cs.reduce((a, b) => a + b, 0) / cs.length : null; return { title: t.name, sub: `${t.count} 則新聞${isNum(av) ? `・平均 <b class="mono ${cls(av)}">${pp(av)}</b>` : ''}`, rows, raw: true }; });
@@ -2675,7 +2693,7 @@ ${footer()}`;
       if (hset === 'mine' && !groups.length) note = '還沒有追蹤或持股：在個股頁按 ★ 追蹤，或到「持股」新增';
     }
     const heatTabs = `<div class="hm-tabs">${seg('hmSet', hset, [['all', '全部'], ['mine', `我的 ${mineK.length}`], ['wl', '觀察清單'], ['hot', '熱門股'], ['theme', '題材股']])}</div>`;
-    const tile = (r, gi) => `<a class="hm-t" data-dk="h-${hset}-${gi}-${esc(r.k)}" href="#/s/${encodeURIComponent(r.k)}" style="background:${heatBg(r.q.c, r.m === 'tw' ? 5 : 3)}"><span class="hm-n">${r.h ? '<i class="hm-own" title="持股">持</i>' : r.st ? '<i class="hm-star" title="追蹤">★</i>' : ''}${esc(r.name)}</span><b class="mono">${pct(r.q.c)}</b><span class="hm-p mono">${px(r.q.p)}${r.tag ? `・${esc(r.tag)}` : ''}</span></a>`;
+    const tile = (r, gi) => `<a class="hm-t" data-dk="h-${hset}-${gi}-${esc(r.k)}" href="#/s/${encodeURIComponent(r.k)}" style="background:${heatBg(r.q.c, r.m === 'tw' ? 5 : 3)}"><span class="hm-n">${r.h ? '<i class="hm-own" title="持股">持</i>' : r.st ? '<i class="hm-star" title="追蹤">★</i>' : ''}${esc(r.name)}</span><b class="mono">${pct(r.q.c)}</b><span class="hm-p mono">${px(r.q.p)}</span>${r.tag ? `<span class="hm-x">${esc(r.tag)}</span>` : ''}</a>`;
     const heat = heatTabs + (groups.map((g, gi) => `<div class="hm-g"><div class="hm-h"><b>${esc(g.title)}</b><span class="small muted">${g.raw ? g.sub : esc(g.sub)}</span></div><div class="hm">${g.rows.map(r => tile(r, gi)).join('')}</div></div>`).join('') || `<p class="empty">${esc(note || '沒有資料')}</p>`);
     return `<div class="ds-h"><h2 id="ds-h">即時儀表板</h2><span class="ds-st small muted" data-dk="st">${status}</span></div>
       <div class="dk-grid">${tiles}</div>

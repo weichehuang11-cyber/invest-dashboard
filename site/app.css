@@ -800,3 +800,7 @@ button, a, select, input, .btn { touch-action: manipulation; }
 .hm-star { color: var(--warn); }
 .hm-tabs .seg { flex-wrap: wrap; }
 html { overflow-anchor: none; }
+.hm-p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hm-x { font-size: 11px; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hm-h b { white-space: nowrap; }
+.hm-h { gap: 8px; }

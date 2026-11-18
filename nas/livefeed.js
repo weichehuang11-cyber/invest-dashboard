@@ -82,7 +82,7 @@ async function twse(items) {
     const last = num(m.z) ?? (bid && ask ? (bid + ask) / 2 : bid ?? ask) ?? num(m.o) ?? null, prev = num(m.y);
     const d = String(m.d || ''), t = String(m.t || '');
     const time = d.length === 8 && t ? new Date(`${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)}T${t}+08:00`).toISOString() : null;
-    out[it.key] = { price: last ?? prev, prev, high: num(m.h), low: num(m.l), time, delay: 0 };
+    out[it.key] = { price: last ?? prev, prev, high: num(m.h), low: num(m.l), vol: num(m.v), time, delay: 0 };   // vol：今日累積成交量（張）
   }
   return out;
 }
@@ -106,7 +106,7 @@ async function yahoo(sym) {
   const res = JSON.parse(r.body)?.chart?.result?.[0]; if (!res) throw new Error('Yahoo 無資料');
   const m = res.meta || {}, c = res.indicators?.quote?.[0]?.close || [], ts = res.timestamp || [];
   const spark = []; for (let i = 0; i < c.length; i++) if (c[i] != null) spark.push([ts[i] * 1000, +c[i].toFixed(2)]);
-  return { price: m.regularMarketPrice, prev: m.previousClose ?? m.chartPreviousClose, high: m.regularMarketDayHigh ?? null, low: m.regularMarketDayLow ?? null,
+  return { price: m.regularMarketPrice, prev: m.previousClose ?? m.chartPreviousClose, high: m.regularMarketDayHigh ?? null, low: m.regularMarketDayLow ?? null, vol: m.regularMarketVolume ?? null,
     time: m.regularMarketTime ? new Date(m.regularMarketTime * 1000).toISOString() : null, delay: m.exchangeDataDelayedBy ? Math.round(m.exchangeDataDelayedBy / 60) || m.exchangeDataDelayedBy : 0, spark };
 }
 
@@ -203,7 +203,7 @@ async function tickStocks(force) {
           const r = await twse(part); for (const [k, v] of Object.entries(r)) stocks[k] = { ...v, state: sess };
         }
       } else {
-        for (const x of L) { try { const r = await yahoo(x.key); stocks[x.key] = { price: r.price, prev: r.prev, high: r.high, low: r.low, time: r.time, delay: r.delay, state: sess }; } catch (_) { /* 下一輪再試 */ } }
+        for (const x of L) { try { const r = await yahoo(x.key); stocks[x.key] = { price: r.price, prev: r.prev, high: r.high, low: r.low, vol: r.vol, time: r.time, delay: r.delay, state: sess }; } catch (_) { /* 下一輪再試 */ } }
       }
     } catch (e) { console.log('個股即時失敗', m, e.message); }
   }
