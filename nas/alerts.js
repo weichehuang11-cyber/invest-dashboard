@@ -33,9 +33,9 @@ function create({ base, send, loadPersonal, log = console.log }) {
     return [...m.values()];
   }
   /** 給 livefeed：要抓的個股（觀察清單＋持股＋追蹤） */
-  function stockList(universe) {
+  function stockList(universe, extra = []) {
     const ex = {}; for (const u of universe || []) ex[u.k] = u.x === 'TPEx' ? 'otc' : 'tse';
-    const keys = new Set([...Object.keys(snap?.items || {}), ...holdings().map(h => h.key), ...(Array.isArray(P?.stars) ? P.stars : [])].filter(k => typeof k === 'string' && /^[0-9A-Z.^=-]{1,12}$/.test(k)));
+    const keys = new Set([...Object.keys(snap?.items || {}), ...holdings().map(h => h.key), ...(Array.isArray(P?.stars) ? P.stars : []), ...extra].filter(k => typeof k === 'string' && /^[0-9A-Z.^=-]{1,12}$/.test(k)));
     return [...keys].map(k => { const it = snap?.items?.[k], m = it?.market || (/^\d/.test(k) ? 'tw' : 'us'); return { key: k, m, ex: ex[k] || 'tse' }; });
   }
 

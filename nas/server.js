@@ -101,7 +101,11 @@ setInterval(async () => {
   if (liveBusy) return; liveBusy = true;
   try {
     await Alerts.refresh();
-    if (Date.now() - stockListAt > 5 * 60000) { stockListAt = Date.now(); let U = []; try { U = JSON.parse(fs.readFileSync(path.join(SITE, 'data', 'universe.json'), 'utf8')).list || []; } catch (_) {} Live.setStocks(Alerts.stockList(U)); }
+    if (Date.now() - stockListAt > 5 * 60000) { stockListAt = Date.now(); let U = []; try { U = JSON.parse(fs.readFileSync(path.join(SITE, 'data', 'universe.json'), 'utf8')).list || []; } catch (_) {} let extra = [];
+      // 熱門股（前一日成交值前 20）＋新聞題材股，讓網站儀表板的「熱門股／題材股」也是即時價
+      extra = U.filter(u => u.m === 'tw' && u.v > 0).sort((a, b) => b.v - a.v).slice(0, 20).map(u => u.k);
+      try { const N = JSON.parse(fs.readFileSync(path.join(SITE, 'data', 'news.json'), 'utf8')); for (const t of (N.themes || []).slice(0, 6)) for (const x of (t.stocks || []).slice(0, 8)) extra.push(x.key); } catch (_) {}
+      Live.setStocks(Alerts.stockList(U, [...new Set(extra)].slice(0, 60))); }
     await Live.tick(); await Live.tickStocks();
     if (ENV.NTFY_TOPIC) await Alerts.check(Live.live, Live.stocks);
   } catch (e) { console.log('即時行情失敗', e.message); }

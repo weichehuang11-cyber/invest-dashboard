@@ -750,11 +750,11 @@ async function main() {
       const ma = k => { const w = arr.slice(-k); return w.length === k && w.every(v => v > 0) ? w.reduce((a, b) => a + b, 0) / k : null; };
       const m20 = ma(20), m60 = ma(60), r20 = arr[nD - 21] > 0 ? (last / arr[nD - 21] - 1) * 100 : null;
       const vp = heavy.tw.valPer?.[id];
-      U.push({ k: id, n: H.names?.[id] || id, m: 'tw', x: 'TWSE', c: last, p: r2(H.lastChg?.[id] ?? null), a20: m20 ? last > m20 : null, a60: m60 ? last > m60 : null, r20: r2(r20, 1), pe: vp?.pe ?? undefined, dy: vp?.dy ?? undefined, b: heavy.tw.tdccAll?.[id] ?? undefined, w: wset.has(id) ? 1 : 0 });
+      U.push({ k: id, n: H.names?.[id] || id, m: 'tw', x: 'TWSE', c: last, p: r2(H.lastChg?.[id] ?? null), a20: m20 ? last > m20 : null, a60: m60 ? last > m60 : null, r20: r2(r20, 1), pe: vp?.pe ?? undefined, dy: vp?.dy ?? undefined, b: heavy.tw.tdccAll?.[id] ?? undefined, v: H.lastVal?.[id] ? r2(H.lastVal[id] / 1e8, 2) : undefined, w: wset.has(id) ? 1 : 0 });
       series.c[id] = cl.map(v => (v > 0 ? r2(v, 2) : null));
     }
     const twIds = new Set(U.map(u => u.k));
-    for (const [id, q] of Object.entries(heavy.tw.tpex?.rows || {})) if (/^(\d{4}|0\d{3,5}[A-Z]?)$/.test(id) && !twIds.has(id)) U.push({ k: id, n: q.n, m: 'tw', x: 'TPEx', c: q.c, p: r2(q.p), b: heavy.tw.tdccAll?.[id] ?? undefined, w: wset.has(id) ? 1 : 0 });
+    for (const [id, q] of Object.entries(heavy.tw.tpex?.rows || {})) if (/^(\d{4}|0\d{3,5}[A-Z]?)$/.test(id) && !twIds.has(id)) U.push({ k: id, n: q.n, m: 'tw', x: 'TPEx', c: q.c, p: r2(q.p), b: heavy.tw.tdccAll?.[id] ?? undefined, v: q.v ? r2(q.v / 1e8, 2) : undefined, w: wset.has(id) ? 1 : 0 });
     for (const k of wl.us) if (items[k]) U.push({ k, n: items[k].name, m: 'us', x: 'US', c: items[k].price, p: items[k].changePct, mc: heavy.us.universe?.rows?.[k]?.mc ?? null, w: 1 });
     const usW = new Set(wl.us);
     for (const [k, q] of Object.entries(heavy.us.universe?.rows || {})) if (!usW.has(k)) U.push({ k, n: q.n, m: 'us', x: 'US', c: q.c, p: r2(q.p), mc: q.mc, s: q.s || undefined, w: 0 });

@@ -29,7 +29,7 @@
   }
   applyLook(); mqDark?.addEventListener?.('change', applyLook);
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  const APP_VERSION = '1.19.1';
+  const APP_VERSION = '1.20.0';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2629,24 +2629,40 @@ ${footer()}`;
       const lc = lineChart('intra', labels, [{ name: v.name, col: (v.chgPct ?? 0) >= 0 ? 'var(--up)' : 'var(--down)', v: v.spark, w: 2 }], { h: 150, fmt: x => px(x), refs: prev ? [{ y: prev, label: `昨收 ${px(prev)}` }] : [], xfmt: hm });
       chart = `<div class="dc" data-dk="c-${esc(sel)}-${n}-${v.price}"><div class="dc-h"><b>${esc(v.name)}・盤中走勢</b><span class="mono ${cls(v.chgPct)}">${px(v.price)} ${pct(v.chgPct)}</span><span class="small muted">${esc(hm(labels[0]))}～${v.time ? `${esc(hms(v.time))}（${agoHtml(v.time)}）` : esc(hm(labels[n - 1]))}・每分鐘一點，最後一點即時・點上方報價可切換</span></div>${lc}</div>`;
     } else chart = `<div class="dc" data-dk="c-none"><p class="empty">${live ? '盤中走勢要等開盤後累積資料' : '設定 NAS 網址後，這裡會顯示每 5 秒更新的盤中走勢'}</p></div>`;
-    // 4. 熱力圖：我的（追蹤＋持股）／觀察清單／全部
+    // 4. 熱力圖：全部／我的（追蹤＋持股）／觀察清單／熱門股／題材股
     const hset = LS.get('hmSet') || 'all', U = UNI ? uniMap(UNI) : new Map();
     const held = [...new Set((LS.get('holdings', { items: [] }).items || []).map(x => x.key))], starK = stars(), mineK = [...new Set([...held, ...starK])], wlK = Object.keys(s.items || {});
-    const keys = hset === 'mine' ? mineK : hset === 'wl' ? wlK : [...new Set([...mineK, ...wlK])];
     const rowOf = k => {
       const it = s.items?.[k], u = U.get(k), lv = nasLive() ? LIVE.data.stocks?.[k] : null;
-      const m = it?.market || u?.m || (/^\d/.test(k) ? 'tw' : 'us'), name = it?.name || u?.n || k;
+      const m = it?.market || u?.m || (/^\d/.test(k) ? 'tw' : 'us'), name = it?.name || (u?.n || k).replace(/\*$/, '');
       let q;
       if (it) q = stockQuote(it);
-      else if (lv && isNum(lv.price)) q = { p: lv.price, c: isNum(lv.chgPct) ? lv.chgPct : isNum(lv.prev) && lv.prev ? (lv.price / lv.prev - 1) * 100 : null };
+      else if (lv && isNum(lv.price)) q = { p: lv.price, c: isNum(lv.chgPct) ? lv.chgPct : isNum(lv.prev) && lv.prev ? (lv.price / lv.prev - 1) * 100 : null, live: true };
       else q = { p: u?.c ?? null, c: u?.p ?? null };
-      return { k, m, name, q, h: held.includes(k), st: starK.includes(k) };
+      return { k, m, name, q, h: held.includes(k), st: starK.includes(k), v: u?.v };
     };
-    const R = keys.map(rowOf);
-    const heatTabs = `<div class="hm-tabs">${seg('hmSet', hset, [['all', `全部 ${new Set([...mineK, ...wlK]).size}`], ['mine', `我的 ${mineK.length}`], ['wl', `觀察清單 ${wlK.length}`]])}</div>`;
-    const heat = heatTabs + (['tw', 'us'].map(m => { const L = R.filter(r => r.m === m); if (!L.length) return '';
-      const up = L.filter(x => x.q.c > 0).length; return `<div class="hm-g"><div class="hm-h"><b>${m === 'tw' ? '台股' : '美股'}</b><span class="small muted">漲 ${up}・跌 ${L.filter(x => x.q.c < 0).length}</span></div><div class="hm">${L.map(r => `<a class="hm-t" data-dk="h-${esc(r.k)}" href="#/s/${encodeURIComponent(r.k)}" style="background:${heatBg(r.q.c, m === 'tw' ? 5 : 3)}"><span class="hm-n">${r.h ? '<i class="hm-own" title="持股">持</i>' : r.st ? '<i class="hm-star" title="追蹤">★</i>' : ''}${esc(r.name)}</span><b class="mono">${pct(r.q.c)}</b><span class="hm-p mono">${px(r.q.p)}</span></a>`).join('')}</div></div>`; }).join('')
-      || `<p class="empty">${hset === 'mine' ? '還沒有追蹤或持股：在個股頁按 ★ 追蹤，或到「持股」新增' : '沒有資料'}</p>`);
+    const byMk = (rows, extra = () => '') => ['tw', 'us'].map(m => { const L = rows.filter(r => r.m === m); return L.length ? { title: m === 'tw' ? '台股' : '美股', sub: extra(m, L), rows: L } : null; }).filter(Boolean);
+    let groups = [], note = '';
+    if (hset === 'hot') {
+      const all = [...U.values()];
+      let tw = all.filter(u => u.m === 'tw' && u.v > 0).sort((a, b) => b.v - a.v).slice(0, 20);
+      const byVal = tw.length > 0;
+      if (!byVal) tw = all.filter(u => u.m === 'tw' && isNum(u.p) && u.c >= 10 && !/^0/.test(u.k)).sort((a, b) => Math.abs(b.p) - Math.abs(a.p)).slice(0, 20);
+      const us = all.filter(u => u.m === 'us' && u.mc > 0 && isNum(u.p)).sort((a, b) => b.mc - a.mc).slice(0, 300).sort((a, b) => Math.abs(b.p) - Math.abs(a.p)).slice(0, 12);
+      groups = [{ title: `台股熱門 ${tw.length} 檔`, sub: byVal ? '依上一個交易日成交值' : '漲跌幅最大（成交值資料下次收盤更新後提供）', rows: tw.map(u => rowOf(u.k)) }, { title: `美股大型股異動 ${us.length} 檔`, sub: '市值前 300 大中漲跌幅最大', rows: us.map(u => rowOf(u.k)) }].filter(g => g.rows.length);
+      if (byVal) groups[0].rows.forEach(r => (r.tag = r.v >= 1 ? `${fix(r.v, r.v >= 100 ? 0 : 1)} 億` : ''));
+    } else if (hset === 'theme') {
+      const T = (S.news?.themes || []).map(t => ({ t, rows: (t.stocks || []).map(x => x.key).filter(k => s.items?.[k] || U.has(k)).slice(0, 8).map(rowOf) })).filter(x => x.rows.length >= 2).slice(0, 6);
+      groups = T.map(({ t, rows }) => { const cs = rows.map(r => r.q.c).filter(isNum), av = cs.length ? cs.reduce((a, b) => a + b, 0) / cs.length : null; return { title: t.name, sub: `${t.count} 則新聞${isNum(av) ? `・平均 <b class="mono ${cls(av)}">${pp(av)}</b>` : ''}`, rows, raw: true }; });
+      note = groups.length ? '' : '新聞題材還沒有足夠的相關個股';
+    } else {
+      const keys = hset === 'mine' ? mineK : hset === 'wl' ? wlK : [...new Set([...mineK, ...wlK])];
+      groups = byMk(keys.map(rowOf), (m, L) => `漲 ${L.filter(x => x.q.c > 0).length}・跌 ${L.filter(x => x.q.c < 0).length}`);
+      if (hset === 'mine' && !groups.length) note = '還沒有追蹤或持股：在個股頁按 ★ 追蹤，或到「持股」新增';
+    }
+    const heatTabs = `<div class="hm-tabs">${seg('hmSet', hset, [['all', '全部'], ['mine', `我的 ${mineK.length}`], ['wl', '觀察清單'], ['hot', '熱門股'], ['theme', '題材股']])}</div>`;
+    const tile = r => `<a class="hm-t" data-dk="h-${esc(r.k)}" href="#/s/${encodeURIComponent(r.k)}" style="background:${heatBg(r.q.c, r.m === 'tw' ? 5 : 3)}"><span class="hm-n">${r.h ? '<i class="hm-own" title="持股">持</i>' : r.st ? '<i class="hm-star" title="追蹤">★</i>' : ''}${esc(r.name)}</span><b class="mono">${pct(r.q.c)}</b><span class="hm-p mono">${px(r.q.p)}${r.tag ? `・${esc(r.tag)}` : ''}</span></a>`;
+    const heat = heatTabs + (groups.map(g => `<div class="hm-g"><div class="hm-h"><b>${esc(g.title)}</b><span class="small muted">${g.raw ? g.sub : esc(g.sub)}</span></div><div class="hm">${g.rows.map(tile).join('')}</div></div>`).join('') || `<p class="empty">${esc(note || '沒有資料')}</p>`);
     return `<div class="ds-h"><h2 id="ds-h">即時儀表板</h2><span class="ds-st small muted" data-dk="st">${status}</span></div>
       <div class="dk-grid">${tiles}</div>
       ${kp.length ? `<div class="dm-grid">${kp.join('')}</div>` : ''}
@@ -2672,8 +2688,8 @@ ${footer()}`;
   async function viewCharts() {
     const s = S.snap, mk = LS.get('chMk') || 'tw', rng = +(LS.get('chRng') || 60);
     const IX = [['^TWII', '加權'], ['^GSPC', '標普 500'], ['^IXIC', '那斯達克'], ['^SOX', '費半']];
-    const [I, ...bars] = await Promise.all([loadInd(), loadUniverse(), ...IX.map(([k]) => loadBars(k)), loadBars('^VIX'), loadBars('USDTWD=X')]);
-    bars.shift(); const vixB = bars[4], fxB = bars[5];
+    const [I, ...bars] = await Promise.all([loadInd(), loadUniverse(), loadNews().catch(() => null), ...IX.map(([k]) => loadBars(k)), loadBars('^VIX'), loadBars('USDTWD=X')]);
+    bars.splice(0, 2); const vixB = bars[4], fxB = bars[5];
     const out = [];
     out.push(`<section class="card dash" id="dash" aria-labelledby="ds-h">${safeDash()}</section><div class="ch-top"><h2 class="ch-title">趨勢圖表</h2>${seg('chRng', String(rng), [['20', '1 個月'], ['60', '3 個月'], ['120', '半年'], ['250', '1 年']])}</div>`);
 

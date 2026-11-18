@@ -33,18 +33,18 @@ async function miIndex(date) {
     }
   }
   const ct = tables.find(t => /每日收盤行情/.test(t.title || '') && Array.isArray(t.data));
-  const closes = {}, names = {}, chg = {};
+  const closes = {}, names = {}, chg = {}, val = {};
   if (ct) {
-    const f = ct.fields || [], iC = col(f, /^收盤價$/), iS = col(f, /^漲跌\(\+\/-\)$/), iD = col(f, /^漲跌價差$/);
+    const f = ct.fields || [], iC = col(f, /^收盤價$/), iS = col(f, /^漲跌\(\+\/-\)$/), iD = col(f, /^漲跌價差$/), iV = col(f, /^成交金額$/);
     if (iC >= 0) for (const row of ct.data) {
       const id = String(row[0] || '').trim(), c = num(row[iC]);
       if (!/^(\d{4}|0\d{3,5}[A-Z]?)$/.test(id) || !(c > 0)) continue;
-      closes[id] = c; names[id] = String(row[1] || '').trim();
+      closes[id] = c; names[id] = String(row[1] || '').trim(); if (iV >= 0) val[id] = num(row[iV]);
       if (iS >= 0 && iD >= 0) { const sg = String(row[iS] || ''), d = (sg.includes('-') ? -1 : sg.includes('+') ? 1 : 0) * num(row[iD]); chg[id] = c - d > 0 ? d / (c - d) * 100 : 0; }
     }
   }
   if (!adv && !Object.keys(closes).length) return null;
-  return { date, adv: adv?.n ?? null, upLimit: adv?.limit ?? null, dec: dec?.n ?? null, downLimit: dec?.limit ?? null, unch: unch?.n ?? null, closes, names, chg };
+  return { date, adv: adv?.n ?? null, upLimit: adv?.limit ?? null, dec: dec?.n ?? null, downLimit: dec?.limit ?? null, unch: unch?.n ?? null, closes, names, chg, val };
 }
 
 /**
@@ -83,7 +83,8 @@ async function updateTwHistory(hist, latestDate, { maxBackfill = 10, keep = 70, 
   const latest = Object.keys(got).sort().pop();
   const names = { ...(hist.names || {}), ...(got[latest]?.names || {}) };
   const lastChg = latest === dates[dates.length - 1] ? got[latest].chg : (hist.lastChg || {});
-  return { dates, c, names, lastChg, breadth: dates.map(dt => bmap[dt]).filter(Boolean) };
+  const lastVal = latest === dates[dates.length - 1] ? (got[latest].val || {}) : (hist.lastVal || {});
+  return { dates, c, names, lastChg, lastVal, breadth: dates.map(dt => bmap[dt]).filter(Boolean) };
 }
 
 /** 由收盤歷史算：站上 20／60 日線比例、20 日新高新低家數，以及每日序列（畫走勢用） */
@@ -216,13 +217,13 @@ async function tpexQuotes() {
   const rows = await get('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes', { timeout: 30000 });
   if (!Array.isArray(rows) || !rows.length) return null;
   const s = rows[0];
-  const kId = findKey(s, /^SecuritiesCompanyCode$/i, /代號/), kN = findKey(s, /^CompanyName$/i, /名稱/), kC = findKey(s, /^Close$/i, /收盤/), kCh = findKey(s, /^Change$/i, /漲跌/), kD = findKey(s, /^Date$/i, /日期/);
+  const kId = findKey(s, /^SecuritiesCompanyCode$/i, /代號/), kN = findKey(s, /^CompanyName$/i, /名稱/), kC = findKey(s, /^Close$/i, /收盤/), kCh = findKey(s, /^Change$/i, /漲跌/), kD = findKey(s, /^Date$/i, /日期/), kV = findKey(s, /^TransactionAmount$/i, /^TradeValue$/i, /成交金額/);
   if (!kId || !kC) return { error: `欄位無法辨識：${Object.keys(s).slice(0, 8).join('|')}` };
   const out = {};
   for (const r of rows) {
     const id = String(r[kId] || '').trim(), c = num(r[kC]); if (!/^(\d{4}|0\d{3,5}[A-Z]?)$/.test(id) || !(c > 0)) continue;
     const ch = kCh ? num(r[kCh]) : 0;
-    out[id] = { n: String(r[kN] || '').trim(), c, p: c - ch > 0 ? ch / (c - ch) * 100 : 0 };
+    out[id] = { n: String(r[kN] || '').trim(), c, p: c - ch > 0 ? ch / (c - ch) * 100 : 0, v: kV ? num(r[kV]) : null };
   }
   return { date: kD ? String(rows[0][kD]) : null, rows: out };
 }
