@@ -29,7 +29,7 @@
   }
   applyLook(); mqDark?.addEventListener?.('change', applyLook);
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  const APP_VERSION = '1.17.0';
+  const APP_VERSION = '1.18.0';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -786,7 +786,7 @@ ${footer()}`;
   }
   const liveAllClosed = () => { const it = Object.values(LIVE.data?.items || {}); return it.length > 0 && it.every(v => v.state === 'closed'); };
   async function pollLive() {
-    if (!['home', 'portfolio'].includes(S.route) || document.hidden || !nasBase() || !/^https:\/\//.test(nasBase())) return;
+    if (!['home', 'portfolio', 'charts'].includes(S.route) || document.hidden || !nasBase() || !/^https:\/\//.test(nasBase())) return;
     if (liveAllClosed() && Date.now() - LIVE.at < 10 * 60000) return;   // 全部休市：不更新，每 10 分鐘看一次有沒有開盤
     try {
       const d = await getJSON(nasBase() + '/live.json?t=' + Date.now(), 6000); LIVE.prev = Object.fromEntries(Object.entries(LIVE.data?.items || {}).map(([k, v]) => [k, v.price])); LIVE.data = d; LIVE.at = Date.now(); LIVE.err = null;
@@ -794,6 +794,7 @@ ${footer()}`;
       if (!!d.alerts !== !!cfg.limits.nasAlerts) { cfg.limits = Object.assign({}, cfg.limits, { nasAlerts: !!d.alerts }); saveCfg(); stamp('limits'); scheduleSync(); }
     }
     catch (e) { LIVE.err = e.name === 'AbortError' ? '逾時' : e.message; }
+    if (S.route === 'charts') { patchDash(); return; }
     if (S.route === 'portfolio') { patchKeep($('#pf-live'), el => { const h = livePortfolioHtml(); if (el.innerHTML !== h) el.innerHTML = h; }); return; }
     if (S.route !== 'home') return;
     patchKeep($('#live'), el => patchLive(el));
@@ -2516,7 +2517,7 @@ ${footer()}`;
   const CH_COL = ['var(--acc)', '#E07B39', '#8B5CF6', '#0EA5A4', '#D9468F', '#7A8699'];
   const ymdShort = d => { const s = d10(d); return s ? +s.slice(5, 7) + '/' + +s.slice(8, 10) : ''; };
   /** 折線圖：series=[{name, col, v:[…]}]，labels=日期；refs=[{y, label}] 參考線；可在圖上滑動看數值 */
-  function lineChart(id, labels, series, { h = 170, fmt = v => num(v, 1), refs = [], zero = false, kind = 'num', w = null } = {}) {
+  function lineChart(id, labels, series, { h = 170, fmt = v => num(v, 1), refs = [], zero = false, kind = 'num', w = null, xfmt = ymdShort } = {}) {
     const all = series.flatMap(s => s.v).filter(isNum).concat(refs.map(r => r.y));
     if (!all.length) return '<p class="empty">沒有資料</p>';
     let lo = Math.min(...all), hi = Math.max(...all); if (zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
@@ -2526,12 +2527,12 @@ ${footer()}`;
     const path = v => { let d = '', pen = false; v.forEach((y, i) => { if (!isNum(y)) { pen = false; return; } d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(y).toFixed(1); pen = true; }); return d; };
     const ticks = [hi - pad, (hi + lo) / 2, lo + pad];
     const xt = [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i);
-    const data = JSON.stringify({ labels: labels.map(ymdShort), s: series.map(s => ({ n: s.name, c: s.col, v: s.v })), L, R, W, fmt: kind });
+    const data = JSON.stringify({ labels: labels.map(xfmt), s: series.map(s => ({ n: s.name, c: s.col, v: s.v })), L, R, W, fmt: kind });
     return `<div class="lc" data-lc='${esc(data)}'><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="折線圖">
       ${ticks.map(t => `<line x1="${L}" x2="${W - R}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}" class="lc-g"/><text x="${W - R + 4}" y="${(Y(t) + 3.5).toFixed(1)}" class="lc-t">${esc(fmt(t))}</text>`).join('')}
       ${zero && lo < 0 && hi > 0 ? `<line x1="${L}" x2="${W - R}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" class="lc-z"/>` : ''}
       ${refs.map(r => `<line x1="${L}" x2="${W - R}" y1="${Y(r.y).toFixed(1)}" y2="${Y(r.y).toFixed(1)}" class="lc-r"/><text x="${L + 2}" y="${(Y(r.y) - 3).toFixed(1)}" class="lc-t lc-rt">${esc(r.label)}</text>`).join('')}
-      ${xt.map(i => `<text x="${X(i).toFixed(1)}" y="${H - 5}" class="lc-t" text-anchor="${i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}">${esc(ymdShort(labels[i]))}</text>`).join('')}
+      ${xt.map(i => `<text x="${X(i).toFixed(1)}" y="${H - 5}" class="lc-t" text-anchor="${i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}">${esc(xfmt(labels[i]))}</text>`).join('')}
       ${series.map(s => `<path d="${path(s.v)}" fill="none" stroke="${s.col}" stroke-width="${s.w || 1.8}" stroke-linejoin="round" stroke-linecap="round"/>`).join('')}
       <line class="lc-x" x1="0" x2="0" y1="${T}" y2="${H - B}" visibility="hidden"/>
     </svg><div class="lc-tip" hidden></div></div>`;
@@ -2574,13 +2575,88 @@ ${footer()}`;
   const chCard = (id, title, concl, body, sub = '') => `<section class="card ch" aria-labelledby="${id}"><div class="ch-h"><h2 id="${id}">${esc(title)}</h2>${sub ? `<span class="small muted">${esc(sub)}</span>` : ''}</div>${concl ? `<p class="ch-c">${esc(concl)}</p>` : ''}${body}</section>`;
   const pctile = (a, v) => { const x = a.filter(isNum); return x.length ? Math.round(x.filter(y => y <= v).length / x.length * 100) : null; };
 
+  // ── 圖表頁上方：即時儀表板（NAS 每 10 秒；沒有 NAS 時用網站資料） ──────────
+  const nasLive = () => !!(LIVE.data && nasBase() && /^https:\/\//.test(nasBase()));
+  function dashQuotes() {
+    if (nasLive()) return (LIVE.data.order || Object.keys(LIVE.data.items)).map(k => [k, LIVE.data.items[k]]).filter(([, v]) => v && isNum(v.price));
+    return LV_FALLBACK.map(([k, ik, n]) => { const x = S.snap.indices?.[ik]; return x && [k, { name: n, price: x.price, chgPct: x.changePct, state: 'snap', time: S.snap.generatedAt }]; }).filter(Boolean);
+  }
+  function stockQuote(it) {
+    const v = nasLive() ? LIVE.data.stocks?.[it.key] : null;
+    if (v && isNum(v.price)) return { p: v.price, c: isNum(v.chgPct) ? v.chgPct : isNum(v.prev) && v.prev ? (v.price / v.prev - 1) * 100 : null, live: true, state: v.state };
+    return { p: it.price, c: it.changePct, live: false };
+  }
+  function dashHold() {
+    const P = holdings(); if (!P.rows.length) return null; const rate = fx();
+    let mv = 0, day = 0, cost = 0, live = false;
+    for (const r of P.rows) {
+      const it = r.it || S.snap.items[r.key]; if (!it) continue; const q = stockQuote(it); if (!isNum(q.p)) continue;
+      const k = it.market === 'us' ? rate : 1, sh = +r.shares || 0; mv += q.p * sh * k; cost += r.cost || 0;
+      if (isNum(q.c)) day += (q.p - q.p / (1 + q.c / 100)) * sh * k; live = live || q.live;
+    }
+    return mv ? { mv, day, pnl: cost ? mv - cost : null, dayPct: day / (mv - day) * 100, live } : null;
+  }
+  const heatBg = (c, lim = 5) => { if (!isNum(c) || Math.abs(c) < 0.05) return 'var(--line2)'; const k = Math.round(18 + Math.min(1, Math.abs(c) / lim) * 72); return `color-mix(in srgb, var(--${c > 0 ? 'up' : 'down'}) ${k}%, var(--card))`; };
+  function dashLiveHtml() {
+    const s = S.snap, Q = dashQuotes(), live = nasLive(), fresh = live && Date.now() - LIVE.at < 60000;
+    const status = live ? (liveAllClosed() ? `<span class="dot"></span>休市中・最後資料 ${hms(LIVE.data.at)}，開盤後每 10 秒自動更新` : fresh ? `<span class="dot on"></span>即時・${hms(LIVE.data.at)} 更新・每 10 秒` : `<span class="dot warn"></span>NAS 資料停在 ${hms(LIVE.data.at)}`)
+      : `<span class="dot"></span>網站資料 ${esc(tpeTime(s.generatedAt))}・${!nasBase() ? '在「設定」填入 NAS 網址可改成每 10 秒即時' : LIVE.err ? `NAS 連不到（${esc(LIVE.err)}）` : '連線 NAS…'}`;
+    // 1. 報價磚
+    const tiles = Q.map(([k, v]) => { const st = LV_STATE[v.state]; return `<div class="dk" data-dk="q-${esc(k)}" data-dsel="${esc(k)}" role="button" tabindex="0"><div class="dk-n">${esc(v.name)}${st ? `<span class="lv-s ${st[1]}">${st[0]}</span>` : ''}</div><div class="dk-p mono">${px(v.price)}</div><div class="dk-c mono ${cls(v.chgPct)}">${pct(v.chgPct)}</div>${liveSpark(v.spark, (v.chgPct ?? 0) >= 0)}</div>`; }).join('');
+    // 2. 市場指標
+    const b = s.health?.tw?.breadth, fu = s.health?.tw?.futures, cm = s.chipMarket, pcR = s.health?.tw?.putcall, vix = s.env?.find(e => e.key === 'vix'), H = dashHold();
+    const kp = [];
+    if (H) kp.push(`<div class="dm" data-dk="m-hold"><span>持股市值${H.live ? '<i class="lvd"></i>' : ''}</span><b class="mono">${int(H.mv)}</b><em class="${cls(H.day)}">今日 ${H.day >= 0 ? '+' : '−'}${int(Math.abs(H.day))}（${pp(H.dayPct)}）</em></div>`);
+    if (b) { const t = (b.adv || 0) + (b.dec || 0) + (b.unch || 0); kp.push(`<div class="dm" data-dk="m-br"><span>漲跌家數</span><b class="mono"><span class="up">${int(b.adv)}</span> / <span class="down">${int(b.dec)}</span></b>${t ? `<div class="stk sm"><i class="up" style="width:${(b.adv / t * 100).toFixed(1)}%"></i><i class="flat" style="width:${(b.unch / t * 100).toFixed(1)}%"></i><i class="down" style="width:${(b.dec / t * 100).toFixed(1)}%"></i></div>` : ''}<em>站上月線 ${fix(b.above20, 0)}%</em></div>`); }
+    if (cm && isNum(cm.foreignValueEst)) kp.push(`<div class="dm" data-dk="m-fv"><span>外資現貨</span><b class="mono ${cls(cm.foreignValueEst)}">${cm.foreignValueEst >= 0 ? '+' : '−'}${int(Math.abs(cm.foreignValueEst) / 1e8)} 億</b><em>${esc(ymdShort(cm.date))}</em></div>`);
+    if (fu) kp.push(`<div class="dm" data-dk="m-fu"><span>外資期貨</span><b class="mono ${cls(fu.net)}">${fu.net >= 0 ? '+' : '−'}${int(Math.abs(fu.net))} 口</b><em>5 日 ${isNum(fu.chg5) ? (fu.chg5 >= 0 ? '+' : '−') + int(Math.abs(fu.chg5)) : '—'}</em></div>`);
+    if (pcR) kp.push(`<div class="dm" data-dk="m-pc"><span>P/C 比</span><b class="mono">${fix(pcR.oi, 1)}%</b><em>近一年第 ${fix(pcR.pct, 0)} 百分位</em></div>`);
+    if (vix && isNum(vix.value)) kp.push(`<div class="dm" data-dk="m-vix"><span>VIX</span><b class="mono ${vix.value >= 25 ? 'bad-t' : vix.value >= 20 ? 'warn-t' : ''}">${num(vix.value, 1)}</b><em>${vix.value >= 30 ? '恐慌' : vix.value >= 20 ? '波動升溫' : vix.value < 15 ? '很平靜' : '正常'}</em></div>`);
+    // 3. 盤中走勢
+    let sel = LS.get('dashK') || '', chart = '';
+    const QM = new Map(Q);
+    if (!QM.get(sel)?.spark?.length) sel = ['TWII', 'TXF', 'GSPC', 'ES', 'NQ', 'IXIC'].find(k => QM.get(k)?.state === 'open' && QM.get(k)?.spark?.length > 1) || ['TWII', 'GSPC'].find(k => QM.get(k)?.spark?.length > 1) || '';
+    const v = QM.get(sel);
+    if (v?.spark?.length > 1) {
+      const n = v.spark.length, t0 = Date.parse(v.t0 || v.time), t1 = Date.parse(v.time || LIVE.data.at);
+      const labels = v.spark.map((_, i) => new Date(t0 + (t1 - t0) * (n > 1 ? i / (n - 1) : 0)).toISOString());
+      const prev = isNum(v.prev) ? v.prev : isNum(v.chgPct) ? v.price / (1 + v.chgPct / 100) : null;
+      const hm = iso => new Date(iso).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit' });
+      const lc = lineChart('intra', labels, [{ name: v.name, col: (v.chgPct ?? 0) >= 0 ? 'var(--up)' : 'var(--down)', v: v.spark, w: 2 }], { h: 150, fmt: x => px(x), refs: prev ? [{ y: prev, label: `昨收 ${px(prev)}` }] : [], xfmt: hm });
+      chart = `<div class="dc" data-dk="c-${esc(sel)}-${n}-${v.price}"><div class="dc-h"><b>${esc(v.name)}・盤中走勢</b><span class="mono ${cls(v.chgPct)}">${px(v.price)} ${pct(v.chgPct)}</span><span class="small muted">${esc(hm(labels[0]))}～${esc(hm(labels[n - 1]))}・點上方報價可切換</span></div>${lc}</div>`;
+    } else chart = `<div class="dc" data-dk="c-none"><p class="empty">${live ? '盤中走勢要等開盤後累積資料' : '設定 NAS 網址後，這裡會顯示每 10 秒更新的盤中走勢'}</p></div>`;
+    // 4. 觀察清單熱力圖
+    const its = Object.values(s.items || {}).filter(i => isNum(i.price));
+    const heat = ['tw', 'us'].map(m => { const L = its.filter(i => i.market === m).map(i => ({ i, q: stockQuote(i) })).sort((a, b) => (b.q.c ?? -99) - (a.q.c ?? -99)); if (!L.length) return '';
+      const up = L.filter(x => x.q.c > 0).length; return `<div class="hm-g"><div class="hm-h"><b>${m === 'tw' ? '台股' : '美股'}觀察清單</b><span class="small muted">漲 ${up}・跌 ${L.filter(x => x.q.c < 0).length}</span></div><div class="hm">${L.map(({ i, q }) => `<a class="hm-t" data-dk="h-${esc(i.key)}" href="#/s/${encodeURIComponent(i.key)}" style="background:${heatBg(q.c, m === 'tw' ? 5 : 3)}"><span class="hm-n">${esc(i.name)}</span><b class="mono">${pct(q.c)}</b><span class="hm-p mono">${px(q.p)}</span></a>`).join('')}</div></div>`; }).join('');
+    return `<div class="ds-h"><h2 id="ds-h">即時儀表板</h2><span class="ds-st small muted" data-dk="st">${status}</span></div>
+      <div class="dk-grid">${tiles}</div>
+      ${kp.length ? `<div class="dm-grid">${kp.join('')}</div>` : ''}
+      <div class="ds-row">${chart}<div class="hm-w">${heat}</div></div>`;
+  }
+  /** 每 10 秒只換有變的小格子；數字變了閃一下 */
+  function patchDash() {
+    const box = $('#dash'); if (!box) return;
+    const tmp = document.createElement('div'); tmp.innerHTML = dashLiveHtml();
+    const keys = el => [...el.querySelectorAll('[data-dk]')].map(x => x.dataset.dk.replace(/^c-.*/, 'c')).join();
+    patchKeep(box, () => {
+      if (keys(tmp) !== keys(box)) { box.innerHTML = tmp.innerHTML; bindLineCharts(box); return; }
+      for (const n of tmp.querySelectorAll('[data-dk]')) {
+        const o = box.querySelector(`[data-dk="${CSS.escape(n.dataset.dk)}"]`) || (n.dataset.dk.startsWith('c-') ? box.querySelector('[data-dk^="c-"]') : null); if (!o) continue;
+        if (o.dataset.dk !== n.dataset.dk || o.innerHTML !== n.innerHTML || o.getAttribute('style') !== n.getAttribute('style')) {
+          o.replaceWith(n); if (!n.dataset.dk.startsWith('st') && !n.dataset.dk.startsWith('c-')) { void n.offsetWidth; n.classList.add('lv-flash'); }
+          if (n.dataset.dk.startsWith('c-')) bindLineCharts(n);
+        }
+      }
+    });
+  }
   async function viewCharts() {
     const s = S.snap, mk = LS.get('chMk') || 'tw', rng = +(LS.get('chRng') || 60);
     const IX = [['^TWII', '加權'], ['^GSPC', '標普 500'], ['^IXIC', '那斯達克'], ['^SOX', '費半']];
     const [I, ...bars] = await Promise.all([loadInd(), ...IX.map(([k]) => loadBars(k)), loadBars('^VIX'), loadBars('USDTWD=X')]);
     const vixB = bars[4], fxB = bars[5];
     const out = [];
-    out.push(`<div class="ch-top"><h1 class="ch-title">圖表</h1>${seg('chRng', String(rng), [['20', '1 個月'], ['60', '3 個月'], ['120', '半年'], ['250', '1 年']])}</div>`);
+    out.push(`<section class="card dash" id="dash" aria-labelledby="ds-h">${dashLiveHtml()}</section><div class="ch-top"><h2 class="ch-title">趨勢圖表</h2>${seg('chRng', String(rng), [['20', '1 個月'], ['60', '3 個月'], ['120', '半年'], ['250', '1 年']])}</div>`);
 
     // 1. 指數走勢（起點＝0%）
     {
@@ -2684,11 +2760,12 @@ ${footer()}`;
       } else out.push(chCard('ch-pf', '我的持股配置', '', '<p class="empty">還沒有輸入持股。到「持股」頁新增後，這裡會畫出配置與損益。</p>'));
     }
     const head = out.shift();
-    return head + `<div class="ch-wrap">${out.join('')}</div>` + footer();
+    return `<h1 class="sr-only">圖表儀表板</h1>` + head + `<div class="ch-wrap">${out.join('')}</div>` + footer();
   }
   function bindCharts2() {
     bindLineCharts($('#main'));
-    $('#main').onclick = e => { if (S.route !== 'charts') return; const b = e.target.closest('[data-of="chRng"],[data-of="chMk"]'); if (!b) return; LS.set(b.dataset.of, b.dataset.v); render(); };
+    $('#main').onclick = e => { if (S.route !== 'charts') return; const d = e.target.closest('[data-dsel]'); if (d) { LS.set('dashK', d.dataset.dsel); patchDash(); return; } const b = e.target.closest('[data-of="chRng"],[data-of="chMk"]'); if (!b) return; LS.set(b.dataset.of, b.dataset.v); render(); };
+    startLive();
   }
   // ── 準確度總表：所有判斷放在一起比，看該相信哪一套 ─────────────────
   function accuracyBoard() {
@@ -3266,7 +3343,7 @@ ${footer()}`;
     else if (S.route === 'habits') { main.innerHTML = '<p class="loading">分析中…</p>'; const html = await viewHabits(); if (S.route !== 'habits') return; main.innerHTML = html; document.title = '交易行為檢討・訊號終端'; }
     else if (S.route === 'decide') { main.innerHTML = viewDecide(); bindDecide(); document.title = '待你確認・訊號終端'; }
     else if (S.route === 'paper') { main.innerHTML = viewPaper(); document.title = '虛擬跟單・訊號終端'; }
-    else if (S.route === 'charts') { main.innerHTML = '<p class="loading">畫圖中…</p>'; const html = await viewCharts(); if (S.route !== 'charts') return; main.innerHTML = html; bindCharts2(); document.title = '圖表・訊號終端'; }
+    else if (S.route === 'charts') { if (!main.querySelector('#dash')) main.innerHTML = '<p class="loading">畫圖中…</p>'; const html = await viewCharts(); if (S.route !== 'charts') return; main.innerHTML = html; bindCharts2(); document.title = '圖表・訊號終端'; }
     else if (S.route === 'settings') { main.innerHTML = viewSettings(); bindSettings(); document.title = '設定・訊號終端'; }
     else if (S.route === 'all') { main.innerHTML = `<div><a href="#/" class="small">← 回總覽</a></div><section class="card" id="opps">${viewOpps(0)}</section>${footer()}`; document.title = '全部標的・訊號終端'; }
     else { main.innerHTML = viewHome(); document.title = '訊號終端'; afterHome(); if (SY.get().token) loadRemote().then(() => { if (S.route !== 'home' || $('#pck-h') || $('#ms-h')) return; const h = viewPcReview() + viewPcChecks(), h2 = viewPcScan(); if (h) $('#opps')?.insertAdjacentHTML('beforebegin', h); if (h2) $('#opps')?.insertAdjacentHTML('afterend', h2); if (h || h2) setupFolds(); }); loadNews().then(N => { if (S.route !== 'home') return; const el = $('#themes'); if (el) el.innerHTML = viewThemesMini(N); const d = $('#digest'); if (d) d.innerHTML = viewDigestMini(N); setupFolds(); }); }
