@@ -29,7 +29,7 @@
   }
   applyLook(); mqDark?.addEventListener?.('change', applyLook);
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  const APP_VERSION = '1.18.1';
+  const APP_VERSION = '1.18.2';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2602,7 +2602,7 @@ ${footer()}`;
     const status = live ? (liveAllClosed() ? `<span class="dot"></span>休市中・最後資料 ${hms(LIVE.data.at)}，開盤後每 10 秒自動更新` : fresh ? `<span class="dot on"></span>即時・${hms(LIVE.data.at)} 更新・每 10 秒` : `<span class="dot warn"></span>NAS 資料停在 ${hms(LIVE.data.at)}`)
       : `<span class="dot"></span>網站資料 ${esc(tpeTime(s.generatedAt))}・${!nasBase() ? '在「設定」填入 NAS 網址可改成每 10 秒即時' : LIVE.err ? `NAS 連不到（${esc(LIVE.err)}）` : '連線 NAS…'}`;
     // 1. 報價磚
-    const tiles = Q.map(([k, v]) => { const st = LV_STATE[v.state]; return `<div class="dk" data-dk="q-${esc(k)}" data-dsel="${esc(k)}" role="button" tabindex="0"><div class="dk-n">${esc(v.name)}${st ? `<span class="lv-s ${st[1]}">${st[0]}</span>` : ''}</div><div class="dk-p mono">${px(v.price)}</div><div class="dk-c mono ${cls(v.chgPct)}">${pct(v.chgPct)}</div>${liveSpark(v.spark, (v.chgPct ?? 0) >= 0)}</div>`; }).join('');
+    const tiles = Q.map(([k, v]) => { try { const st = LV_STATE[v.state]; return `<div class="dk" data-dk="q-${esc(k)}" data-dsel="${esc(k)}" role="button" tabindex="0"><div class="dk-n">${esc(v.name)}${st ? `<span class="lv-s ${st[1]}">${st[0]}</span>` : ''}</div><div class="dk-p mono">${px(v.price)}</div><div class="dk-c mono ${cls(v.chgPct)}">${pct(v.chgPct)}</div>${liveSpark(v.spark, (v.chgPct ?? 0) >= 0)}</div>`; } catch (_) { return ''; } }).join('');
     // 2. 市場指標
     const b = s.health?.tw?.breadth, fu = s.health?.tw?.futures, cm = s.chipMarket, pcR = s.health?.tw?.putcall, vix = s.env?.find(e => e.key === 'vix'), H = dashHold();
     const kp = [];
@@ -2618,7 +2618,7 @@ ${footer()}`;
     if (!QM.get(sel)?.spark?.length) sel = ['TWII', 'TXF', 'GSPC', 'ES', 'NQ', 'IXIC'].find(k => QM.get(k)?.state === 'open' && QM.get(k)?.spark?.length > 1) || ['TWII', 'GSPC'].find(k => QM.get(k)?.spark?.length > 1) || '';
     const v = QM.get(sel);
     if (v?.spark?.length > 1) {
-      const n = v.spark.length, t0 = Date.parse(v.t0 || v.time), t1 = Date.parse(v.time || LIVE.data.at);
+      const tp = x => (typeof x === 'number' ? (x < 1e12 ? x * 1000 : x) : Date.parse(x)), n = v.spark.length, t1 = [v.time, LIVE.data?.at].map(tp).find(Number.isFinite) || Date.now(), t0 = [v.t0].map(tp).find(Number.isFinite) || t1 - n * 60000;
       const labels = v.spark.map((_, i) => new Date(t0 + (t1 - t0) * (n > 1 ? i / (n - 1) : 0)).toISOString());
       const prev = isNum(v.prev) ? v.prev : isNum(v.chgPct) ? v.price / (1 + v.chgPct / 100) : null;
       const hm = iso => new Date(iso).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit' });
@@ -2634,10 +2634,11 @@ ${footer()}`;
       ${kp.length ? `<div class="dm-grid">${kp.join('')}</div>` : ''}
       <div class="ds-row">${chart}<div class="hm-w">${heat}</div></div>`;
   }
+  function safeDash() { try { return dashLiveHtml(); } catch (e) { console.error(e); return `<div class="ds-h"><h2 id="ds-h">即時儀表板</h2></div><p class="empty" data-dk="err">即時資料暫時無法顯示（${esc(e.message)}）</p>`; } }
   /** 每 10 秒只換有變的小格子；數字變了閃一下 */
   function patchDash() {
     const box = $('#dash'); if (!box) return;
-    const tmp = document.createElement('div'); tmp.innerHTML = dashLiveHtml();
+    const tmp = document.createElement('div'); tmp.innerHTML = safeDash();
     const keys = el => [...el.querySelectorAll('[data-dk]')].map(x => x.dataset.dk.replace(/^c-.*/, 'c')).join();
     patchKeep(box, () => {
       if (keys(tmp) !== keys(box)) { box.innerHTML = tmp.innerHTML; bindLineCharts(box); return; }
@@ -2656,10 +2657,10 @@ ${footer()}`;
     const [I, ...bars] = await Promise.all([loadInd(), ...IX.map(([k]) => loadBars(k)), loadBars('^VIX'), loadBars('USDTWD=X')]);
     const vixB = bars[4], fxB = bars[5];
     const out = [];
-    out.push(`<section class="card dash" id="dash" aria-labelledby="ds-h">${dashLiveHtml()}</section><div class="ch-top"><h2 class="ch-title">趨勢圖表</h2>${seg('chRng', String(rng), [['20', '1 個月'], ['60', '3 個月'], ['120', '半年'], ['250', '1 年']])}</div>`);
+    out.push(`<section class="card dash" id="dash" aria-labelledby="ds-h">${safeDash()}</section><div class="ch-top"><h2 class="ch-title">趨勢圖表</h2>${seg('chRng', String(rng), [['20', '1 個月'], ['60', '3 個月'], ['120', '半年'], ['250', '1 年']])}</div>`);
 
     // 1. 指數走勢（起點＝0%）
-    {
+    try {
       const ok = IX.map(([k, n], i) => ({ k, n, b: bars[i] })).filter(x => x.b?.close?.length);
       if (ok.length) {
         const base = ok.find(x => x.k === '^TWII') || ok[0], dates = base.b.dates.slice(-rng);
@@ -2674,9 +2675,9 @@ ${footer()}`;
         const concl = srt.length > 1 ? `${srt[0].name}最強（${pp(srt[0].t)}），${srt[srt.length - 1].name}最弱（${pp(srt[srt.length - 1].t)}）${srt.every(x => x.t < 0) ? '，四大指數全部收黑' : srt.every(x => x.t > 0) ? '，四大指數全部上漲' : ''}` : '';
         out.push(chCard('ch-ix', '指數走勢', concl, legend(ser) + lineChart('ix', dates, ser, { fmt: pp, zero: true, kind: 'pct' }), `${rng} 個交易日，以起點為 0%`));
       }
-    }
+    } catch (e) { console.error(e); }
     // 2. 今日產業漲跌
-    {
+    try {
       const gs = (I.groups || []).filter(g => g.m === mk && isNum(g.stats?.chg)).map(g => ({ label: g.name, v: g.stats.chg, href: '#/industry/' + encodeURIComponent(g.id), note: `漲 ${g.stats.up}／跌 ${g.stats.down}` })).sort((a, b) => b.v - a.v);
       const bx = s.indices?.[mk === 'tw' ? '^TWII' : '^GSPC'];
       if (gs.length) {
@@ -2690,9 +2691,9 @@ ${footer()}`;
           out.push(chCard('ch-rs', '產業強弱（近 20 日，相對大盤）', `${st.length ? `強於大盤：${st.join('、')}` : '沒有產業強於大盤'}；${wk.length ? `弱於大盤：${wk.join('、')}` : '沒有產業弱於大盤'}`, divBars(rs, { fmt: v => (v > 0 ? '+' : '−') + fix(v, 1) }), '單位：百分點'));
         }
       }
-    }
+    } catch (e) { console.error(e); }
     // 4. 台股市場廣度
-    {
+    try {
       const b = s.health?.tw?.breadth;
       if (b) {
         const tot = (b.adv || 0) + (b.dec || 0) + (b.unch || 0);
@@ -2703,9 +2704,9 @@ ${footer()}`;
         const bar = tot ? `<div class="stk"><i class="up" style="width:${(b.adv / tot * 100).toFixed(1)}%"></i><i class="flat" style="width:${(b.unch / tot * 100).toFixed(1)}%"></i><i class="down" style="width:${(b.dec / tot * 100).toFixed(1)}%"></i></div><div class="stk-l small"><span class="up">上漲 ${int(b.adv)}（漲停 ${int(b.upLimit)}）</span><span class="muted">平盤 ${int(b.unch)}</span><span class="down">下跌 ${int(b.dec)}（跌停 ${int(b.downLimit)}）</span></div>` : '';
         out.push(chCard('ch-br', '台股市場廣度', `今天上漲 ${int(b.adv)} 家、下跌 ${int(b.dec)} 家；站上月線的股票只有 ${fix(b.above20, 0)}%，${lvl}`, bar + legend([a20, a60]) + lineChart('br', ser.map(x => x.date), [a20, a60], { fmt: v => fix(v, 0) + '%', refs: [{ y: 20, label: '20% 超賣' }, { y: 80, label: '80% 過熱' }] }), d10(b.date)));
       }
-    }
+    } catch (e) { console.error(e); }
     // 5. 籌碼：外資期貨淨部位、選擇權 P/C
-    {
+    try {
       const fu = s.health?.tw?.futures, pc = s.health?.tw?.putcall, cm = s.chipMarket;
       if (fu?.hist?.length) {
         const h = fu.hist.slice(-rng), v = { name: '外資台指期淨部位（口）', col: 'var(--acc)', v: h.map(x => x.net), w: 2 };
@@ -2716,9 +2717,9 @@ ${footer()}`;
         const h = pc.hist.slice(-rng), v = { name: '未平倉 P/C 比', col: '#8B5CF6', v: h.map(x => x.oi), w: 2 };
         out.push(chCard('ch-pc', '選擇權 Put/Call 比', `目前 ${fix(pc.oi, 1)}%，在近一年的第 ${fix(pc.pct, 0)} 百分位${pc.pct <= 20 ? '（偏低：賣權未平倉少，下檔支撐較弱）' : pc.pct >= 80 ? '（偏高：賣權未平倉多，下檔支撐較強）' : ''}`, lineChart('pc', h.map(x => x.date), [v], { fmt: v => fix(v, 0), refs: [{ y: 100, label: '100' }] }), d10(pc.date)));
       }
-    }
+    } catch (e) { console.error(e); }
     // 6. 風險溫度計：VIX、高收益債利差、台幣
-    {
+    try {
       const parts = [];
       if (vixB?.close?.length) {
         const c = vixB.close.slice(-rng), d = vixB.dates.slice(-rng), last = c[c.length - 1];
@@ -2737,18 +2738,18 @@ ${footer()}`;
         const v = vixB?.close?.at(-1), hot = [v >= 20, hy?.pct >= 80].filter(Boolean).length;
         out.push(chCard('ch-risk', '風險溫度計', hot >= 2 ? '恐慌指數和信用利差同時偏高，市場處於避險狀態' : hot === 1 ? '有一項風險指標偏高，留意波動' : '風險指標都在正常範圍', `<div class="ch-grid">${parts.join('')}</div>`));
       }
-    }
+    } catch (e) { console.error(e); }
     // 7. 觀察清單綜合分數
-    {
+    try {
       const its = Object.values(s.items || {}).filter(i => i.market === mk && isNum(i.signal?.score)).sort((a, b) => b.signal.score - a.signal.score);
       if (its.length) {
         const n = k => its.filter(i => i.signal.sig === k).length, bt = its[0].signal.buyThreshold ?? 63, st = its[0].signal.sellThreshold ?? 37;
         const rows = its.map(i => { const sc = i.signal.score, c = i.signal.sig === 'BUY' ? 'up' : i.signal.sig === 'SELL' ? 'down' : 'flat'; return `<div class="sc-r"><a class="sc-l" href="#/s/${encodeURIComponent(i.key)}">${esc(i.name)}</a><span class="sc-t"><i class="sc-b ${c}" style="width:${sc}%"></i><i class="sc-m" style="left:${st}%"></i><i class="sc-m" style="left:${bt}%"></i></span><b class="mono">${Math.round(sc)}</b></div>`; }).join('');
         out.push(chCard('ch-sc', `觀察清單綜合分數（${mk === 'tw' ? '台股' : '美股'}）`, `${its.length} 檔：買進 ${n('BUY')}、持有 ${n('HOLD')}、賣出 ${n('SELL')}；最高 ${its[0].name} ${Math.round(its[0].signal.score)} 分`, `<div class="sc">${rows}</div><p class="small muted">直線是賣出門檻 ${st} 分與買進門檻 ${bt} 分</p>`));
       }
-    }
+    } catch (e) { console.error(e); }
     // 8. 我的持股（只在你的瀏覽器計算）
-    {
+    try {
       const P = holdings(); const agg = new Map();
       for (const r of P.rows) { if (!(r.mv > 0)) continue; const a = agg.get(r.key) || { key: r.key, name: r.it?.name || r.key, mv: 0, cost: 0, pnl: 0, day: 0 }; a.mv += r.mv; a.cost += r.cost || 0; a.pnl += r.pnl || 0; a.day += r.day || 0; agg.set(r.key, a); }
       const A = [...agg.values()].sort((a, b) => b.mv - a.mv);
@@ -2758,7 +2759,7 @@ ${footer()}`;
         const big = A[0], bigPct = big.mv / P.total * 100;
         out.push(chCard('ch-pf', '我的持股配置', `最大部位 ${big.name} 占 ${fix(bigPct, 1)}%${bigPct > (cfg.limits?.maxPos || 25) ? '，超過單一持股上限' : ''}；總未實現損益 ${P.pnl >= 0 ? '+' : '−'}${int(Math.abs(P.pnl))} 元（${pp(P.pnlPct)}）`, donut(parts, P.total >= 1e8 ? fix(P.total / 1e8, 2) + ' 億' : P.total >= 1e4 ? int(P.total / 1e4) + ' 萬' : int(P.total)) + `<h3 class="ch-h3">各檔未實現損益（%）</h3>` + divBars(A.filter(x => x.cost > 0).map(x => ({ label: x.name, v: x.pnl / x.cost * 100, href: '#/s/' + encodeURIComponent(x.key), note: `今日 ${x.day >= 0 ? '+' : '−'}${int(Math.abs(x.day))}` })).sort((a, b) => b.v - a.v), { fmt: v => pp(v, 1) }), '只在這台裝置計算'));
       } else out.push(chCard('ch-pf', '我的持股配置', '', '<p class="empty">還沒有輸入持股。到「持股」頁新增後，這裡會畫出配置與損益。</p>'));
-    }
+    } catch (e) { console.error(e); }
     const head = out.shift();
     return `<h1 class="sr-only">圖表儀表板</h1>` + head + `<div class="ch-wrap">${out.join('')}</div>` + footer();
   }
@@ -3343,7 +3344,7 @@ ${footer()}`;
     else if (S.route === 'habits') { main.innerHTML = '<p class="loading">分析中…</p>'; const html = await viewHabits(); if (S.route !== 'habits') return; main.innerHTML = html; document.title = '交易行為檢討・訊號終端'; }
     else if (S.route === 'decide') { main.innerHTML = viewDecide(); bindDecide(); document.title = '待你確認・訊號終端'; }
     else if (S.route === 'paper') { main.innerHTML = viewPaper(); document.title = '虛擬跟單・訊號終端'; }
-    else if (S.route === 'charts') { if (!main.querySelector('#dash')) main.innerHTML = '<p class="loading">畫圖中…</p>'; const html = await viewCharts(); if (S.route !== 'charts') return; main.innerHTML = html; bindCharts2(); document.title = '圖表・訊號終端'; }
+    else if (S.route === 'charts') { if (!main.querySelector('#dash')) main.innerHTML = '<p class="loading">畫圖中…</p>'; let html; try { html = await viewCharts(); } catch (e) { console.error(e); html = `<section class="card"><p class="empty">圖表載入失敗：${esc(e.message)}。請按右上角重新整理，或把這段文字截圖給我。</p></section>`; } if (S.route !== 'charts') return; main.innerHTML = html; bindCharts2(); document.title = '圖表・訊號終端'; }
     else if (S.route === 'settings') { main.innerHTML = viewSettings(); bindSettings(); document.title = '設定・訊號終端'; }
     else if (S.route === 'all') { main.innerHTML = `<div><a href="#/" class="small">← 回總覽</a></div><section class="card" id="opps">${viewOpps(0)}</section>${footer()}`; document.title = '全部標的・訊號終端'; }
     else { main.innerHTML = viewHome(); document.title = '訊號終端'; afterHome(); if (SY.get().token) loadRemote().then(() => { if (S.route !== 'home' || $('#pck-h') || $('#ms-h')) return; const h = viewPcReview() + viewPcChecks(), h2 = viewPcScan(); if (h) $('#opps')?.insertAdjacentHTML('beforebegin', h); if (h2) $('#opps')?.insertAdjacentHTML('afterend', h2); if (h || h2) setupFolds(); }); loadNews().then(N => { if (S.route !== 'home') return; const el = $('#themes'); if (el) el.innerHTML = viewThemesMini(N); const d = $('#digest'); if (d) d.innerHTML = viewDigestMini(N); setupFolds(); }); }
