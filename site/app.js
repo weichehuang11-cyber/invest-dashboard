@@ -29,7 +29,7 @@
   }
   applyLook(); mqDark?.addEventListener?.('change', applyLook);
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  const APP_VERSION = '1.20.0';
+  const APP_VERSION = '1.20.1';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -761,10 +761,24 @@ ${footer()}`;
     return `<div class="hd"><h2 id="lv-h">即時行情</h2><span class="note">${note}</span></div><div class="lv-grid">${tiles.map(tile).join('') || '<p class="empty">沒有資料</p>'}</div>`;
   }
   // 每 10 秒更新只改數字、不重建整張卡；萬一高度變了，補償捲動位置，畫面不會跳
-  function patchKeep(el, fn) {
-    if (!el) return; const r0 = el.getBoundingClientRect(), h0 = el.offsetHeight; fn(el);
-    const dh = el.offsetHeight - h0; if (dh && r0.top < 0) scrollBy(0, dh);
+  // 以「畫面上你正在看的那一塊」當錨點：更新前記下它在螢幕上的位置，更新後把它放回原位（上面或下面變高變矮都不會跳）
+  const ANCH = '[data-dk],[data-lvk],[id],.hm-tabs,.hm-g,.hm-w,.dc,.ds-row,.dm-grid,.dk-grid,.ch-top,section,.card';
+  function anchorKey(e) {
+    if (e.dataset.dk) return { sel: `[data-dk="${CSS.escape(e.dataset.dk)}"]`, idx: 0 };
+    if (e.dataset.lvk) return { sel: `[data-lvk="${CSS.escape(e.dataset.lvk)}"]`, idx: 0 };
+    if (e.id) return { sel: '#' + CSS.escape(e.id), idx: 0 };
+    const sel = e.tagName.toLowerCase() + [...e.classList].filter(c => c !== 'lv-flash').map(c => '.' + CSS.escape(c)).join('');
+    return { sel, idx: [...document.querySelectorAll(sel)].indexOf(e) };
   }
+  function viewAnchor() {
+    const out = []; let e = document.elementFromPoint(innerWidth / 2, Math.round(innerHeight * 0.3));
+    while (e && e !== document.body && out.length < 8) { if (e.matches?.(ANCH)) out.push({ ...anchorKey(e), top: e.getBoundingClientRect().top }); e = e.parentElement; }
+    return out;
+  }
+  function restoreAnchor(A) {
+    for (const a of A || []) { const n = a.idx >= 0 ? document.querySelectorAll(a.sel)[a.idx] : null; if (n?.isConnected) { const d = n.getBoundingClientRect().top - a.top; if (Math.abs(d) >= 1) scrollBy(0, d); return; } }
+  }
+  function patchKeep(el, fn) { if (!el) return; const A = viewAnchor(); fn(el); restoreAnchor(A); }
   function patchLive(box) {
     const tmp = document.createElement('div'); tmp.innerHTML = viewLive();
     const nk = [...tmp.querySelectorAll('[data-lvk]')].map(x => x.dataset.lvk).join(), ok = [...box.querySelectorAll('[data-lvk]')].map(x => x.dataset.lvk).join();
@@ -2661,8 +2675,8 @@ ${footer()}`;
       if (hset === 'mine' && !groups.length) note = '還沒有追蹤或持股：在個股頁按 ★ 追蹤，或到「持股」新增';
     }
     const heatTabs = `<div class="hm-tabs">${seg('hmSet', hset, [['all', '全部'], ['mine', `我的 ${mineK.length}`], ['wl', '觀察清單'], ['hot', '熱門股'], ['theme', '題材股']])}</div>`;
-    const tile = r => `<a class="hm-t" data-dk="h-${esc(r.k)}" href="#/s/${encodeURIComponent(r.k)}" style="background:${heatBg(r.q.c, r.m === 'tw' ? 5 : 3)}"><span class="hm-n">${r.h ? '<i class="hm-own" title="持股">持</i>' : r.st ? '<i class="hm-star" title="追蹤">★</i>' : ''}${esc(r.name)}</span><b class="mono">${pct(r.q.c)}</b><span class="hm-p mono">${px(r.q.p)}${r.tag ? `・${esc(r.tag)}` : ''}</span></a>`;
-    const heat = heatTabs + (groups.map(g => `<div class="hm-g"><div class="hm-h"><b>${esc(g.title)}</b><span class="small muted">${g.raw ? g.sub : esc(g.sub)}</span></div><div class="hm">${g.rows.map(tile).join('')}</div></div>`).join('') || `<p class="empty">${esc(note || '沒有資料')}</p>`);
+    const tile = (r, gi) => `<a class="hm-t" data-dk="h-${hset}-${gi}-${esc(r.k)}" href="#/s/${encodeURIComponent(r.k)}" style="background:${heatBg(r.q.c, r.m === 'tw' ? 5 : 3)}"><span class="hm-n">${r.h ? '<i class="hm-own" title="持股">持</i>' : r.st ? '<i class="hm-star" title="追蹤">★</i>' : ''}${esc(r.name)}</span><b class="mono">${pct(r.q.c)}</b><span class="hm-p mono">${px(r.q.p)}${r.tag ? `・${esc(r.tag)}` : ''}</span></a>`;
+    const heat = heatTabs + (groups.map((g, gi) => `<div class="hm-g"><div class="hm-h"><b>${esc(g.title)}</b><span class="small muted">${g.raw ? g.sub : esc(g.sub)}</span></div><div class="hm">${g.rows.map(r => tile(r, gi)).join('')}</div></div>`).join('') || `<p class="empty">${esc(note || '沒有資料')}</p>`);
     return `<div class="ds-h"><h2 id="ds-h">即時儀表板</h2><span class="ds-st small muted" data-dk="st">${status}</span></div>
       <div class="dk-grid">${tiles}</div>
       ${kp.length ? `<div class="dm-grid">${kp.join('')}</div>` : ''}
@@ -2679,7 +2693,7 @@ ${footer()}`;
       for (const n of tmp.querySelectorAll('[data-dk]')) {
         const o = box.querySelector(`[data-dk="${CSS.escape(n.dataset.dk)}"]`) || (n.dataset.dk.startsWith('c-') ? box.querySelector('[data-dk^="c-"]') : null); if (!o) continue;
         if (o.dataset.dk !== n.dataset.dk || o.innerHTML !== n.innerHTML || o.getAttribute('style') !== n.getAttribute('style')) {
-          o.replaceWith(n); if (!n.dataset.dk.startsWith('st') && !n.dataset.dk.startsWith('c-')) { void n.offsetWidth; n.classList.add('lv-flash'); }
+          o.replaceWith(n); if (/^(q|m)-/.test(n.dataset.dk)) { void n.offsetWidth; n.classList.add('lv-flash'); }
           if (n.dataset.dk.startsWith('c-')) bindLineCharts(n);
         }
       }
@@ -2801,13 +2815,15 @@ ${footer()}`;
   function patchCharts(main, html) {
     const tmp = document.createElement('div'); tmp.innerHTML = html;
     const keyOf = el => el.id || el.getAttribute('aria-labelledby') || el.className;
-    const swap = (o, n) => { if (!o || o.outerHTML === n.outerHTML) return; const top = o.getBoundingClientRect().top, h0 = o.offsetHeight; o.replaceWith(n); bindLineCharts(n); const dh = n.offsetHeight - h0; if (dh && top < 0) scrollBy(0, dh); };
+    const A = viewAnchor();
+    const swap = (o, n) => { if (!o || o.outerHTML === n.outerHTML) return; o.replaceWith(n); bindLineCharts(n); };
     // 上方的期間切換列
     swap(main.querySelector('.ch-top'), tmp.querySelector('.ch-top'));
     const ow = main.querySelector('.ch-wrap'), nw = tmp.querySelector('.ch-wrap');
     const oKeys = [...ow.children].map(keyOf).join('|'), nKeys = [...nw.children].map(keyOf).join('|');
-    if (oKeys !== nKeys) { const top = ow.getBoundingClientRect().top, h0 = ow.offsetHeight; ow.replaceWith(nw); bindLineCharts(nw); const dh = nw.offsetHeight - h0; if (dh && top < 0) scrollBy(0, dh); }
+    if (oKeys !== nKeys) { ow.replaceWith(nw); bindLineCharts(nw); }
     else [...nw.children].forEach((n, i) => swap(ow.children[i], n));
+    restoreAnchor(A);
     patchDash();
   }
   function bindCharts2() {

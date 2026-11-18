@@ -799,3 +799,4 @@ button, a, select, input, .btn { touch-action: manipulation; }
 .hm-own { padding: 0 3px; border-radius: 3px; background: var(--ink); color: var(--card); }
 .hm-star { color: var(--warn); }
 .hm-tabs .seg { flex-wrap: wrap; }
+html { overflow-anchor: none; }
