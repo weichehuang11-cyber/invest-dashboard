@@ -29,7 +29,7 @@
   }
   applyLook(); mqDark?.addEventListener?.('change', applyLook);
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  const APP_VERSION = '1.19.0';
+  const APP_VERSION = '1.19.1';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2629,10 +2629,24 @@ ${footer()}`;
       const lc = lineChart('intra', labels, [{ name: v.name, col: (v.chgPct ?? 0) >= 0 ? 'var(--up)' : 'var(--down)', v: v.spark, w: 2 }], { h: 150, fmt: x => px(x), refs: prev ? [{ y: prev, label: `昨收 ${px(prev)}` }] : [], xfmt: hm });
       chart = `<div class="dc" data-dk="c-${esc(sel)}-${n}-${v.price}"><div class="dc-h"><b>${esc(v.name)}・盤中走勢</b><span class="mono ${cls(v.chgPct)}">${px(v.price)} ${pct(v.chgPct)}</span><span class="small muted">${esc(hm(labels[0]))}～${v.time ? `${esc(hms(v.time))}（${agoHtml(v.time)}）` : esc(hm(labels[n - 1]))}・每分鐘一點，最後一點即時・點上方報價可切換</span></div>${lc}</div>`;
     } else chart = `<div class="dc" data-dk="c-none"><p class="empty">${live ? '盤中走勢要等開盤後累積資料' : '設定 NAS 網址後，這裡會顯示每 5 秒更新的盤中走勢'}</p></div>`;
-    // 4. 觀察清單熱力圖
-    const its = Object.values(s.items || {}).filter(i => isNum(i.price));
-    const heat = ['tw', 'us'].map(m => { const L = its.filter(i => i.market === m).map(i => ({ i, q: stockQuote(i) })); if (!L.length) return '';
-      const up = L.filter(x => x.q.c > 0).length; return `<div class="hm-g"><div class="hm-h"><b>${m === 'tw' ? '台股' : '美股'}觀察清單</b><span class="small muted">漲 ${up}・跌 ${L.filter(x => x.q.c < 0).length}</span></div><div class="hm">${L.map(({ i, q }) => `<a class="hm-t" data-dk="h-${esc(i.key)}" href="#/s/${encodeURIComponent(i.key)}" style="background:${heatBg(q.c, m === 'tw' ? 5 : 3)}"><span class="hm-n">${esc(i.name)}</span><b class="mono">${pct(q.c)}</b><span class="hm-p mono">${px(q.p)}</span></a>`).join('')}</div></div>`; }).join('');
+    // 4. 熱力圖：我的（追蹤＋持股）／觀察清單／全部
+    const hset = LS.get('hmSet') || 'all', U = UNI ? uniMap(UNI) : new Map();
+    const held = [...new Set((LS.get('holdings', { items: [] }).items || []).map(x => x.key))], starK = stars(), mineK = [...new Set([...held, ...starK])], wlK = Object.keys(s.items || {});
+    const keys = hset === 'mine' ? mineK : hset === 'wl' ? wlK : [...new Set([...mineK, ...wlK])];
+    const rowOf = k => {
+      const it = s.items?.[k], u = U.get(k), lv = nasLive() ? LIVE.data.stocks?.[k] : null;
+      const m = it?.market || u?.m || (/^\d/.test(k) ? 'tw' : 'us'), name = it?.name || u?.n || k;
+      let q;
+      if (it) q = stockQuote(it);
+      else if (lv && isNum(lv.price)) q = { p: lv.price, c: isNum(lv.chgPct) ? lv.chgPct : isNum(lv.prev) && lv.prev ? (lv.price / lv.prev - 1) * 100 : null };
+      else q = { p: u?.c ?? null, c: u?.p ?? null };
+      return { k, m, name, q, h: held.includes(k), st: starK.includes(k) };
+    };
+    const R = keys.map(rowOf);
+    const heatTabs = `<div class="hm-tabs">${seg('hmSet', hset, [['all', `全部 ${new Set([...mineK, ...wlK]).size}`], ['mine', `我的 ${mineK.length}`], ['wl', `觀察清單 ${wlK.length}`]])}</div>`;
+    const heat = heatTabs + (['tw', 'us'].map(m => { const L = R.filter(r => r.m === m); if (!L.length) return '';
+      const up = L.filter(x => x.q.c > 0).length; return `<div class="hm-g"><div class="hm-h"><b>${m === 'tw' ? '台股' : '美股'}</b><span class="small muted">漲 ${up}・跌 ${L.filter(x => x.q.c < 0).length}</span></div><div class="hm">${L.map(r => `<a class="hm-t" data-dk="h-${esc(r.k)}" href="#/s/${encodeURIComponent(r.k)}" style="background:${heatBg(r.q.c, m === 'tw' ? 5 : 3)}"><span class="hm-n">${r.h ? '<i class="hm-own" title="持股">持</i>' : r.st ? '<i class="hm-star" title="追蹤">★</i>' : ''}${esc(r.name)}</span><b class="mono">${pct(r.q.c)}</b><span class="hm-p mono">${px(r.q.p)}</span></a>`).join('')}</div></div>`; }).join('')
+      || `<p class="empty">${hset === 'mine' ? '還沒有追蹤或持股：在個股頁按 ★ 追蹤，或到「持股」新增' : '沒有資料'}</p>`);
     return `<div class="ds-h"><h2 id="ds-h">即時儀表板</h2><span class="ds-st small muted" data-dk="st">${status}</span></div>
       <div class="dk-grid">${tiles}</div>
       ${kp.length ? `<div class="dm-grid">${kp.join('')}</div>` : ''}
@@ -2658,8 +2672,8 @@ ${footer()}`;
   async function viewCharts() {
     const s = S.snap, mk = LS.get('chMk') || 'tw', rng = +(LS.get('chRng') || 60);
     const IX = [['^TWII', '加權'], ['^GSPC', '標普 500'], ['^IXIC', '那斯達克'], ['^SOX', '費半']];
-    const [I, ...bars] = await Promise.all([loadInd(), ...IX.map(([k]) => loadBars(k)), loadBars('^VIX'), loadBars('USDTWD=X')]);
-    const vixB = bars[4], fxB = bars[5];
+    const [I, ...bars] = await Promise.all([loadInd(), loadUniverse(), ...IX.map(([k]) => loadBars(k)), loadBars('^VIX'), loadBars('USDTWD=X')]);
+    bars.shift(); const vixB = bars[4], fxB = bars[5];
     const out = [];
     out.push(`<section class="card dash" id="dash" aria-labelledby="ds-h">${safeDash()}</section><div class="ch-top"><h2 class="ch-title">趨勢圖表</h2>${seg('chRng', String(rng), [['20', '1 個月'], ['60', '3 個月'], ['120', '半年'], ['250', '1 年']])}</div>`);
 
@@ -2782,7 +2796,7 @@ ${footer()}`;
   }
   function bindCharts2() {
     bindLineCharts($('#main'));
-    $('#main').onclick = e => { if (S.route !== 'charts') return; const d = e.target.closest('[data-dsel]'); if (d) { LS.set('dashK', d.dataset.dsel); patchDash(); return; } const b = e.target.closest('[data-of="chRng"],[data-of="chMk"]'); if (!b) return; LS.set(b.dataset.of, b.dataset.v); render(); };
+    $('#main').onclick = e => { if (S.route !== 'charts') return; const d = e.target.closest('[data-dsel]'); if (d) { LS.set('dashK', d.dataset.dsel); patchDash(); return; } const hs = e.target.closest('[data-of="hmSet"]'); if (hs) { LS.set('hmSet', hs.dataset.v); patchDash(); return; } const b = e.target.closest('[data-of="chRng"],[data-of="chMk"]'); if (!b) return; LS.set(b.dataset.of, b.dataset.v); render(); };
     startLive();
   }
   // ── 準確度總表：所有判斷放在一起比，看該相信哪一套 ─────────────────

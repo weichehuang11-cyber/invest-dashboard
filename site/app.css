@@ -794,3 +794,7 @@ button, a, select, input, .btn { touch-action: manipulation; }
 .hm-p { font-size: 11px; color: var(--ink2); }
 @media (max-width: 560px) { .dk-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; } .dk { padding: 6px 7px 4px; } .dk-p { font-size: 15px; } .dk-c { font-size: 12px; } .dk-n { font-size: 11px; } .dk-n .lv-s { display: none; } .dk .lv-sp { height: 16px; } .dm-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .ago { font-weight: 600; font-variant-numeric: tabular-nums; }
+.hm-tabs { margin-bottom: 2px; }
+.hm-own, .hm-star { font-style: normal; font-size: 10px; margin-right: 3px; }
+.hm-own { padding: 0 3px; border-radius: 3px; background: var(--ink); color: var(--card); }
+.hm-star { color: var(--warn); }
