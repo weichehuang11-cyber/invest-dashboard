@@ -29,7 +29,7 @@
   }
   applyLook(); mqDark?.addEventListener?.('change', applyLook);
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  const APP_VERSION = '1.18.3';
+  const APP_VERSION = '1.19.0';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -733,6 +733,10 @@ ${footer()}`;
     return `<div class="ixlive"><span class="lv-s ${st?.[1] || ''}">${st ? '即時・' + st[0] : '即時'}</span> <b class="mono">${px(v.price)}</b> <span class="mono ${cls(v.chgPct)}">${pct(v.chgPct)}</span> <span class="small muted">${v.time ? hms(v.time) : ''}</span>
       ${P ? `<div class="small"><span class="${P.lv.c}">${P.lv.t}</span>${P.fc ? `・<span class="${P.fc.c}">${P.fc.t}</span>` : ''}</div>` : ''}</div>`;
   }
+  const agoS = t => { const d = Math.max(0, Math.round((Date.now() - (typeof t === 'number' ? t : Date.parse(t))) / 1000)); return !Number.isFinite(d) ? '' : d < 60 ? `${d} 秒前` : d < 3600 ? `${Math.floor(d / 60)} 分鐘前` : `${Math.floor(d / 3600)} 小時前`; };
+  const agoHtml = t => `<b class="ago" data-ago="${esc(String(t))}">${agoS(t)}</b>`;
+  /** 每秒更新「幾秒前」，不重畫其他東西 */
+  function tickAgo() { if (document.hidden) return; document.querySelectorAll('[data-ago]').forEach(el => { const t = el.dataset.ago, v = agoS(/^\d+$/.test(t) ? +t : t); if (el.textContent !== v) el.textContent = v; }); }
   const hms = iso => new Date(iso).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   function liveSpark(a, up) {
     const v = (a || []).filter(isNum); if (v.length < 2) return '<div class="lv-sp"></div>';
@@ -753,7 +757,7 @@ ${footer()}`;
         <div class="lv-p mono">${px(v.price)}</div><div class="lv-c ${cls(v.chgPct)}">${isNum(v.chg) ? sign(v.chg) + fix(v.chg, Math.abs(v.chg) >= 100 ? 0 : 2) : ''} ${pct(v.chgPct)}</div>
         ${liveSpark(v.spark, up)}${(() => { const ik = LV_IDX[k], P = ik && v.state !== 'snap' ? livePos(ik, v.price) : null; return ik ? `<div class="lv-pos ${P ? P.lv.c : ''}">${P ? P.lv.t.replace(/（.*?）/g, '') : '&nbsp;'}</div>` : ''; })()}<div class="lv-m">${tm}</div></div>`;
     };
-    const note = !nasBase() ? '非即時：在「設定」填入 NAS 網址，就會每 10～60 秒自動更新' : !/^https:\/\//.test(nasBase()) ? `非即時：NAS 網址要 https 開頭（目前是 ${esc(nasBase())}）` : !L ? (LIVE.err ? `NAS 連不到（${esc(LIVE.err)}）：${esc(nasBase())}/live.json，先顯示網站資料` : '連線 NAS…') : liveAllClosed() ? `休市中，不更新（最後資料 ${hms(L.at)}；開盤後自動恢復）` : fresh ? `NAS 即時・${hms(L.at)} 更新・開盤中每 10～60 秒` : `NAS 資料停在 ${hms(L.at)}（連線中斷？）`;
+    const note = !nasBase() ? '非即時：在「設定」填入 NAS 網址，就會每 5～15 秒自動更新' : !/^https:\/\//.test(nasBase()) ? `非即時：NAS 網址要 https 開頭（目前是 ${esc(nasBase())}）` : !L ? (LIVE.err ? `NAS 連不到（${esc(LIVE.err)}）：${esc(nasBase())}/live.json，先顯示網站資料` : '連線 NAS…') : liveAllClosed() ? `休市中，不更新（最後資料 ${hms(L.at)}；開盤後自動恢復）` : fresh ? `NAS 即時・${hms(L.at)} 更新・開盤中每 10～60 秒` : `NAS 資料停在 ${hms(L.at)}（連線中斷？）`;
     return `<div class="hd"><h2 id="lv-h">即時行情</h2><span class="note">${note}</span></div><div class="lv-grid">${tiles.map(tile).join('') || '<p class="empty">沒有資料</p>'}</div>`;
   }
   // 每 10 秒更新只改數字、不重建整張卡；萬一高度變了，補償捲動位置，畫面不會跳
@@ -803,7 +807,7 @@ ${footer()}`;
   function startLive() {
     pollLive();
     const mn = $('#main'); if (mn && !mn._lv) { mn._lv = true; mn.addEventListener('click', e => { const t = S.route === 'home' && e.target.closest('[data-lvidx]'); if (!t) return; const ik = t.dataset.lvidx; if (S.snap.indices?.[ik]) { S.idx = ik; LS.set('idx', ik); fillIndexSection().then(() => $('#idx')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); } }); }
-    if (!LIVE.timer) { LIVE.timer = setInterval(pollLive, 10000); document.addEventListener('visibilitychange', () => { if (!document.hidden) pollLive(); }); }
+    if (!LIVE.timer) { LIVE.timer = setInterval(pollLive, 5000); setInterval(tickAgo, 1000); document.addEventListener('visibilitychange', () => { if (!document.hidden) pollLive(); }); }
   }
   // ── 總覽自訂：區塊順序（手機版）與顯示／隱藏 ─────────────────────
   function homeSections() {
@@ -2599,8 +2603,8 @@ ${footer()}`;
   const heatBg = (c, lim = 5) => { if (!isNum(c) || Math.abs(c) < 0.05) return 'var(--line2)'; const k = Math.round(18 + Math.min(1, Math.abs(c) / lim) * 72); return `color-mix(in srgb, var(--${c > 0 ? 'up' : 'down'}) ${k}%, var(--card))`; };
   function dashLiveHtml() {
     const s = S.snap, Q = dashQuotes(), live = nasLive(), fresh = live && Date.now() - LIVE.at < 60000;
-    const status = live ? (liveAllClosed() ? `<span class="dot"></span>休市中・最後資料 ${hms(LIVE.data.at)}，開盤後每 10 秒自動更新` : fresh ? `<span class="dot on"></span>即時・${hms(LIVE.data.at)} 更新・每 10 秒` : `<span class="dot warn"></span>NAS 資料停在 ${hms(LIVE.data.at)}`)
-      : `<span class="dot"></span>網站資料 ${esc(tpeTime(s.generatedAt))}・${!nasBase() ? '在「設定」填入 NAS 網址可改成每 10 秒即時' : LIVE.err ? `NAS 連不到（${esc(LIVE.err)}）` : '連線 NAS…'}`;
+    const status = live ? (liveAllClosed() ? `<span class="dot"></span>休市中・最後資料 ${hms(LIVE.data.at)}，開盤後每 5 秒自動更新` : fresh ? `<span class="dot on"></span>即時・${hms(LIVE.data.at)} 更新（${agoHtml(LIVE.data.at)}）・每 5 秒` : `<span class="dot warn"></span>NAS 資料停在 ${hms(LIVE.data.at)}`)
+      : `<span class="dot"></span>網站資料 ${esc(tpeTime(s.generatedAt))}・${!nasBase() ? '在「設定」填入 NAS 網址可改成每 5 秒即時' : LIVE.err ? `NAS 連不到（${esc(LIVE.err)}）` : '連線 NAS…'}`;
     // 1. 報價磚
     const tiles = Q.map(([k, v]) => { try { const st = LV_STATE[v.state]; return `<div class="dk" data-dk="q-${esc(k)}" data-dsel="${esc(k)}" role="button" tabindex="0"><div class="dk-n">${esc(v.name)}${st ? `<span class="lv-s ${st[1]}">${st[0]}</span>` : ''}</div><div class="dk-p mono">${px(v.price)}</div><div class="dk-c mono ${cls(v.chgPct)}">${pct(v.chgPct)}</div>${liveSpark(v.spark, (v.chgPct ?? 0) >= 0)}</div>`; } catch (_) { return ''; } }).join('');
     // 2. 市場指標
@@ -2623,8 +2627,8 @@ ${footer()}`;
       const prev = isNum(v.prev) ? v.prev : isNum(v.chgPct) ? v.price / (1 + v.chgPct / 100) : null;
       const hm = iso => new Date(iso).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit' });
       const lc = lineChart('intra', labels, [{ name: v.name, col: (v.chgPct ?? 0) >= 0 ? 'var(--up)' : 'var(--down)', v: v.spark, w: 2 }], { h: 150, fmt: x => px(x), refs: prev ? [{ y: prev, label: `昨收 ${px(prev)}` }] : [], xfmt: hm });
-      chart = `<div class="dc" data-dk="c-${esc(sel)}-${n}-${v.price}"><div class="dc-h"><b>${esc(v.name)}・盤中走勢</b><span class="mono ${cls(v.chgPct)}">${px(v.price)} ${pct(v.chgPct)}</span><span class="small muted">${esc(hm(labels[0]))}～${esc(hm(labels[n - 1]))}・點上方報價可切換</span></div>${lc}</div>`;
-    } else chart = `<div class="dc" data-dk="c-none"><p class="empty">${live ? '盤中走勢要等開盤後累積資料' : '設定 NAS 網址後，這裡會顯示每 10 秒更新的盤中走勢'}</p></div>`;
+      chart = `<div class="dc" data-dk="c-${esc(sel)}-${n}-${v.price}"><div class="dc-h"><b>${esc(v.name)}・盤中走勢</b><span class="mono ${cls(v.chgPct)}">${px(v.price)} ${pct(v.chgPct)}</span><span class="small muted">${esc(hm(labels[0]))}～${v.time ? `${esc(hms(v.time))}（${agoHtml(v.time)}）` : esc(hm(labels[n - 1]))}・每分鐘一點，最後一點即時・點上方報價可切換</span></div>${lc}</div>`;
+    } else chart = `<div class="dc" data-dk="c-none"><p class="empty">${live ? '盤中走勢要等開盤後累積資料' : '設定 NAS 網址後，這裡會顯示每 5 秒更新的盤中走勢'}</p></div>`;
     // 4. 觀察清單熱力圖
     const its = Object.values(s.items || {}).filter(i => isNum(i.price));
     const heat = ['tw', 'us'].map(m => { const L = its.filter(i => i.market === m).map(i => ({ i, q: stockQuote(i) })); if (!L.length) return '';

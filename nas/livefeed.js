@@ -9,16 +9,16 @@
 const https = require('https');
 
 const LIST = [
-  { key: 'TWII', name: '加權指數', src: 'twse', ch: 'tse_t00.tw', ysym: '^TWII', sess: 'tw', every: 10 },
-  { key: 'TWOII', name: '櫃買指數', src: 'twse', ch: 'otc_o00.tw', ysym: '^TWOII', sess: 'tw', every: 10 },
-  { key: 'TXF', name: '台指期', src: 'taifex', sess: 'txf', every: 10 },
-  { key: 'GSPC', name: '標普 500', src: 'yahoo', sym: '^GSPC', sess: 'us', every: 20 },
-  { key: 'IXIC', name: '那斯達克', src: 'yahoo', sym: '^IXIC', sess: 'us', every: 20 },
-  { key: 'SOX', name: '費城半導體', src: 'yahoo', sym: '^SOX', sess: 'us', every: 20 },
-  { key: 'ES', name: '標普期貨', src: 'yahoo', sym: 'ES=F', sess: 'fut', every: 60 },
-  { key: 'NQ', name: '那斯達克期貨', src: 'yahoo', sym: 'NQ=F', sess: 'fut', every: 60 },
-  { key: 'N225', name: '日經 225', src: 'yahoo', sym: '^N225', sess: 'asia', every: 30 },
-  { key: 'KS11', name: '韓國綜合', src: 'yahoo', sym: '^KS11', sess: 'asia', every: 30 },
+  { key: 'TWII', name: '加權指數', src: 'twse', ch: 'tse_t00.tw', ysym: '^TWII', sess: 'tw', every: 5 },
+  { key: 'TWOII', name: '櫃買指數', src: 'twse', ch: 'otc_o00.tw', ysym: '^TWOII', sess: 'tw', every: 5 },
+  { key: 'TXF', name: '台指期', src: 'taifex', sess: 'txf', every: 5 },
+  { key: 'GSPC', name: '標普 500', src: 'yahoo', sym: '^GSPC', sess: 'us', every: 10 },
+  { key: 'IXIC', name: '那斯達克', src: 'yahoo', sym: '^IXIC', sess: 'us', every: 10 },
+  { key: 'SOX', name: '費城半導體', src: 'yahoo', sym: '^SOX', sess: 'us', every: 10 },
+  { key: 'ES', name: '標普期貨', src: 'yahoo', sym: 'ES=F', sess: 'fut', every: 15 },
+  { key: 'NQ', name: '那斯達克期貨', src: 'yahoo', sym: 'NQ=F', sess: 'fut', every: 15 },
+  { key: 'N225', name: '日經 225', src: 'yahoo', sym: '^N225', sess: 'asia', every: 15 },
+  { key: 'KS11', name: '韓國綜合', src: 'yahoo', sym: '^KS11', sess: 'asia', every: 15 },
 ];
 
 function get(url, { method = 'GET', headers = {}, body, timeout = 12000 } = {}) {
@@ -133,7 +133,7 @@ async function tick(force) {
   const now = Date.now(), jobs = [];
   const twItems = LIST.filter(x => x.src === 'twse');
   for (const it of LIST) {
-    const sess = session(it.sess), every = (sess === 'closed' ? 600 : it.every) * 1000;
+    const sess = session(it.sess), every = (sess === 'closed' ? 600 : it.every) * 1000 - 800;   // 扣一點容差，5 秒一輪的迴圈才不會被跳過
     // 休市時不更新：收盤後再抓兩次（剛收盤、10 分鐘後確認收盤價）就停，等下次開盤
     if (sess !== 'closed') afterClose[it.key] = 0;
     else if (live.items[it.key]?.ok && (afterClose[it.key] || 0) >= 2 && !force) { if (live.items[it.key]) live.items[it.key].state = 'closed'; continue; }
@@ -195,7 +195,7 @@ async function tickStocks(force) {
     const sess = session(m === 'tw' ? 'tw' : 'us');
     if (sess !== 'closed') sAfter[m] = 0; else if (sAfter[m] >= 2 && !force && L.every(x => stocks[x.key])) continue;
     if (!force && sDue[m] && now < sDue[m]) continue;
-    sDue[m] = now + (sess === 'closed' ? 600 : m === 'tw' ? 10 : 60) * 1000; if (sess === 'closed') sAfter[m]++;
+    sDue[m] = now + (sess === 'closed' ? 600 : m === 'tw' ? 5 : 20) * 1000 - 800; if (sess === 'closed') sAfter[m]++;
     try {
       if (m === 'tw') {
         for (let i = 0; i < L.length; i += 50) {
