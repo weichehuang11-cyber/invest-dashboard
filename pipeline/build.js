@@ -910,7 +910,13 @@ async function main() {
       if (hasAI && (!cache.tried || cache.v !== 2 || (cache.lastError && Date.now() - Date.parse(cache.tried) > 30 * 60000) || Date.now() - Date.parse(cache.tried) > 115 * 60000 || FULL)) {
         const r = await NewsAI.summarize(groups.flat(), AI.chat, cache, { log });
         cache.tried = new Date().toISOString(); ranAI = true; cache.v = 2;
-        if (process.env.GEMINI_API_KEY && (FULL || !cache.deepAt || Date.now() - Date.parse(cache.deepAt) > 170 * 60000)) { cache.deepAt = new Date().toISOString(); const d = await NewsAI.deepen(fullStories, AI.grounded, cache, { log }); status.newsDeep = d.err ? 'fail: ' + d.err : `查證 ${d.added} 則`; }
+        if (process.env.GEMINI_API_KEY && cache.deepPause && Date.now() < Date.parse(cache.deepPause)) status.newsDeep = `暫停到 ${cache.deepPause.slice(0, 16)}（Google 搜尋查證的免費額度用完）`;
+        else if (process.env.GEMINI_API_KEY && (FULL || !cache.deepAt || Date.now() - Date.parse(cache.deepAt) > 170 * 60000)) {
+          cache.deepAt = new Date().toISOString(); const d = await NewsAI.deepen(fullStories, AI.grounded, cache, { log });
+          // 額度用完（429）：暫停到額度重置（太平洋時間午夜＝台灣 16:00 左右），不要每次更新都撞牆
+          if (d.err && /429|quota/i.test(d.err)) { const n = new Date(); const r = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate(), 8, 30)); if (r <= n) r.setUTCDate(r.getUTCDate() + 1); cache.deepPause = r.toISOString(); }
+          status.newsDeep = d.err ? 'fail: ' + d.err.slice(0, 80) : `查證 ${d.added} 則`;
+        }
         cache.lastError = r.errs[0] || null;
         writeJSON(cFile, cache); console.log('DIGEST_CHANGED');
         status.newsAI = `新增 ${r.added}、待處理 ${r.pending}${r.errs.length ? '、錯誤：' + r.errs[0] : ''}`;

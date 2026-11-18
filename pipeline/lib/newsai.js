@@ -12,7 +12,15 @@ function save(cache, id, r, extra = {}) {
   cache.map[id] = { t: String(r.t || '').slice(0, 60), s: String(r.s || '').slice(0, 260), k: (r.k || []).map(String).filter(Boolean).slice(0, 3), w: String(r.w || '').slice(0, 100),
     i: /利多/.test(r.i) ? 1 : /利空/.test(r.i) ? -1 : 0, m: (r.m || []).map(String).slice(0, 3), at: Date.now(), v: 2, ...extra };
 }
-const parseJ = txt => JSON.parse((String(txt).match(/\{[\s\S]*\}/) || [txt])[0]);
+/** 寬鬆解析 AI 回傳的 JSON：去掉 ```、只取第一個完整的 {…}、移除結尾多餘逗號 */
+function parseJ(txt) {
+  const t = String(txt || '').replace(/```(?:json)?/gi, '');
+  const i = t.indexOf('{'); if (i < 0) throw new Error('沒有 JSON');
+  let d = 0, q = false, e = -1;
+  for (let k = i; k < t.length; k++) { const c = t[k]; if (q) { if (c === '\\') k++; else if (c === '"') q = false; continue; } if (c === '"') q = true; else if (c === '{') d++; else if (c === '}' && --d === 0) { e = k; break; } }
+  const body = (e > 0 ? t.slice(i, e + 1) : t.slice(i)).replace(/,\s*([}\]])/g, '$1');
+  return JSON.parse(body);
+}
 
 /** 直接抓得到的原文（CNBC、鉅亨等非付費網站）補上內文 */
 async function fetchBodies(items, { max = 15 } = {}) {
@@ -87,7 +95,7 @@ async function themeSummaries(themes, chat, cache, { log = () => {} } = {}) {
   const user = `${body}\n\n逐一整理上面每個題材，輸出 JSON：{"themes":[{"name":"題材名稱（照抄）","sum":"為什麼現在熱、驅動因素是什麼，2 句、70 字內","phase":"剛起漲／發酵中／過熱／降溫 四選一（依新聞量與漲幅判斷）","stocks":{"代號":"這檔和題材的關係或看點，25 字內；如果新聞看不出它和題材有關，就只寫「無直接關聯」"}}]}`;
   try {
     const txt = await chat([{ role: 'system', content: sys }, { role: 'user', content: user }], { json: true, timeout: 120000 });
-    const j = JSON.parse((txt.match(/\{[\s\S]*\}/) || [txt])[0]);
+    const j = parseJ(txt);
     let n = 0;
     for (const r of j.themes || []) {
       const t = todo.find(x => x.name === String(r.name || '').trim()) || todo[(j.themes || []).indexOf(r)];

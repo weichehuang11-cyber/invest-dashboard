@@ -76,7 +76,7 @@ function dataCheck(snap) {
   add('大盤籌碼（外資）', snap.chipMarket?.date, twD, 1, '對照台股收盤日');
   const chips = Object.values(snap.items || {}).filter(i => i.market === 'tw' && i.chip?.date).map(i => i.chip.date).sort();
   if (chips.length) add('個股籌碼', chips[0], twD, 2, '最舊的一檔');
-  const tdcc = Object.values(snap.items || {}).map(i => i.tdcc?.[0]?.date).filter(Boolean).sort();
+  const tdcc = Object.values(snap.items || {}).map(i => i.tdcc?.[i.tdcc.length - 1]?.date).filter(Boolean).sort();   // 每檔最新一週
   if (tdcc.length) add('大戶持股（集保）', tdcc[tdcc.length - 1], twD, 7, '每週更新');
   if (snap.health?.us?.vixTerm?.date) add('VIX 期限結構', snap.health.us.vixTerm.date, usD, 1, '近月與三個月同一天');
   const bad = rows.filter(r => !r.ok);
