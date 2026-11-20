@@ -804,3 +804,25 @@ html { overflow-anchor: none; }
 .hm-x { font-size: 11px; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hm-h b { white-space: nowrap; }
 .hm-h { gap: 8px; }
+/* 今日重點 */
+.fc { border-radius: 12px; padding: 10px 12px; border: 1px solid var(--line); border-left: 4px solid var(--acc); background: var(--card); }
+.fc-down { border-left-color: var(--down); background: color-mix(in srgb, var(--down) 6%, var(--card)); }
+.fc-up { border-left-color: var(--up); background: color-mix(in srgb, var(--up) 6%, var(--card)); }
+.fc-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.fc-h > b { font-size: 16px; }
+.fc-m { font-weight: 600; color: var(--ink2); }
+.fc-a { margin: 8px 0; font-size: 15px; font-weight: 600; line-height: 1.55; color: var(--ink); }
+.fc-t { display: inline-block; font-size: 12px; padding: 1px 7px; margin-right: 6px; border-radius: 99px; background: var(--ink); color: var(--card); vertical-align: 1px; }
+.fc-g { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px; }
+.fc-i { display: flex; flex-direction: column; gap: 1px; padding: 6px 9px; border-radius: 8px; background: var(--bg); border: 1px solid transparent; min-width: 0; }
+.fc-i > span { font-size: 12px; color: var(--ink2); }
+.fc-i > b { font-size: 15px; }
+.fc-i > em { font-style: normal; font-size: 12px; color: var(--mute); line-height: 1.4; }
+.fc-i.fc-bad { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--card)); }
+.fc-i.fc-bad > b { color: var(--bad); }
+.fc-i.fc-warn { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--card)); }
+.fc-i.fc-warn > b { color: var(--warn); }
+.fc-i.fc-ok > b { color: var(--ok, #16a34a); }
+@media (max-width: 560px) { .fc-g { grid-template-columns: 1fr 1fr; } .fc-i > b { font-size: 14px; } }
+.fc-i.fc-key { grid-column: 1 / -1; }
+.fc-i.fc-key > b { font-size: 20px; }

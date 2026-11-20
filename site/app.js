@@ -29,7 +29,7 @@
   }
   applyLook(); mqDark?.addEventListener?.('change', applyLook);
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  const APP_VERSION = '1.20.2';
+  const APP_VERSION = '1.21.0';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2615,6 +2615,66 @@ ${footer()}`;
     return mv ? { mv, day, pnl: cost ? mv - cost : null, dayPct: day / (mv - day) * 100, live } : null;
   }
   const heatBg = (c, lim = 5) => { if (!isNum(c) || Math.abs(c) < 0.05) return 'var(--line2)'; const k = Math.round(18 + Math.min(1, Math.abs(c) / lim) * 72); return `color-mix(in srgb, var(--${c > 0 ? 'up' : 'down'}) ${k}%, var(--card))`; };
+  // ── 今日重點：下跌看融資維持率等風險指標，上漲看量能廣度與壓力；最上面給一句建議 ──────
+  function focusHtml() {
+    const s = S.snap, tw = s.health?.tw || {}, ix = s.indices?.['^TWII'], ol = ix?.outlook || {};
+    const lv = nasLive() ? LIVE.data.items?.TWII : null;
+    const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+    const liveToday = lv && isNum(lv.chgPct) && lv.time && new Date(Date.parse(lv.time) + 8 * 3600000).toISOString().slice(0, 10) === today;
+    const chg = liveToday ? lv.chgPct : ix?.changePct, price = liveToday ? lv.price : ix?.price;
+    if (!isNum(chg)) return '';
+    const mode = chg <= -0.8 ? 'down' : chg >= 0.8 ? 'up' : ol.state === 'down' ? 'down' : ol.state === 'up' ? 'up' : 'flat';
+    const when = liveToday ? `盤中 ${hms(lv.time)}` : `${ymdShort(ix.marketDate)} 收盤`;
+    const dist = p => (isNum(price) && price ? (p / price - 1) * 100 : null);
+    const M = tw.margin || {}, br = tw.breadth, fu = tw.futures, cm = s.chipMarket, rsi = ol.ind?.rsi;
+    const sup = (ol.sr?.support || []).filter(x => !isNum(price) || x.p < price).slice(0, 2), res = (ol.sr?.resistance || []).filter(x => !isNum(price) || x.p > price).slice(0, 2);
+    const lvTxt = lv => (lv.p ? `${lv.label} ${int(lv.p)}（${pp(dist(lv.p) ?? lv.dist)}）` : '');
+    const rows = [];   // [標籤, 數值, 等級 ok|warn|bad|'', 說明]
+    let est = null;
+    if (M.ratio) {
+      // 今天還沒有新的維持率：用指數漲跌粗估（融資股波動通常比大盤大，乘 1.3）
+      const rd = d10(M.ratioDate); if (rd < today && liveToday) est = +(M.ratio * (1 + chg * 1.3 / 100)).toFixed(1);
+      const v = est ?? M.ratio, lvl = v < 130 ? ['bad', '低於追繳線 130%'] : v < 140 ? ['bad', '接近追繳線，斷頭賣壓風險高'] : v < 150 ? ['warn', '偏低，再跌容易引發追繳'] : v < 166 ? ['', '正常偏低'] : ['ok', '健康'];
+      rows.push(['融資維持率', `${fix(M.ratio, 1)}%${est ? `　今天估 ${fix(est, 1)}%` : ''}`, lvl[0], `${lvl[1]}・${ymdShort(M.ratioDate)}${isNum(M.ratioChg) ? `（較前一日 ${M.ratioChg >= 0 ? '+' : '−'}${fix(Math.abs(M.ratioChg), 1)}）` : ''}${M.ratioMin ? `・近半年最低 ${fix(M.ratioMin, 1)}%` : ''}`, mode !== 'up']);
+    } else if (mode !== 'up') rows.push(['融資維持率', '計算中', '', '下次收盤完整更新後提供（130% 追繳線、140% 以下斷頭風險高）']);
+    if (isNum(M.chg5) && M.balance) {
+      const r5 = M.chg5 / (M.balance - M.chg5) * 100;
+      const t = mode === 'up' ? (r5 > 3 ? ['warn', '散戶追價，短線過熱'] : ['', r5 < 0 ? '上漲但融資減少，籌碼乾淨' : '溫和增加']) : (r5 < -5 ? ['ok', '大幅去槓桿，籌碼在清洗'] : r5 > 2 ? ['warn', '跌時融資反增，散戶逢低承接、籌碼變亂'] : ['', '變化不大']);
+      rows.push(['融資餘額 5 日', `${M.chg5 >= 0 ? '+' : '−'}${int(Math.abs(M.chg5))} 億（${pp(r5)}）`, t[0], `${t[1]}・餘額 ${int(M.balance)} 億・${ymdShort(M.date)}`]);
+    }
+    if (cm && isNum(cm.foreignValueEst)) { const v = cm.foreignValueEst / 1e8; rows.push(['外資現貨', `${v >= 0 ? '買超' : '賣超'} ${int(Math.abs(v))} 億`, mode === 'down' && v < -200 ? 'warn' : mode === 'up' && v > 100 ? 'ok' : '', `${ymdShort(cm.date)}${tw.foreignCum ? `・5 日累計 ${tw.foreignCum.d5 >= 0 ? '+' : '−'}${int(Math.abs(tw.foreignCum.d5))} 億` : ''}`]); }
+    if (fu) rows.push(['外資期貨', `淨${fu.net < 0 ? '空' : '多'} ${int(Math.abs(fu.net))} 口`, fu.net < -40000 && mode === 'down' ? 'warn' : '', isNum(fu.chg5) ? `5 日${(fu.net < 0) === (fu.chg5 < 0) ? '增加' : '減少'} ${int(Math.abs(fu.chg5))} 口${fu.net < 0 && fu.chg5 > 0 ? '（空單回補）' : fu.net < 0 && fu.chg5 < 0 ? '（持續加空）' : ''}` : '']);
+    const brSame = br && d10(br.date) === (liveToday ? today : d10(ix.marketDate));
+    if (br && (brSame || mode !== 'up')) {
+      const t = (br.adv || 0) + (br.dec || 0) + (br.unch || 0), up = t ? br.adv / t * 100 : null;
+      if (mode === 'up') rows.push(['上漲家數', `${int(br.adv)} 家（${fix(up, 0)}%）`, up < 45 ? 'warn' : up > 65 ? 'ok' : '', `${up < 45 ? '指數漲但多數股票沒跟，權值股撐盤' : up > 65 ? '普漲，上漲有廣度' : '漲跌參半'}・漲停 ${int(br.upLimit)}・${ymdShort(br.date)}`]);
+      else rows.push(['跌停／下跌家數', `${int(br.downLimit)}／${int(br.dec)} 家`, br.downLimit >= 50 ? 'bad' : br.dec / t > 0.7 ? 'warn' : '', `${brSame ? (br.downLimit >= 50 ? '恐慌性賣壓' : br.dec / t > 0.7 ? '全面性下跌' : '跌勢集中在部分股票') : '前一交易日'}・站上月線 ${fix(br.above20, 0)}%・${ymdShort(br.date)}`]);
+    }
+    if (mode === 'up' && isNum(rsi)) rows.push(['加權 RSI', fix(rsi, 0), rsi > 75 ? 'warn' : rsi < 50 ? '' : 'ok', rsi > 75 ? '短線過熱' : rsi < 50 ? '仍在弱勢區，屬於反彈' : '動能轉強']);
+    const broken = (ol.sr?.support || []).filter(x => isNum(price) && x.p >= price);
+    if (mode !== 'up' && sup.length) rows.push(['下方支撐', sup.map(lvTxt).join('、'), '', broken.length ? `已跌破 ${broken.map(x => x.label).join('、')}` : '跌破第一道支撐要提高警覺']);
+    else if (mode !== 'up' && broken.length) { let k = Math.floor(price / 1000) * 1000; if (k >= price) k -= 1000; rows.push(['支撐', `已全部跌破`, 'bad', `跌破 ${broken.slice(0, 2).map(x => `${x.label} ${int(x.p)}`).join('、')}；下一個參考是整數關卡 ${int(k)}`]); }
+    if (mode !== 'down' && res.length) rows.push(['上方壓力', res.map(lvTxt).join('、'), '', '帶量突破才算轉強']);
+    // 建議
+    const v = est ?? M.ratio, fs = cm?.foreignValueEst / 1e8, s1 = sup[0] ? `${sup[0].label} ${int(sup[0].p)}` : broken.length && isNum(price) ? `整數關卡 ${int(Math.floor(price / 1000) * 1000 >= price ? Math.floor(price / 1000) * 1000 - 1000 : Math.floor(price / 1000) * 1000)}` : '下方支撐', r1 = res[0] ? `${res[0].label} ${int(res[0].p)}` : '上方壓力';
+    let adv;
+    if (mode === 'down') {
+      if (isNum(v) && v < 140) adv = `融資斷頭賣壓可能還沒結束：先不要急著接，等維持率回到 150% 以上、或融資大幅減少後再分批進場；持股跌破停損照紀律出場。`;
+      else if (isNum(v) && v < 150) adv = `維持率偏低，再跌容易引發追繳：不加槓桿、不攤平，觀察 ${s1} 是否守住。`;
+      else adv = `${isNum(v) ? '籌碼還算健康，' : ''}屬於回檔：觀察 ${s1} 是否守住，守住再分批布局；跌破就降低持股。`;
+      if (fs < -200) adv += `外資賣超 ${int(-fs)} 億，反彈要先看外資是否回補。`;
+    } else if (mode === 'up') {
+      const upPct = brSame ? br.adv / ((br.adv || 0) + (br.dec || 0) + (br.unch || 0)) * 100 : null, hot = (isNum(rsi) && rsi > 75) || (isNum(M.chg5) && M.balance && M.chg5 / M.balance * 100 > 3);
+      if (ol.state === 'down') adv = `空頭格局中的反彈：壓力在 ${r1}，接近壓力分批減碼，不追高。`;
+      else if (hot) adv = `短線過熱、散戶追價：持股可以續抱但分批停利，不追高。`;
+      else if (isNum(upPct) && upPct < 45) adv = `權值股撐盤、多數股票沒跟：不宜追高中小型股，以權值股為主。`;
+      else adv = `${fs > 0 ? '外資買超、' : ''}上漲有廣度：持股續抱，突破 ${r1} 再考慮加碼。`;
+    } else adv = `指數變動不大：維持原本部位，留意 ${s1} 與 ${r1}。`;
+    const title = mode === 'down' ? '下跌日：先看融資與賣壓' : mode === 'up' ? '上漲日：看量能廣度與壓力' : '盤整：看支撐與壓力';
+    return `<div class="fc fc-${mode}" data-dk="focus"><div class="fc-h"><b>今日重點</b><span class="fc-m">${esc(title)}</span><span class="small muted">加權 <b class="mono ${cls(chg)}">${pp(chg)}</b>・${esc(when)}</span></div>
+      <p class="fc-a"><span class="fc-t">建議</span>${esc(adv)}</p>
+      <div class="fc-g">${rows.map(([l, v, c, n, key]) => `<div class="fc-i ${c ? 'fc-' + c : ''}${key ? ' fc-key' : ''}"><span>${esc(l)}</span><b class="mono">${esc(v)}</b>${n ? `<em>${esc(n)}</em>` : ''}</div>`).join('')}</div></div>`;
+  }
   function dashLiveHtml() {
     const s = S.snap, Q = dashQuotes(), live = nasLive(), fresh = live && Date.now() - LIVE.at < 60000;
     const status = live ? (liveAllClosed() ? `<span class="dot"></span>休市中・最後資料 ${hms(LIVE.data.at)}，開盤後每 5 秒自動更新` : fresh ? `<span class="dot on"></span>即時・${hms(LIVE.data.at)} 更新（${agoHtml(LIVE.data.at)}）・每 5 秒` : `<span class="dot warn"></span>NAS 資料停在 ${hms(LIVE.data.at)}`)
@@ -2695,7 +2755,9 @@ ${footer()}`;
     const heatTabs = `<div class="hm-tabs">${seg('hmSet', hset, [['all', '全部'], ['mine', `我的 ${mineK.length}`], ['wl', '觀察清單'], ['hot', '熱門股'], ['theme', '題材股']])}</div>`;
     const tile = (r, gi) => `<a class="hm-t" data-dk="h-${hset}-${gi}-${esc(r.k)}" href="#/s/${encodeURIComponent(r.k)}" style="background:${heatBg(r.q.c, r.m === 'tw' ? 5 : 3)}"><span class="hm-n">${r.h ? '<i class="hm-own" title="持股">持</i>' : r.st ? '<i class="hm-star" title="追蹤">★</i>' : ''}${esc(r.name)}</span><b class="mono">${pct(r.q.c)}</b><span class="hm-p mono">${px(r.q.p)}</span>${r.tag ? `<span class="hm-x">${esc(r.tag)}</span>` : ''}</a>`;
     const heat = heatTabs + (groups.map((g, gi) => `<div class="hm-g"><div class="hm-h"><b>${esc(g.title)}</b><span class="small muted">${g.raw ? g.sub : esc(g.sub)}</span></div><div class="hm">${g.rows.map(r => tile(r, gi)).join('')}</div></div>`).join('') || `<p class="empty">${esc(note || '沒有資料')}</p>`);
+    let focus = ''; try { focus = focusHtml(); } catch (e) { console.error(e); }
     return `<div class="ds-h"><h2 id="ds-h">即時儀表板</h2><span class="ds-st small muted" data-dk="st">${status}</span></div>
+      ${focus}
       <div class="dk-grid">${tiles}</div>
       ${kp.length ? `<div class="dm-grid">${kp.join('')}</div>` : ''}
       <div class="ds-row">${chart}<div class="hm-w">${heat}</div></div>`;
@@ -2778,6 +2840,11 @@ ${footer()}`;
         const h = fu.hist.slice(-rng), v = { name: '外資台指期淨部位（口）', col: 'var(--acc)', v: h.map(x => x.net), w: 2 };
         const ch5 = fu.chg5;
         out.push(chCard('ch-fu', '外資期貨部位', `外資${fu.net < 0 ? '淨空單' : '淨多單'} ${int(Math.abs(fu.net))} 口${isNum(ch5) ? `，5 天內${(fu.net < 0) === (ch5 < 0) ? '增加' : '減少'} ${int(Math.abs(ch5))} 口` : ''}${fu.net < 0 && ch5 > 0 ? '（空單回補）' : fu.net < 0 && ch5 < 0 ? '（持續加空）' : ''}${cm && isNum(cm.foreignValueEst) ? `；現貨${cm.foreignValueEst > 0 ? '買超' : '賣超'}約 ${int(Math.abs(cm.foreignValueEst) / 1e8)} 億` : ''}`, lineChart('fu', h.map(x => x.date), [v], { fmt: int, kind: 'int' }), d10(fu.date)));
+      }
+      const mh = (s.health?.tw?.margin?.hist || []).filter(x => x.ratio > 0).slice(-rng);
+      if (mh.length >= 3) {
+        const M = s.health.tw.margin, v = { name: '融資維持率', col: '#D9468F', v: mh.map(x => x.ratio), w: 2 };
+        out.push(chCard('ch-mr', '大盤融資維持率', `目前 ${fix(M.ratio, 1)}%${M.ratio < 140 ? '，接近 130% 追繳線，斷頭賣壓風險高' : M.ratio < 150 ? '，偏低，再跌容易引發追繳' : M.ratio < 166 ? '，正常偏低' : '，健康'}`, lineChart('mr', mh.map(x => x.date), [v], { fmt: v => fix(v, 0) + '%', refs: [{ y: 130, label: '130% 追繳' }, { y: 166, label: '166% 健康' }] }), '上市・每日收盤後'));
       }
       if (pc?.hist?.length) {
         const h = pc.hist.slice(-rng), v = { name: '未平倉 P/C 比', col: '#8B5CF6', v: h.map(x => x.oi), w: 2 };
