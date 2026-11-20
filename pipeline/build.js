@@ -102,6 +102,12 @@ function buildHealth({ heavy, daily, vix, tsy, sectorsList }) {
   if (mg.length) {
     const l = lastOf(mg), p5 = mg[mg.length - 6], p20 = mg[mg.length - 21];
     H.tw.margin = { date: l.date, balance: l.balance, chg: mg.length > 1 ? l.balance - mg[mg.length - 2].balance : null, chg5: p5 ? l.balance - p5.balance : null, chg20: p20 ? l.balance - p20.balance : null, hist: mg.slice(-40) };
+    // 融資維持率（最新一筆有算出來的）
+    const rr = mg.filter(x => x.ratio > 0), lr = rr[rr.length - 1], pr1 = rr[rr.length - 2];
+    if (lr) { H.tw.margin.ratio = lr.ratio; H.tw.margin.ratioDate = lr.date; H.tw.margin.ratioChg = pr1 ? r2(lr.ratio - pr1.ratio, 1) : null; H.tw.margin.ratioMin = r2(Math.min(...rr.slice(-120).map(x => x.ratio)), 1);
+      if (lr.ratio < 140) sig(3, 'neg', `大盤融資維持率 ${lr.ratio}%，低於 140%，接近追繳線（130%），斷頭賣壓風險升高`);
+      else if (lr.ratio < 150) sig(2, 'neg', `大盤融資維持率 ${lr.ratio}%，偏低（150% 以下），留意融資追繳`);
+    }
     const tw = daily['^TWII'];
     if (p5 && tw && (l.balance / p5.balance - 1) * 100 > 3 && TA.ret(tw.bars.close, 5) < 0) sig(2, 'neg', `融資 5 日增加 ${(l.balance - p5.balance).toFixed(0)} 億但指數下跌，散戶逢低承接、籌碼轉亂`);
   }
@@ -219,9 +225,26 @@ async function main() {
       if (v && !v.error && v.pe) { push('valHist', { date: lastDate, pe: r2(v.pe), dy: r2(v.dy), pb: r2(v.pb), n: v.n }, 1500); heavy.tw.valPer = v.per; status.valuation = 'ok'; } else status.valuation = 'fail: ' + (v?.error || '無資料');
     } catch (e) { status.valuation = 'fail: ' + e.message; }
     try {
-      const m = await Market.twMargin(lastDate);
-      if (m) { push('marginHist', { date: lastDate, balance: r2(m.balance, 1) }); if (m.prev != null && !(heavy.tw.marginHist.length > 1)) heavy.tw.marginHist.unshift({ date: TWSE.prevTradingDate(lastDate), balance: r2(m.prev, 1) }); status.margin = 'ok'; } else status.margin = 'fail';
+      // 當天收盤價（維持率要用）：融資資料的日期在歷史收盤表裡才算
+      const TH = heavy.tw.hist, di = TH?.dates ? TH.dates.indexOf(lastDate) : -1;
+      const closes = di >= 0 ? Object.fromEntries(Object.entries(TH.c || {}).map(([id, a]) => [id, a[di]]).filter(([, v]) => v > 0)) : null;
+      const m = await Market.twMargin(lastDate, closes);
+      if (m) { push('marginHist', { date: lastDate, balance: r2(m.balance, 1), ...(m.ratio ? { ratio: m.ratio } : {}) }); if (!m.ratio) status.marginRatio = closes ? '算不出來' : '沒有當天收盤價'; if (m.prev != null && !(heavy.tw.marginHist.length > 1)) heavy.tw.marginHist.unshift({ date: TWSE.prevTradingDate(lastDate), balance: r2(m.prev, 1) }); status.margin = 'ok'; } else status.margin = 'fail';
     } catch (e) { status.margin = 'fail: ' + e.message; }
+    // 融資維持率補過去 20 個交易日（每次最多 5 天，避免證交所擋）
+    try {
+      const TH = heavy.tw.hist; let done = 0;
+      for (const d of (TH?.dates || []).slice(-21, -1).reverse()) {
+        if (done >= 5) break;
+        const ex = (heavy.tw.marginHist || []).find(x => x.date === d); if (ex?.ratio || ex?.noRatio) continue;
+        const di = TH.dates.indexOf(d), closes = Object.fromEntries(Object.entries(TH.c || {}).map(([id, a]) => [id, a[di]]).filter(([, v]) => v > 0));
+        await new Promise(r => setTimeout(r, 1500)); done++;
+        const m = await Market.twMargin(d, closes).catch(() => null);
+        if (m?.ratio) push('marginHist', { ...(ex || {}), date: d, balance: ex?.balance ?? r2(m.balance, 1), ratio: m.ratio });
+        else if (ex) ex.noRatio = 1;
+      }
+      if (done) status.marginBackfill = `補 ${done} 天`;
+    } catch (e) { status.marginBackfill = 'fail: ' + e.message; }
     // 集保大戶持股（每週五更新；超過 6 天才重抓）
     if (!heavy.tw.tdccTs || Date.now() - heavy.tw.tdccTs > 6 * 86400000) {
       try {

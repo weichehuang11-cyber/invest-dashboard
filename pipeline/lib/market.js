@@ -200,16 +200,35 @@ async function twValuation() {
   return { pe: median(pe), dy: median(st.map(r => num(r[kDY])).filter(v => v > 0)), pb: median(st.map(r => num(r[kPB])).filter(v => v > 0)), n: pe.length, per };
 }
 /** 信用交易統計（全市場）：融資金額今日餘額（億元） */
-async function twMargin(date) {
-  const raw = await get(`https://www.twse.com.tw/exchangeReport/MI_MARGN?response=json&date=${date}&selectType=MS`, { timeout: 20000 });
+/**
+ * 上市融資：融資金額（億）與大盤融資維持率
+ *   維持率 ≒ Σ（每檔融資餘額張數 × 1000 × 收盤價）÷ 融資金額
+ *   closes：代號 → 當天收盤價（沒給就只回傳融資金額）
+ */
+async function twMargin(date, closes = null) {
+  const raw = await get(`https://www.twse.com.tw/exchangeReport/MI_MARGN?response=json&date=${date}&selectType=ALL`, { timeout: 30000 });
   if (!raw || raw.stat !== 'OK') return null;
-  const tbl = (raw.tables || []).find(t => Array.isArray(t.data) && t.data.some(r => /融資金額/.test(String(r[0])))) || (raw.creditList ? { fields: raw.creditFields, data: raw.creditList } : null);
+  const tables = (raw.tables || []).filter(t => Array.isArray(t.data));
+  if (raw.creditList) tables.push({ fields: raw.creditFields, data: raw.creditList });
+  if (raw.fields && raw.data) tables.push({ fields: raw.fields, data: raw.data });
+  const tbl = tables.find(t => t.data.some(r => /融資金額/.test(String(r[0]))));
   if (!tbl) return null;
   const f = tbl.fields || [];
   const iT = col(f, /今日餘額/), iY = col(f, /前日餘額/);
   const row = tbl.data.find(r => /融資金額/.test(String(r[0])));
   if (!row || iT < 0) return null;
-  return { date, balance: num(row[iT]) / 1e5, prev: iY >= 0 ? num(row[iY]) / 1e5 : null };   // 仟元 → 億元
+  const amt = num(row[iT]) * 1000;   // 仟元 → 元
+  const out = { date, balance: num(row[iT]) / 1e5, prev: iY >= 0 ? num(row[iY]) / 1e5 : null, ratio: null, n: 0 };   // 億元
+  // 個股融資餘額（第一個「今日餘額」欄是融資，第二個是融券）
+  const per = tables.find(t => t !== tbl && (t.fields || []).some(x => /代號/.test(String(x))) && (t.fields || []).some(x => /今日餘額/.test(String(x))));
+  if (per && closes && amt > 0) {
+    const pf = per.fields, iId = col(pf, /代號/), iB = col(pf, /今日餘額/);
+    let mv = 0, n = 0;
+    for (const r of per.data) { const id = String(r[iId] || '').trim(), sh = num(r[iB]), c = closes[id]; if (sh > 0 && c > 0) { mv += sh * 1000 * c; n++; } }
+    const ratio = mv / amt * 100;
+    if (n > 300 && ratio > 100 && ratio < 400) { out.ratio = +ratio.toFixed(1); out.n = n; }
+  }
+  return out;
 }
 
 // ── 櫃買中心（上櫃）每日收盤 ─────────────────────────────────
