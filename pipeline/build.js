@@ -192,18 +192,39 @@ async function main() {
       heavy.tw.chipMarket = { date: lc.date, foreignValueEst: fv, topForeignBuy: top('foreignValue', 1), topForeignSell: top('foreignValue', -1), topTrustBuy: top('trustValue', 1) };
       heavy.tw.t86 = Object.fromEntries(wl.tw.map(id => [id, lc.chip[id] || null]));
       status.t86 = lc.date;
+      // 補抓前幾個交易日漏掉的外資買賣超金額（只看歷史收盤表裡的交易日，最多 3 天）
+      try {
+        const have = new Set(heavy.tw.foreignHistory.map(x => x.date));
+        const miss = (heavy.tw.hist?.dates || []).filter(d => d < lc.date).slice(-5).filter(d => !have.has(d)).slice(-3);
+        let got = 0;
+        for (const d of miss) {
+          await new Promise(r => setTimeout(r, 1500));
+          const ch = await TWSE.t86(d).catch(() => null);
+          if (!ch || Object.keys(ch).length < 100) continue;
+          await new Promise(r => setTimeout(r, 1500));
+          const px = await TWSE.closes(d).catch(() => null);
+          if (!px) continue;
+          let v = 0; for (const [id, c] of Object.entries(ch)) { const p = px[id]?.close; if (p) v += c.foreign * p; }
+          heavy.tw.foreignHistory.push({ date: d, valueEst: v }); got++;
+        }
+        if (got) { heavy.tw.foreignHistory = heavy.tw.foreignHistory.sort((a, b) => a.date.localeCompare(b.date)).slice(-30); status.t86Backfill = `補 ${got} 天`; }
+      } catch (e) { status.t86Backfill = 'fail: ' + e.message; }
     } else status.t86 = 'fail';
     if (TOKEN) {
       heavy.tw.finmind = heavy.tw.finmind || {};
+      let mgOk = 0, mgErr = null;
       await mapSeries(wl.tw, async id => {
         const [hist, rev, mg] = await Promise.all([
           FinMind.institutional(id, TOKEN).catch(() => null),
           FinMind.revenueYoY(id, TOKEN).catch(() => null),
-          FinMind.margin(id, TOKEN).catch(() => null),
+          FinMind.margin(id, TOKEN).catch(e => { mgErr = mgErr || e.message; return null; }),
         ]);
+        if (mg?.length) mgOk++;
         if (hist || rev || mg) heavy.tw.finmind[id] = { hist: hist || heavy.tw.finmind[id]?.hist || [], rev, margin: mg || [] };
       }, 400);
       status.finmind = `${Object.keys(heavy.tw.finmind).length}/${wl.tw.length}`;
+      // 個股融資以前失敗時錯誤被吞掉；現在記下來，抓不到時後面改用證交所 MI_MARGN 的個股資料
+      status.finmindMargin = mgOk ? `${mgOk}/${wl.tw.length}` : 'fail: ' + (mgErr || '沒有資料');
     } else status.finmind = 'no-token';
     // 市場寬度、期貨選擇權、估值、融資（失敗不影響其他資料）
     const lastDate = status.t86 && status.t86 !== 'fail' ? status.t86 : TWSE.lastTradingDate();
@@ -211,6 +232,10 @@ async function main() {
       heavy.tw.hist = await Market.updateTwHistory(heavy.tw.hist, lastDate, { maxBackfill: heavy.tw.hist ? 12 : 25, keep: 130, log });
       status.breadth = `${heavy.tw.hist.dates.length} 日`;
     } catch (e) { status.breadth = 'fail: ' + e.message; }
+    const saveMarginStock = (d, stocks) => {   // 觀察清單個股融資餘額歷史（日期 YYYY-MM-DD，格式同 FinMind）
+      const iso = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`, ms = heavy.tw.marginStock = heavy.tw.marginStock || {};
+      for (const id of wl.tw) { const o = stocks[id]; if (!o) continue; ms[id] = [...(ms[id] || []).filter(x => x.date !== iso), { date: iso, margin: o.margin, short: o.short }].sort((a, b) => a.date.localeCompare(b.date)).slice(-30); }
+    };
     const push = (k, row, keep = 120) => { const a = (heavy.tw[k] || []).filter(x => x.date !== row.date); a.push(row); heavy.tw[k] = a.sort((x, y) => x.date.localeCompare(y.date)).slice(-keep); };
     try {
       const fx = await Market.taifexForeignTX(lastDate);
@@ -222,15 +247,42 @@ async function main() {
     } catch (e) { status.putcall = 'fail: ' + e.message; }
     try {
       const v = await Market.twValuation();
-      if (v && !v.error && v.pe) { push('valHist', { date: lastDate, pe: r2(v.pe), dy: r2(v.dy), pb: r2(v.pb), n: v.n }, 1500); heavy.tw.valPer = v.per; status.valuation = 'ok'; } else status.valuation = 'fail: ' + (v?.error || '無資料');
+      // 證交所 BWIBBU_ALL 收盤後要一段時間才更新：資料日期不是今天就不能記成今天（11/20 曾抄到 11/19 的數字）
+      const vSame = (a, b) => a && b && a.pe === b.pe && a.dy === b.dy && a.pb === b.pb && a.n === b.n;
+      heavy.tw.valHist = (heavy.tw.valHist || []).filter((x, i, a) => i === 0 || !vSame(x, a[i - 1]));   // 清掉以前抄錯的重複日
+      if (v && !v.error && v.pe) {
+        const row = { pe: r2(v.pe), dy: r2(v.dy), pb: r2(v.pb), n: v.n }, prevV = heavy.tw.valHist.filter(x => x.date !== lastDate).slice(-1)[0];
+        if (v.date && v.date !== lastDate) {
+          if (v.date < lastDate && !heavy.tw.valHist.some(x => x.date === v.date)) push('valHist', { date: v.date, ...row }, 1500);
+          status.valuation = `stale：來源是 ${v.date}`;
+        } else if (!v.date && vSame(row, prevV)) status.valuation = `stale：和 ${prevV.date} 完全相同`;
+        else { push('valHist', { date: lastDate, ...row }, 1500); heavy.tw.valPer = v.per; status.valuation = 'ok'; }
+      } else status.valuation = 'fail: ' + (v?.error || '無資料');
     } catch (e) { status.valuation = 'fail: ' + e.message; }
     try {
       // 當天收盤價（維持率要用）：融資資料的日期在歷史收盤表裡才算
       const TH = heavy.tw.hist, di = TH?.dates ? TH.dates.indexOf(lastDate) : -1;
       const closes = di >= 0 ? Object.fromEntries(Object.entries(TH.c || {}).map(([id, a]) => [id, a[di]]).filter(([, v]) => v > 0)) : null;
       const m = await Market.twMargin(lastDate, closes);
+      if (m?.stocks) saveMarginStock(lastDate, m.stocks);
       if (m) { push('marginHist', { date: lastDate, balance: r2(m.balance, 1), ...(m.ratio ? { ratio: m.ratio } : {}) }); if (!m.ratio) status.marginRatio = closes ? '算不出來' : '沒有當天收盤價'; if (m.prev != null && !(heavy.tw.marginHist.length > 1)) heavy.tw.marginHist.unshift({ date: TWSE.prevTradingDate(lastDate), balance: r2(m.prev, 1) }); status.margin = 'ok'; } else status.margin = 'fail';
     } catch (e) { status.margin = 'fail: ' + e.message; }
+    // FinMind 個股融資抓不到：補齊最近 6 個交易日的證交所個股融資，再填回 finmind[id].margin（張；上櫃股沒有）
+    if (TOKEN && String(status.finmindMargin || '').startsWith('fail')) {
+      try {
+        const ms = heavy.tw.marginStock || {}, ref = wl.tw.find(id => ms[id]?.length) || wl.tw[0];
+        const have = new Set((ms[ref] || []).map(x => x.date.replace(/-/g, '')));
+        let got = 0;
+        for (const d of (heavy.tw.hist?.dates || []).slice(-6).filter(d => !have.has(d))) {
+          await new Promise(r => setTimeout(r, 1500));
+          const m = await Market.twMargin(d).catch(() => null);
+          if (m?.stocks) { saveMarginStock(d, m.stocks); got++; }
+        }
+        let n = 0;
+        for (const id of wl.tw) { const a = heavy.tw.marginStock?.[id]; if (a?.length && heavy.tw.finmind?.[id]) { heavy.tw.finmind[id].margin = a; n++; } }
+        status.finmindMargin += `；改用證交所 ${n} 檔${got ? `（補 ${got} 天）` : ''}`;
+      } catch (e) { status.finmindMargin += '；證交所備援失敗：' + e.message; }
+    }
     // 融資維持率補過去 20 個交易日（每次最多 5 天，避免證交所擋）
     try {
       const TH = heavy.tw.hist; let done = 0;
@@ -978,7 +1030,9 @@ async function main() {
     // fullAt 是排程用的「台北日期今天已完成」標記（不能改）；tradeDate 另外記資料實際對應的交易日，方便檢查有沒有斷更
     const twLast = (heavy.tw.hist?.dates || []).slice(-1)[0];
     const tradeDate = { ...(last.tradeDate || {}), ...(twLast ? { tw: `${twLast.slice(0, 4)}-${twLast.slice(4, 6)}-${twLast.slice(6, 8)}` } : {}), ...((heavy.us.valHist || []).length ? { us: heavy.us.valHist[heavy.us.valHist.length - 1].date } : {}) };
-    writeJSON(path.join(STATE, 'last.json'), { verdict: { level: verdict.level, at: nowIso }, signals: { ...(last.signals || {}), ...signals }, at: nowIso, status, fullAt, tradeDate });
+    // status 只有這一次的結果；statusBy 分開保存台股／美股最近一次完整更新的狀態，互相不覆蓋
+    const statusBy = { ...(last.statusBy || {}), ...(fullTW ? { tw: { at: nowIso, ...status } } : {}), ...(fullUS ? { us: { at: nowIso, ...status } } : {}) };
+    writeJSON(path.join(STATE, 'last.json'), { verdict: { level: verdict.level, at: nowIso }, signals: { ...(last.signals || {}), ...signals }, at: nowIso, status, statusBy, fullAt, tradeDate });
     writeJSON(path.join(STATE, 'heavy.json'), heavy);
     writeJSON(path.join(STATE, 'conviction.json'), { at: nowIso, conviction, high: Object.values(items).filter(i => i.conv?.high?.length).map(i => ({ key: i.key, bucket: i.conv.bucket, score: i.conv.score, high: i.conv.high })) });
     writeJSON(path.join(STATE, 'predictions.json'), predictions);

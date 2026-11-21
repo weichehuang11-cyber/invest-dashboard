@@ -23,3 +23,7 @@ jobs:
         run: node pipeline/lib/twdata.js
       - name: 融資維持率
         run: node pipeline/test/margin-live.js
+      - name: FinMind 個股融資
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: node pipeline/test/finmind-margin-live.js
