@@ -130,12 +130,28 @@ setInterval(() => {
     const failed = lines(first).filter(l => l.startsWith('⚠') || (l.startsWith('·') && /手動修/.test(l)));
     const left = again == null ? before : lines(again).filter(l => l.startsWith('✕'));
     console.log(new Date().toISOString(), 'NAS 每週體檢', `發現 ${before.length} 項、修好 ${fixed.length} 項、剩 ${left.length} 項`);
+    hlog.checks.push({ at: new Date().toISOString(), found: before.length, fixed, left, failed }); hlog.checks = hlog.checks.slice(-12); saveH();
     if (!before.length) return;
     const title = left.length ? `NAS 每週體檢：修好 ${fixed.length} 項，${left.length} 項要手動處理` : `NAS 每週體檢：${fixed.length} 項問題已自動修好`;
     const body = [...(fixed.length ? ['已自動修正：', ...fixed] : []), ...(left.length ? ['還需要處理：', ...left.slice(0, 6), ...failed.slice(0, 3), '→ SSH 到 NAS 執行 bash nas/check.sh 看修正指令'] : [])].join('\n');
     ntfy(title, body, left.length ? 4 : 3);
   });
 }, 60000);
+
+// ── 健康紀錄：每小時一筆（保留 7 天）＋每週體檢結果（保留 12 次），網站「系統」頁讀 /health.json ──
+const HLOG = path.join(BASE, 'health-log.json');
+let hlog = { samples: [], checks: [] }; try { hlog = { ...hlog, ...JSON.parse(fs.readFileSync(HLOG, 'utf8')) }; } catch (_) {}
+const saveH = () => { try { fs.writeFileSync(HLOG, JSON.stringify(hlog)); } catch (_) {} };
+function healthNow() {
+  let L = {}; try { L = JSON.parse(Live.snapshotJSON()); } catch (_) {}
+  const it = Object.values(L.items || {}), sAt = (() => { try { return fs.statSync(path.join(SITE, 'data', 'snapshot.json')).mtimeMs; } catch (_) { return 0; } })();
+  let free = null; try { const f = fs.statfsSync(BASE); free = +(f.bavail * f.bsize / 1e9).toFixed(1); } catch (_) {}
+  return { at: new Date().toISOString(), liveOk: it.filter(x => x.ok !== false).length, liveN: it.length, liveAge: L.at ? Math.round((Date.now() - Date.parse(L.at)) / 1000) : null,
+    stocks: Object.keys(L.stocks || {}).length, backupAge: sAt ? Math.round((Date.now() - sAt) / 60000) : null, backupOk: state.last ? state.last.ok : null,
+    rss: Math.round(process.memoryUsage().rss / 1e6), up: Math.round(process.uptime() / 60), free, liveReq };
+}
+function sampleHealth() { hlog.samples.push(healthNow()); hlog.samples = hlog.samples.slice(-168); saveH(); }
+setTimeout(sampleHealth, 120000); setInterval(sampleHealth, 3600000);
 
 // 程式更新（git pull）後自動重新啟動，讓 pm2 載入新版本（備援更新進行中就等它跑完）
 const SELF = [__filename, path.join(__dirname, 'livefeed.js')], mtime0 = SELF.map(f => { try { return fs.statSync(f).mtimeMs; } catch (_) { return 0; } });
@@ -149,6 +165,7 @@ http.createServer((req, res) => {
   const url = decodeURIComponent((req.url || '/').split('?')[0]);
   if (url === '/' ) { res.writeHead(302, { Location: '/backup/' }); return res.end(); }
   if (url === '/live.json' || url === '/backup/live.json') { liveReq++; res.writeHead(200, { 'Content-Type': TYPES['.json'], 'Cache-Control': 'no-store' }); return res.end(Live.snapshotJSON()); }
+  if (url === '/health.json') { res.writeHead(200, { 'Content-Type': TYPES['.json'], 'Cache-Control': 'no-store' }); return res.end(JSON.stringify({ now: healthNow(), samples: hlog.samples, checks: hlog.checks, last: state.last, running: state.running, watch: state.watch, history: state.history.slice(0, 20) })); }
   if (url === '/backup/status.json' || url === '/health') { res.writeHead(200, { 'Content-Type': TYPES['.json'], 'Cache-Control': 'no-store' }); return res.end(JSON.stringify({ status: 'ok', ...state })); }
   // 歷史封存：盤中每次更新的快照（網站「歷史快照」頁可選時間查詢）
   if (url === '/backup/archive/index.json') {

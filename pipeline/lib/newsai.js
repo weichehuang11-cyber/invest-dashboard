@@ -52,7 +52,16 @@ async function summarize(items, chat, cache, { max = 60, batch = 20, log = () =>
     const user = `逐則整理以下新聞（格式：編號｜媒體｜標題｜補充內容）。補充內容越多，摘要要越具體（寫出數字、公司、原因）；只有標題時就簡短說明，不要硬湊：\n${list}\n\n輸出 JSON：{"items":[${FORMAT}]}，每一則都要有。`;
     try {
       const j = parseJ(await chat([{ role: 'system', content: SYS }, { role: 'user', content: user }], { json: true, timeout: 120000, lite: true }));
-      for (const r of j.items || []) { const id = String(r.id || '').trim(); if (part.some(x => x.id === id)) { save(cache, id, r, { src: part.find(x => x.id === id).body ? 'body' : 'title' }); added++; } }
+      // AI 偶爾把陣列放在別的欄位、編號前後多了符號或序號：寬鬆比對
+      const arr = Array.isArray(j) ? j : j.items || j.news || j.results || Object.values(j).find(Array.isArray) || [];
+      let hit = 0;
+      arr.forEach((r, k) => {
+        const raw = String(r.id ?? r['編號'] ?? '').replace(/[#＃\s｜|]/g, '');
+        const x = part.find(p => p.id === raw) || part.find(p => raw && (raw.includes(p.id) || p.id.includes(raw)) && raw.length >= 4) || (arr.length === part.length && !raw ? part[k] : null);
+        if (x) { save(cache, x.id, r, { src: x.body ? 'body' : 'title' }); added++; hit++; }
+      });
+      if (!hit && arr.length) errs.push(`回覆 ${arr.length} 則但編號都對不上（例：${String(arr[0]?.id ?? '').slice(0, 20)}）`);
+      else if (!arr.length) errs.push('回覆沒有 items 陣列');
       fails = 0;
     } catch (e) { errs.push(e.message.slice(0, 160)); log('新聞摘要失敗', e.message); if (++fails >= 2) break; }  // 單批失敗就換下一批，連續兩批失敗才停
   }
