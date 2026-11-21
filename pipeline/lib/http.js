@@ -12,7 +12,7 @@ async function get(url, { timeout = 15000, retries = 2, headers = {}, as = 'json
       const res = await fetch(url, { headers: { 'User-Agent': UA, 'Accept': '*/*', ...headers }, signal: ctl.signal });
       clearTimeout(t);
       if (res.status === 429 || res.status >= 500) throw new Error(`HTTP ${res.status}`);
-      if (!res.ok) { const e = new Error(`HTTP ${res.status}`); e.fatal = true; throw e; }
+      if (!res.ok) { const b = (await res.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 160); const e = new Error(`HTTP ${res.status}${b ? ' ' + b : ''}`); e.fatal = true; throw e; }   // 附上回應開頭，看得出 422 等錯誤的原因
       return as === 'text' ? await res.text() : await res.json();
     } catch (e) {
       lastErr = e;

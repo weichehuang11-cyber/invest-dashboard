@@ -47,7 +47,7 @@ async function revenueYoY(id, token) {
 
 /** 融資融券餘額（舊→新）：{date, margin, short} */
 async function margin(id, token, days = 30) {
-  const rows = await dataset('TaiwanStockMarginPurchaseShortsale', id, days, token);
+  const rows = await dataset('TaiwanStockMarginPurchaseShortSale', id, days, token);
   return rows.map(r => ({ date: String(r.date).slice(0, 10), margin: +r.MarginPurchaseTodayBalance || 0, short: +r.ShortSaleTodayBalance || 0 }))
     .sort((a, b) => a.date.localeCompare(b.date));
 }

@@ -1,5 +1,5 @@
 'use strict';
-// 線上測試：FinMind 個股融資融券（TaiwanStockMarginPurchaseShortsale）能不能抓到；抓不到時印出 FinMind 回的錯誤訊息
+// 線上測試：FinMind 個股融資融券（TaiwanStockMarginPurchaseShortSale）能不能抓到；抓不到時印出 FinMind 回的錯誤訊息
 const FinMind = require('../lib/finmind');
 (async () => {
   const note = t => console.log(`::notice title=FinMind 個股融資::${t}`);
