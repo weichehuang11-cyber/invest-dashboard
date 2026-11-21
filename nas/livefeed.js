@@ -19,6 +19,12 @@ const LIST = [
   { key: 'NQ', name: '那斯達克期貨', src: 'yahoo', sym: 'NQ=F', sess: 'fut', every: 15 },
   { key: 'N225', name: '日經 225', src: 'yahoo', sym: '^N225', sess: 'asia', every: 15 },
   { key: 'KS11', name: '韓國綜合', src: 'yahoo', sym: '^KS11', sess: 'asia', every: 15 },
+  // 全球溫度計（網站儀表板最上方一列）：風險偏好、匯率、利率
+  { key: 'VIX', name: 'VIX', src: 'yahoo', sym: '^VIX', sess: 'us', every: 15, grp: 'macro' },
+  { key: 'TNX', name: '美債 10 年', src: 'yahoo', sym: '^TNX', sess: 'fut', every: 30, grp: 'macro' },
+  { key: 'DXY', name: '美元指數', src: 'yahoo', sym: 'DX-Y.NYB', sess: 'fut', every: 30, grp: 'macro' },
+  { key: 'USDTWD', name: '美元兌台幣', src: 'yahoo', sym: 'TWD=X', sess: 'fut', every: 30, grp: 'macro' },
+  { key: 'BTC', name: '比特幣', src: 'yahoo', sym: 'BTC-USD', sess: 'crypto', every: 30, grp: 'macro' },
 ];
 
 function get(url, { method = 'GET', headers = {}, body, timeout = 12000 } = {}) {
@@ -61,6 +67,7 @@ function sessionRaw(s) {
   if (s === 'txf') { const t = local('Asia/Taipei'); if (t.wd >= 1 && t.wd <= 5 && t.hm >= 525 && t.hm <= 830) return 'open'; if ((t.wd >= 1 && t.wd <= 5 && t.hm >= 900) || (t.wd >= 2 && t.wd <= 6 && t.hm <= 305)) return 'night'; return 'closed'; }
   if (s === 'us') { const t = local('America/New_York'); return t.wd >= 1 && t.wd <= 5 && t.hm >= 570 && t.hm <= 965 ? 'open' : 'closed'; }
   if (s === 'fut') { const t = local('America/New_York'); const closed = t.wd === 6 || (t.wd === 0 && t.hm < 1080) || (t.wd === 5 && t.hm >= 1020) || (t.wd >= 1 && t.wd <= 4 && t.hm >= 1020 && t.hm < 1080); return closed ? 'closed' : 'open'; }
+  if (s === 'crypto') return 'open';
   if (s === 'asia') { const t = local('Asia/Tokyo'); return t.wd >= 1 && t.wd <= 5 && t.hm >= 540 && t.hm <= 930 ? 'open' : 'closed'; }
   return 'closed';
 }
@@ -178,9 +185,9 @@ function snapshotJSON() {
   for (const it of LIST) {
     const v = live.items[it.key]; if (!v) continue;
     const pts = (v.spark && v.spark.length ? v.spark : (v.sparkOwn || []).length >= 10 ? v.sparkOwn : v.sparkY?.length ? v.sparkY : v.sparkOwn || []).slice(-300);
-    items[it.key] = { name: v.name, price: v.price, prev: v.prev, chg: v.chg, chgPct: v.chgPct, high: v.high, low: v.low, time: v.time, delay: v.delay || 0, state: v.state, src: v.src, ok: v.ok, err: v.ok ? undefined : v.err, spark: pts.map(p => p[1]), t0: pts[0]?.[0] || null };
+    items[it.key] = { name: v.name, price: v.price, prev: v.prev, chg: v.chg, chgPct: v.chgPct, high: v.high, low: v.low, time: v.time, delay: v.delay || 0, state: v.state, src: v.src, ok: v.ok, grp: it.grp, err: v.ok ? undefined : v.err, spark: pts.map(p => p[1]), t0: pts[0]?.[0] || null };
   }
-  const st = {}; for (const [k, v] of Object.entries(stocks)) st[k] = { price: v.price, prev: v.prev, chgPct: v.chgPct, high: v.high, low: v.low, time: v.time, delay: v.delay || 0, state: v.state };
+  const st = {}; for (const [k, v] of Object.entries(stocks)) st[k] = { price: v.price, prev: v.prev, chgPct: v.chgPct, high: v.high, low: v.low, vol: v.vol, time: v.time, delay: v.delay || 0, state: v.state };
   return JSON.stringify({ at: live.at, order: LIST.map(x => x.key), items, stocks: st, alerts: ALERTS_ON });
 }
 

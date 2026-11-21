@@ -29,7 +29,7 @@
   }
   applyLook(); mqDark?.addEventListener?.('change', applyLook);
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  const APP_VERSION = '1.21.0';
+  const APP_VERSION = '1.22.0';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -746,7 +746,7 @@ ${footer()}`;
   function viewLive() {
     const L = LIVE.data, fresh = L && Date.now() - LIVE.at < 60000;
     let tiles = [];
-    if (L) tiles = (L.order || Object.keys(L.items)).map(k => [k, L.items[k]]).filter(([, v]) => v && isNum(v.price));
+    if (L) tiles = (L.order || Object.keys(L.items)).map(k => [k, L.items[k]]).filter(([, v]) => v && isNum(v.price) && v.grp !== 'macro');
     else if (nasBase() && /^https:\/\//.test(nasBase()) && !LIVE.err) tiles = LV_SKEL.map(([k, n]) => [k, { name: n, price: null, skel: true }]);
     else tiles = LV_FALLBACK.map(([k, ik, n]) => { const x = S.snap.indices?.[ik]; return x && [k, { name: n, price: x.price, chgPct: x.changePct, chg: isNum(x.changePct) ? x.price - x.price / (1 + x.changePct / 100) : null, state: 'snap', time: S.snap.generatedAt }]; }).filter(Boolean);
     const tile = ([k, v]) => {
@@ -1539,7 +1539,7 @@ ${footer()}`;
   }
 
   const TOOLS = [['industry', '🏭', '產業分類', '族群強弱、輪動、成分股'], ['tw', '🇹🇼', '台股籌碼與營收', '法人、借券、大戶、月營收、法說會'], ['compare', '⚖️', '個股並排比較', '2–4 檔放一起比'], ['lab', '🧪', '策略實驗室', '自訂規則回測'], ['ask', '💬', '問問看', '用系統資料回答你的問題'],
-    ['tax', '🧾', '股利與稅費', '股利、健保補充保費、計稅方式'], ['habits', '🪞', '交易行為檢討', '你的習慣與盲點'], ['paper', '🤖', '虛擬跟單', '照訊號用假錢買賣'], ['decide', '🔧', '待你確認', '模型調整建議']];
+    ['tax', '🧾', '股利與稅費', '股利、健保補充保費、計稅方式'], ['habits', '🪞', '交易行為檢討', '你的習慣與盲點'], ['paper', '🤖', '虛擬跟單', '照訊號用假錢買賣'], ['decide', '🔧', '待你確認', '模型調整建議'], ['manual', '📖', '使用手冊', '指標高低代表什麼、怎麼維護']];
   const toolsHub = () => `<section class="card" aria-labelledby="tl-h"><div class="hd"><h2 id="tl-h">工具</h2></div><div class="tools">${TOOLS.map(([r, i, t, d]) => `<a class="tool" href="#/${r}"><span class="ti" aria-hidden="true">${i}</span><b>${t}</b><span class="small muted">${d}</span></a>`).join('')}</div></section>`;
   /** 下單前檢查清單：把系統已有的資訊在買進那一刻整合起來 */
   async function preTradeHtml(key, price, shares) {
@@ -2593,10 +2593,197 @@ ${footer()}`;
   const chCard = (id, title, concl, body, sub = '') => `<section class="card ch" aria-labelledby="${id}"><div class="ch-h"><h2 id="${id}">${esc(title)}</h2>${sub ? `<span class="small muted">${esc(sub)}</span>` : ''}</div>${concl ? `<p class="ch-c">${esc(concl)}</p>` : ''}${body}</section>`;
   const pctile = (a, v) => { const x = a.filter(isNum); return x.length ? Math.round(x.filter(y => y <= v).length / x.length * 100) : null; };
 
+  // ── 使用手冊＋指標手冊（#/manual、#/manual/<段落>）────────────────────────
+  // 表格列：[左欄, 中欄, 右欄]，左欄開頭用 !ok／!warn／!bad 標顏色
+  const mT = (head, rows) => `<table class="mn-t"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map((c, i) => { const m = i === 0 && /^!(ok|warn|bad) /.exec(c); return `<td${m ? ` class="mn-${m[1]}"` : ''}>${m ? c.slice(m[0].length) : c}</td>`; }).join('')}</tr>`).join('')}</tbody></table>`;
+  const mHL = (hi, lo, hiCls = 'bad', loCls = 'ok') => `<div class="mn-hl"><div class="mn-p mn-p-${hiCls}"><b>${hi[0]}</b><span>${hi[1]}</span></div><div class="mn-p mn-p-${loCls}"><b>${lo[0]}</b><span>${lo[1]}</span></div></div>`;
+  const mNote = (t, k = 'tip') => `<p class="mn-n mn-n-${k}">${t}</p>`;
+  const mWhere = t => `<p class="mn-w">在網站哪裡看：${t}</p>`;
+  const MANUAL = [
+    // ── 使用手冊 ──
+    { g: '使用手冊', id: 'arch', t: '系統架構', body: () => `
+      <p>訊號終端由四個部分組成，彼此獨立：任何一個停了，其他照常運作。</p>
+      <div class="mn-arch">
+        <div class="mn-row"><span class="mn-box">GitHub Actions<em>排程抓資料、算訊號、AI 評論</em></span><span class="mn-arr">→</span><span class="mn-box">GitHub Pages 網站<em>你現在看的這個網站</em></span></div>
+        <div class="mn-row"><span class="mn-box mn-box-g">NAS（Synology）<em>每 5 秒即時行情、警示推播、備援網站、每週體檢自動修復</em></span><span class="mn-arr">→</span><span class="mn-box mn-box-g">Tailscale<em>手機在外面也連得到 NAS</em></span></div>
+        <div class="mn-row"><span class="mn-box mn-box-y">你的電腦<em>本機 AI：NPU／CPU 模型預測、本機語言模型評論</em></span><span class="mn-arr">→</span><span class="mn-box mn-box-y">私密 Gist<em>結果上傳後網站讀取</em></span></div>
+        <div class="mn-row"><span class="mn-box mn-box-p">你的瀏覽器<em>持股、日記、追蹤、設定</em></span><span class="mn-arr">⇄</span><span class="mn-box mn-box-p">加密私密 Gist<em>多台裝置同步、NAS 推播讀取</em></span></div>
+      </div>
+      ${mT(['部分', '做什麼', '停了會怎樣'], [
+        ['GitHub', '抓行情、法人籌碼、財報、新聞；算技術面＋模型的綜合分數；雲端 AI 評論；盤前資訊與週報', '網站停在最後一次更新的資料'],
+        ['NAS', '每 5 秒抓指數、期貨、你的持股與追蹤股；價格警示推播；每 30 分鐘備份網站資料', '儀表板改用網站資料（12～15 分鐘一次），警示改由 GitHub 推播'],
+        ['你的電腦', '本機模型預測、本機 AI 評論', '只用雲端 AI 與技術面，網站照常'],
+        ['雲端 AI（Gemini）', '新聞摘要、全球快報、題材整理、查證', '額度用完時改用規則整理，隔天自動恢復'],
+      ])}
+      ${mNote('AI 會自動降級：電腦 AI → 雲端 AI → 規則引擎（純程式計算，永遠可用）。目前哪一個在線，看「系統」頁的「AI 引擎狀態」。')}` },
+    { g: '使用手冊', id: 'pages', t: '各頁怎麼用', body: () => mT(['頁面', '重點'], [
+        ['圖表', '即時儀表板：今日重點（附建議）、全球溫度計、報價磚、盤中走勢、熱力圖（全部／我的／觀察清單／熱門股／題材股）；下方是趨勢圖表'],
+        ['總覽', '大盤推論、指數走勢與漲跌原因、市場環境、觀察清單訊號、產業'],
+        ['新聞', 'AI 全球快報、題材、個股新聞（附多空判讀）'],
+        ['持股', '部位、損益、停損、配置；只存在你的裝置'],
+        ['我的・工具', '交易日記、比較、實驗室、問 AI、稅務、習慣、台股籌碼、本手冊'],
+        ['系統', '各套判斷的準確度、虛擬跟單、待確認的調整建議、資料檢查、AI 引擎與 NAS 健康'],
+        ['設定', 'NAS 網址、推播、安靜時段、同步、外觀'],
+        ['個股頁', '一句話漲跌原因、價格與訊號、技術面、籌碼、財報、新聞；按 ★ 追蹤'],
+      ]) },
+    { g: '使用手冊', id: 'schedule', t: '資料什麼時候更新', body: () => mT(['項目', '時間（台北）'], [
+        ['即時行情（NAS）', '台股與台指期每 5 秒；美股指數 10 秒；期貨、日韓股、全球溫度計 15～30 秒；收盤後每 10 分鐘'],
+        ['網站資料（GitHub）', '台股盤中約每 10～15 分鐘；收盤後 16:40 起完整更新；美股盤中約每 10 分鐘、收盤後 05:15 起完整更新；週末每 3 小時更新新聞'],
+        ['盤前資訊', '台股 08:17；美股 20:57（夏令）／21:57（冬令）；休市日不寄'],
+        ['週報', '週日 20:17'],
+        ['NAS 每週體檢', '週日 20:30，能修的自動修，修完推播結果'],
+        ['融資維持率', '證交所晚間公布融資資料後，隔天的更新才會有前一天的維持率；盤中顯示依跌幅估算的值'],
+      ]) },
+    { g: '使用手冊', id: 'signal', t: '訊號與綜合分數', body: () => `
+      <p>每檔觀察清單的股票有一個 0～100 的<b>綜合分數</b>，由技術面分數和模型分數加權而成（預設各半）。</p>
+      <div class="mn-sig"><div class="mn-sig-b"><b>63 以上</b><span>買進</span><em>多數指標一致偏多</em></div><div class="mn-sig-h"><b>38～62</b><span>持有</span><em>方向不明，維持部位</em></div><div class="mn-sig-s"><b>37 以下</b><span>賣出</span><em>多數指標偏空</em></div></div>
+      ${mT(['規則', '說明'], [
+        ['VIX 調整', 'VIX 高時買進門檻自動提高，恐慌時要求更強的訊號'],
+        ['停損', '買進價 − 2 × ATR（平均真實波幅）'],
+        ['門檻與權重調整', '每週回測後若有更好的參數，會產生「待確認」建議；你按同意才套用，可隨時恢復預設'],
+        ['虛擬跟單', '每次買進訊號模擬買進，追蹤實際績效，用來校正門檻'],
+        ['高信心', '分數離 50 越遠、技術面與模型方向一致，信心越高'],
+      ])}
+      ${mNote('分數接近 50 代表模型不確定，部位要小；分數極端（>75 或 <25）且技術面與模型同向時最可靠。')}` },
+    { g: '使用手冊', id: 'push', t: '推播與信件', body: () => mT(['類型', '內容'], [
+        ['盤前資訊', '隔夜美股、即時訊號、今日判斷、全球新聞、關鍵價位、持股新聞、事件、待確認'],
+        ['週報', '本週大盤走勢、市場環境、部位、產業輪動、籌碼、虛擬跟單、上週預測對答案、下週方向與行事曆'],
+        ['即時警示（NAS）', '指數跌破支撐／突破壓力、持股觸及停損或單日 ±5%、你設定的價格警示'],
+        ['系統警示', '資料過舊、NAS 體檢結果、待確認的調整建議'],
+        ['安靜時段', '預設 23:00～07:00 只推最重要的警示（可在設定調整）'],
+      ]) },
+    { g: '使用手冊', id: 'nas', t: 'NAS 維護與故障排除', body: () => `
+      ${mT(['狀況', '怎麼做'], [
+        ['更新程式', '<code>cd /volume2/homes/invest-dashboard && git pull</code>（伺服器約 1 分鐘內自動重啟）'],
+        ['全面檢查', '<code>bash nas/check.sh</code>；能自動修的加 <code>--fix</code>'],
+        ['服務狀態', '<code>pm2 status</code>、<code>pm2 logs signal-backup --lines 50</code>'],
+        ['重啟服務', '<code>pm2 restart signal-backup</code>'],
+        ['手機連不到 NAS', '確認 Tailscale App 已連線；NAS 上 <code>sudo docker ps</code> 要看到 ts-signal'],
+        ['儀表板顯示「網站資料」', 'NAS 沒回應：先跑 check.sh；設定頁的 NAS 網址要是 https 開頭'],
+        ['推播收不到', '<code>nas/.env</code> 要有 NTFY_TOPIC；讀持股要有 BACKUP_GIST_ID、BACKUP_PASSPHRASE'],
+        ['搬了資料夾', '跑 <code>bash nas/check.sh --fix</code>，會重新登記 pm2 與 Tailscale 容器'],
+      ])}
+      ${mNote('每週日 20:30 NAS 會自己跑一次體檢：更新程式、補套件、補備援資料、重建容器，修完推播「已自動修正」與「還需要處理」。', 'ok')}` },
+    { g: '使用手冊', id: 'privacy', t: '資料與隱私', body: () => `<p>公開網站只有市場資料。持股、日記、追蹤、警示、核准紀錄只存在你的瀏覽器，同步時先加密再存到私密 Gist；NAS 用你設定的密碼解密後才推播。GitHub 的執行紀錄不會印出持股。</p>` },
+    // ── 指標手冊 ──
+    { g: '指標手冊', id: 'index', t: '大盤指數', tags: '加權 櫃買 台指期 標普 那斯達克 費半 費城半導體 夜盤', body: () => `
+      ${mT(['指數', '代表什麼', '怎麼看'], [
+        ['加權指數', '台股上市公司市值加權，台積電占約 4 成', '看權值股是否帶頭；指數漲但多數股票跌＝權值股撐盤'],
+        ['櫃買指數', '上櫃中小型股', '比加權強＝資金偏好中小型股、內資活躍'],
+        ['台指期', '加權指數期貨，夜盤 15:00～隔日 05:00', '夜盤漲跌是隔天台股開盤方向最直接的參考'],
+        ['標普 500', '美國 500 大企業，全球資金風向標', '和 VIX 一起看：標普跌＋VIX 升＝恐慌確認'],
+        ['那斯達克', '科技成長股為主，對利率敏感', '比標普強＝科技主導；殖利率急升時通常比標普弱'],
+        ['費城半導體', '美國半導體股', '和台股電子股連動最高，前一晚費半大跌，台股隔天通常承壓'],
+      ])}
+      ${mHL(['📈 漲', '風險偏好上升，資金進場；看廣度確認是不是普漲'], ['📉 跌', '避險情緒升溫；看融資維持率、跌停家數判斷賣壓是否結束'], 'ok', 'bad')}` },
+    { g: '指標手冊', id: 'vix', t: 'VIX 恐慌指數', tags: 'vix 恐慌 波動率 cboe', body: () => `
+      <p>標普 500 選擇權未來 30 天的隱含波動率，和股市通常反向。</p>
+      ${mT(['VIX', '市場狀態', '解讀'], [
+        ['!bad 40 以上', '極度恐慌', '歷史性拋售，常是中長線的反向買點（2008、2020）'],
+        ['!bad 30～40', '高度恐慌', '大幅修正中，不確定性極高'],
+        ['!warn 20～30', '緊張', '波動擴大，避免重倉'],
+        ['15～20', '中性', '正常略偏高'],
+        ['!ok 12～15', '平靜', '風險偏好正常'],
+        ['!warn 12 以下', '過度自滿', '警覺性低，風險在累積'],
+      ])}
+      ${mNote('網站會依 VIX 自動提高買進門檻；VIX 近月高於三個月期（期限結構倒掛）代表短線恐慌特別嚴重。')}${mWhere('圖表頁全球溫度計、風險溫度計')}` },
+    { g: '指標手冊', id: 'tnx', t: '美債 10 年殖利率', tags: 'tnx 10年 公債 殖利率 利率', body: () => `
+      ${mT(['殖利率', '對股市'], [['!ok 3.5% 以下', '估值友善，成長股受惠'], ['3.5～4%', '中性'], ['!warn 4～4.5%', '高本益比股承壓'], ['!bad 4.5% 以上', '估值壓力大，資金轉向債券']])}
+      ${mHL(['↑ 上升', '通膨或升息預期；科技成長股承壓，金融股受惠'], ['↓ 下降', '降息或避險；成長股估值回升'])}` },
+    { g: '指標手冊', id: 'curve', t: '殖利率曲線（10 年－2 年）', tags: 'yield curve 倒掛 利差 2y10y', body: () => `
+      ${mT(['利差', '解讀'], [['!ok 0.5 以上', '正常陡峭，景氣擴張'], ['!warn 0～0.5', '走平，景氣可能接近高峰'], ['!bad 0 以下（倒掛）', '歷史上多數倒掛後 12～18 個月出現衰退'], ['!warn 從倒掛轉正', '往往是衰退真正開始的時候']])}` },
+    { g: '指標手冊', id: 'dxy', t: '美元指數 DXY', tags: 'dxy 美元 強弱', body: () => `
+      ${mT(['DXY', '影響'], [['!bad 105 以上', '美元強：新興市場、原物料承壓，外資撤出台股'], ['!warn 102～105', '偏強'], ['97～102', '中性'], ['!ok 97 以下', '美元弱：資金回流亞洲，台幣升值']])}` },
+    { g: '指標手冊', id: 'twd', t: '美元兌台幣', tags: 'usdtwd 台幣 匯率 外資', body: () => `
+      ${mHL(['↑ 數字變大（台幣貶值）', '外資匯出、賣超壓力；出口商匯兌收益增加'], ['↓ 數字變小（台幣升值）', '外資匯入，資金行情；出口商匯損'])}
+      ${mNote('單日變動超過 0.3% 就算大，常伴隨外資大買或大賣。')}` },
+    { g: '指標手冊', id: 'btc', t: '比特幣', tags: 'btc bitcoin 加密貨幣 風險偏好', body: () => `<p>近年和科技股高度連動，是風險情緒的放大鏡：漲代表流動性充裕、風險偏好強；跌幅常是股市的 2～3 倍，24 小時交易，週末也能先看出情緒。</p>` },
+    { g: '指標手冊', id: 'hy', t: '高收益債利差', tags: 'hy spread 信用利差 垃圾債', body: () => `
+      <p>垃圾債和公債的殖利率差，反映市場對企業違約的擔心，通常領先股市。</p>
+      ${mT(['位置（近一年百分位）', '解讀'], [['!bad 90 以上', '信用風險快速升溫，股市常跟著修正'], ['!warn 75～90', '偏高'], ['25～75', '中性'], ['!ok 25 以下', '信用環境寬鬆']])}` },
+    { g: '指標手冊', id: 'margin', t: '融資維持率與融資餘額', tags: '融資 維持率 斷頭 追繳 槓桿 散戶', body: () => `
+      <p><b>大盤融資維持率</b>＝所有融資股票的市值 ÷ 融資借款金額。股價跌，維持率就跟著降；個人帳戶低於 130% 會被追繳，補不上就斷頭賣出。</p>
+      ${mT(['維持率', '狀態', '怎麼看'], [
+        ['!ok 166% 以上', '健康', '散戶槓桿壓力小'],
+        ['150～166%', '正常偏低', '還有緩衝'],
+        ['!warn 140～150%', '偏低', '再跌容易引發追繳'],
+        ['!bad 130～140%', '危險', '斷頭賣壓隨時出現，常見急殺'],
+        ['!bad 130% 以下', '追繳線', '大量斷頭；斷頭潮出清後常是波段低點'],
+      ])}
+      ${mT(['融資餘額', '解讀'], [['!ok 下跌時大減', '去槓桿、籌碼清洗，跌勢較容易止穩'], ['!warn 下跌時增加', '散戶逢低攤平，籌碼變亂，反彈容易遇到解套賣壓'], ['!warn 上漲時暴增', '散戶追價，短線過熱'], ['!ok 上漲時減少', '漲勢由法人推動，籌碼乾淨']])}
+      ${mWhere('圖表頁「今日重點」（下跌日放第一格，盤中依跌幅估算）、趨勢圖「大盤融資維持率」')}` },
+    { g: '指標手冊', id: 'foreign', t: '外資現貨與期貨', tags: '外資 法人 期貨 淨空單 淨多單 買超 賣超', body: () => `
+      ${mT(['指標', '解讀'], [
+        ['外資現貨買賣超', '台股最大的資金來源；連續大賣通常伴隨台幣貶值'],
+        ['外資台指期淨部位', '負數＝淨空單（避險或看空）；空單持續增加偏空，空單回補（減少）偏多'],
+        ['投信', '偏中小型股，季底作帳；連續買超的股票常是波段主流'],
+      ])}
+      ${mNote('現貨賣、期貨空單同時增加＝真的看空；現貨賣但期貨空單回補＝可能只是調節。')}` },
+    { g: '指標手冊', id: 'pc', t: '選擇權 Put/Call 比', tags: 'pc put call 選擇權 未平倉', body: () => `
+      <p>台指選擇權<b>未平倉</b>賣權 ÷ 買權（%）。台灣的未平倉 P/C 主要反映法人賣方的布局：</p>
+      ${mT(['P/C', '解讀'], [['!ok 120% 以上', '賣權未平倉多，法人賣出賣權＝在下方建立支撐，盤勢偏多'], ['80～120%', '中性'], ['!warn 80% 以下', '下檔支撐薄弱，盤勢偏空']])}
+      ${mNote('網站同時顯示它在近一年的百分位：低於 20 百分位代表支撐偏弱。')}` },
+    { g: '指標手冊', id: 'breadth', t: '市場廣度', tags: '廣度 漲跌家數 站上月線 漲停 跌停 普漲', body: () => `
+      ${mT(['指標', '解讀'], [
+        ['漲跌家數', '指數漲但下跌家數多＝權值股撐盤，行情不健康'],
+        ['!bad 站上月線比例 20% 以下', '超賣區，跌勢接近尾聲的機率提高'],
+        ['!warn 站上月線比例 80% 以上', '過熱區，追高風險升高'],
+        ['跌停家數 50 家以上', '恐慌性賣壓'],
+      ])}` },
+    { g: '指標手冊', id: 'rsi', t: 'RSI 相對強弱', tags: 'rsi 超買 超賣', body: () => `
+      ${mT(['RSI', '狀態', '參考'], [['!bad 80 以上', '嚴重超買', '注意獲利了結'], ['!warn 70～80', '超買', '追高風險升高'], ['!ok 50～70', '強勢', '健康多頭'], ['30～50', '偏弱', '反彈不一定站得穩'], ['!ok 30 以下', '超賣', '短線反彈機率高，但要等止穩']])}
+      ${mNote('強趨勢中 RSI 可以長時間停在超買或超賣，要搭配均線方向。', 'warn')}` },
+    { g: '指標手冊', id: 'macd', t: 'MACD', tags: 'macd 金叉 死叉 背離 動能', body: () => mT(['訊號', '條件', '解讀'], [['!ok 黃金交叉', 'MACD 線上穿訊號線', '動能轉強'], ['!bad 死亡交叉', 'MACD 線下穿訊號線', '動能轉弱'], ['!warn 背離', '價格創新高但 MACD 沒有', '趨勢可能反轉'], ['零軸上方', 'MACD > 0', '中期多頭']]) },
+    { g: '指標手冊', id: 'ma', t: '均線與支撐壓力', tags: 'ma 均線 月線 季線 半年線 年線 布林 支撐 壓力', body: () => `
+      ${mT(['均線', '天數', '用途'], [['週線', '5 日', '極短線'], ['月線', '20 日', '短線最重要的支撐壓力'], ['季線', '60 日', '中期趨勢'], ['半年線', '120 日', '法人重視的多空分界'], ['!warn 年線', '240 日', '長期趨勢，跌破視為長線轉弱']])}
+      ${mNote('網站的支撐壓力來自均線、布林通道、近期高低點與成交密集區；「今日重點」會用即時價重算距離。')}` },
+    { g: '指標手冊', id: 'atr', t: 'ATR 與停損', tags: 'atr 停損 波動', body: () => `<p>ATR（平均真實波幅）＝近 14 天每天的平均波動幅度。網站的建議停損＝買進價 − 2 × ATR：波動大的股票停損放寬，避免被正常波動洗出場。</p>` },
+    { g: '指標手冊', id: 'score', t: '綜合分數與訊號', tags: 'score 分數 訊號 buy sell hold 買進 賣出 持有 信心', body: () => `
+      ${mT(['訊號', '意義', '參考做法'], [['!ok 買進', '分數 ≥ 買進門檻（預設 63）', '分批建倉，設好停損'], ['持有', '介於兩門檻之間', '維持部位，等更明確的訊號'], ['!bad 賣出', '分數 ≤ 37', '減碼或停損']])}
+      ${mNote('看「系統」頁的準確度：某套判斷近期命中率低於 50%，就少參考它。')}` },
+    { g: '指標手冊', id: 'chip', t: '集保大戶、借券、月營收', tags: '集保 大戶 千張 借券 融券 月營收 yoy', body: () => mT(['指標', '解讀'], [
+        ['集保大戶持股（每週五）', '千張大戶比例上升＝籌碼集中，中長線偏多；散戶比例上升＝籌碼渙散'],
+        ['借券賣出餘額', '大增代表法人放空或避險，股價上漲時可能出現回補買盤'],
+        ['月營收年增率（每月 10 日前）', '連續成長且加速最強；由負轉正常是基本面轉折'],
+      ]) },
+    { g: '指標手冊', id: 'rotation', t: '產業輪動', tags: '產業 族群 輪動 相對強弱 rs', body: () => mT(['訊號', '解讀'], [
+        ['!ok 由弱轉強', '20 日表現從弱於大盤翻成強於大盤，資金開始流入'],
+        ['!ok 廣度急升', '站上月線比例 5 天內從 30% 以下升到 60% 以上，常見於族群起漲'],
+        ['!warn 由強轉弱', '資金開始流出'],
+        ['進入前三強', '近 20 日表現最強的三個產業，通常是當下主流'],
+      ]) },
+    { g: '指標手冊', id: 'hit', t: '命中率與回測', tags: '命中率 準確度 回測 勝率 超額報酬 夏普 回撤', body: () => mT(['指標', '說明', '好的水準'], [
+        ['方向命中率', '5 個交易日後漲跌方向是否正確', '!ok 60% 以上有優勢；50% 以下就是瞎猜'],
+        ['超額報酬', '跟單報酬減大盤報酬', '長期為正才有價值'],
+        ['勝率', '獲利交易次數占比', '55% 以上'],
+        ['最大回撤', '從高點最多跌多少', '越小越好'],
+      ].map(r => r.length === 3 && /^!ok /.test(r[2]) ? [r[0], r[1], r[2].slice(4)] : r)) },
+    { g: '指標手冊', id: 'glossary', t: '術語速查', tags: '術語 縮寫', body: () => mT(['術語', '意思'], [
+        ['ATR', '平均真實波幅，用來設停損'], ['BB 布林通道', '均線 ±2 個標準差'], ['DXY', '美元指數'], ['HY 利差', '高收益債利差'], ['MACD', '趨勢動能指標'],
+        ['P/C', '選擇權賣權／買權比'], ['RSI', '相對強弱指標'], ['TNX', '美債 10 年殖利率'], ['VIX', '恐慌指數'], ['YoY／MoM', '年增率／月增率'],
+        ['去槓桿', '融資減少、借錢買股的人變少'], ['斷頭', '維持率不足被強制賣出'], ['權值股', '市值大、影響指數多的股票'], ['作帳', '投信季底拉抬持股'],
+      ]) },
+  ];
+  function viewManual(anchor = '') {
+    const groups = [...new Set(MANUAL.map(m => m.g))];
+    const nav = groups.map(g => `<div class="mn-ng"><span>${esc(g)}</span>${MANUAL.filter(m => m.g === g).map(m => `<a href="#/manual/${m.id}" data-mn="${m.id}"${m.id === anchor ? ' class="on"' : ''}>${esc(m.t)}</a>`).join('')}</div>`).join('');
+    const secs = MANUAL.map(m => `<section class="card mn-s" id="mn-${m.id}" data-tags="${esc((m.tags || '') + ' ' + m.t)}"><h2>${esc(m.t)}<span class="mn-g">${esc(m.g)}</span></h2>${m.body()}</section>`).join('');
+    return `<div class="mn"><div class="mn-top"><h1>使用手冊</h1><input id="mn-q" type="search" placeholder="搜尋指標或功能，例如 融資、VIX、停損" aria-label="搜尋手冊" autocomplete="off"></div>
+      <div class="mn-l"><nav class="mn-nav" aria-label="手冊目錄">${nav}</nav><div class="mn-c">${secs}<p id="mn-none" class="empty" hidden>找不到相關內容，換個關鍵字試試</p></div></div></div>`;
+  }
+  function bindManual(anchor) {
+    const q = $('#mn-q');
+    q?.addEventListener('input', () => {
+      const t = q.value.trim().toLowerCase(); let n = 0;
+      document.querySelectorAll('.mn-s').forEach(s => { const hit = !t || (s.dataset.tags + ' ' + s.textContent).toLowerCase().includes(t); s.hidden = !hit; if (hit) n++; });
+      $('#mn-none').hidden = n > 0;
+    });
+    if (anchor) { const el = document.getElementById('mn-' + anchor); if (el) { el.classList.add('mn-hi'); requestAnimationFrame(() => el.scrollIntoView({ block: 'start' })); } }
+  }
   // ── 圖表頁上方：即時儀表板（NAS 每 10 秒；沒有 NAS 時用網站資料） ──────────
   const nasLive = () => !!(LIVE.data && nasBase() && /^https:\/\//.test(nasBase()));
   function dashQuotes() {
-    if (nasLive()) return (LIVE.data.order || Object.keys(LIVE.data.items)).map(k => [k, LIVE.data.items[k]]).filter(([, v]) => v && isNum(v.price));
+    if (nasLive()) return (LIVE.data.order || Object.keys(LIVE.data.items)).map(k => [k, LIVE.data.items[k]]).filter(([, v]) => v && isNum(v.price) && v.grp !== 'macro');
     return LV_FALLBACK.map(([k, ik, n]) => { const x = S.snap.indices?.[ik]; return x && [k, { name: n, price: x.price, chgPct: x.changePct, state: 'snap', time: S.snap.generatedAt }]; }).filter(Boolean);
   }
   function stockQuote(it) {
@@ -2615,6 +2802,40 @@ ${footer()}`;
     return mv ? { mv, day, pnl: cost ? mv - cost : null, dayPct: day / (mv - day) * 100, live } : null;
   }
   const heatBg = (c, lim = 5) => { if (!isNum(c) || Math.abs(c) < 0.05) return 'var(--line2)'; const k = Math.round(18 + Math.min(1, Math.abs(c) / lim) * 72); return `color-mix(in srgb, var(--${c > 0 ? 'up' : 'down'}) ${k}%, var(--card))`; };
+  // ── 全球溫度計：風險偏好、匯率、利率一列看完（NAS 即時；沒有 NAS 用網站資料） ───────────
+  const THERMO = [
+    // key, 名稱, Yahoo 代號（網站資料備援）, 手冊錨點, 區間 [lo, hi, 反向?]（溫度條）, 判讀
+    { k: 'VIX', n: 'VIX 恐慌', sym: '^VIX', env: 'vix', man: 'vix', bar: [10, 45], lv: v => v >= 30 ? ['bad', '恐慌'] : v >= 20 ? ['warn', '緊張'] : v >= 15 ? ['', '中性'] : v >= 12 ? ['ok', '平靜'] : ['warn', '過度自滿'], f: v => num(v, 2) },
+    { k: 'TNX', n: '美債 10 年', sym: '^TNX', man: 'tnx', bar: [2.5, 5.5], lv: v => v > 4.5 ? ['bad', '高，壓估值'] : v > 4 ? ['warn', '偏高'] : v < 3.5 ? ['ok', '低，利成長股'] : ['', '中性'], f: v => num(v, 2) + '%', norm: v => (v > 20 ? v / 10 : v) },
+    { k: 'DXY', n: '美元指數', sym: 'DX-Y.NYB', env: 'dxy', man: 'dxy', bar: [92, 110], lv: v => v > 105 ? ['bad', '強，新興市場承壓'] : v > 102 ? ['warn', '偏強'] : v < 97 ? ['ok', '弱，資金回流亞洲'] : ['', '中性'], f: v => num(v, 2) },
+    { k: 'USDTWD', n: '美元兌台幣', sym: 'TWD=X', env: 'twd', man: 'twd', lv: (v, c) => c >= 0.3 ? ['warn', '台幣急貶，外資匯出'] : c > 0.05 ? ['', '台幣貶值'] : c <= -0.3 ? ['ok', '台幣急升，資金流入'] : c < -0.05 ? ['ok', '台幣升值'] : ['', '持平'], f: v => num(v, 3) },
+    { k: 'BTC', n: '比特幣', sym: 'BTC-USD', man: 'btc', lv: (v, c) => c <= -5 ? ['bad', '重挫，避險'] : c <= -2 ? ['warn', '走弱'] : c >= 3 ? ['ok', '風險偏好強'] : ['', '持平'], f: v => int(v) },
+  ];
+  function thermoHtml() {
+    const s = S.snap, Q = Object.fromEntries((S.news?.digest?.quotes || []).map(q => [q.sym, q])), envOf = k => (s.env || []).find(e => e.key === k);
+    const out = [];
+    for (const t of THERMO) {
+      const lv = nasLive() ? LIVE.data.items?.[t.k] : null;
+      let v, c, src;
+      if (lv?.ok !== false && isNum(lv?.price)) { v = lv.price; c = lv.chgPct; src = 'live'; }
+      else if (isNum(Q[t.sym]?.price)) { v = Q[t.sym].price; c = Q[t.sym].chg; src = 'web'; }
+      else if (t.env && isNum(envOf(t.env)?.value)) { v = envOf(t.env).value; c = null; src = 'web'; }
+      if (!isNum(v)) continue;
+      if (t.norm) v = t.norm(v);
+      const [lc, lt] = t.lv(v, c ?? 0);
+      const pos = t.bar ? Math.max(0, Math.min(100, (v - t.bar[0]) / (t.bar[1] - t.bar[0]) * 100)) : null;
+      out.push(`<a class="th ${lc ? 'th-' + lc : ''}" data-dk="t-${t.k}" href="#/manual/${t.man}" title="點開看高低代表什麼"><span class="th-n">${esc(t.n)}${src === 'live' ? '<i class="lvd"></i>' : ''}</span><b class="mono">${t.f(v)}</b>${isNum(c) ? `<span class="th-c mono ${t.k === 'VIX' || t.k === 'TNX' || t.k === 'DXY' || t.k === 'USDTWD' ? '' : cls(c)}">${pct(c)}</span>` : ''}<span class="th-l">${esc(lt)}</span>${pos != null ? `<span class="th-bar"><i style="left:${pos.toFixed(0)}%"></i></span>` : ''}</a>`);
+    }
+    // 信用利差（每日）、殖利率曲線（每日）
+    const hy = s.health?.us?.hy;
+    if (hy && isNum(hy.v)) { const p = hy.pct; const [lc, lt] = p >= 90 ? ['bad', '近一年最高區，信用風險升溫'] : p >= 75 ? ['warn', '偏高'] : p <= 25 ? ['ok', '低，信用環境寬鬆'] : ['', '中性']; out.push(`<a class="th ${lc ? 'th-' + lc : ''}" data-dk="t-HY" href="#/manual/hy"><span class="th-n">高收益債利差</span><b class="mono">${num(hy.v, 2)}%</b>${isNum(hy.chg) ? `<span class="th-c mono">${hy.chg >= 0 ? '+' : '−'}${fix(Math.abs(hy.chg), 2)}</span>` : ''}<span class="th-l">${esc(lt)}</span><span class="th-bar"><i style="left:${Math.round(p)}%"></i></span></a>`); }
+    const cv = envOf('curve');
+    if (cv && isNum(cv.value)) { const v = cv.value; const [lc, lt] = v < 0 ? ['bad', '倒掛，衰退前兆'] : v < 0.5 ? ['warn', '走平'] : ['ok', '正常陡峭']; out.push(`<a class="th ${lc ? 'th-' + lc : ''}" data-dk="t-CURVE" href="#/manual/curve"><span class="th-n">10 年－2 年</span><b class="mono">${v >= 0 ? '+' : '−'}${fix(Math.abs(v), 2)}</b><span class="th-l">${esc(lt)}</span><span class="th-bar"><i style="left:${Math.max(0, Math.min(100, (2 - v) / 3 * 100)).toFixed(0)}%"></i></span></a>`); }
+    if (!out.length) return '';
+    const bad = out.filter(h => h.includes('th-bad')).length, warn = out.filter(h => h.includes('th-warn')).length;
+    const sum = bad >= 2 ? '多項風險指標亮紅燈，全球處於避險狀態' : bad === 1 || warn >= 3 ? '部分風險指標偏高，留意波動' : '全球風險指標大致正常';
+    return `<div class="tm" data-dk="tm"><div class="tm-h"><b>全球溫度計</b><span class="small muted">${esc(sum)}・點任一格看高低代表什麼</span></div><div class="tm-g">${out.join('')}</div></div>`;
+  }
   // ── 今日重點：下跌看融資維持率等風險指標，上漲看量能廣度與壓力；最上面給一句建議 ──────
   function focusHtml() {
     const s = S.snap, tw = s.health?.tw || {}, ix = s.indices?.['^TWII'], ol = ix?.outlook || {};
@@ -2635,26 +2856,26 @@ ${footer()}`;
       // 今天還沒有新的維持率：用指數漲跌粗估（融資股波動通常比大盤大，乘 1.3）
       const rd = d10(M.ratioDate); if (rd < today && liveToday) est = +(M.ratio * (1 + chg * 1.3 / 100)).toFixed(1);
       const v = est ?? M.ratio, lvl = v < 130 ? ['bad', '低於追繳線 130%'] : v < 140 ? ['bad', '接近追繳線，斷頭賣壓風險高'] : v < 150 ? ['warn', '偏低，再跌容易引發追繳'] : v < 166 ? ['', '正常偏低'] : ['ok', '健康'];
-      rows.push(['融資維持率', `${fix(M.ratio, 1)}%${est ? `　今天估 ${fix(est, 1)}%` : ''}`, lvl[0], `${lvl[1]}・${ymdShort(M.ratioDate)}${isNum(M.ratioChg) ? `（較前一日 ${M.ratioChg >= 0 ? '+' : '−'}${fix(Math.abs(M.ratioChg), 1)}）` : ''}${M.ratioMin ? `・近半年最低 ${fix(M.ratioMin, 1)}%` : ''}`, mode !== 'up']);
-    } else if (mode !== 'up') rows.push(['融資維持率', '計算中', '', '下次收盤完整更新後提供（130% 追繳線、140% 以下斷頭風險高）']);
+      rows.push(['融資維持率|margin', `${fix(M.ratio, 1)}%${est ? `　今天估 ${fix(est, 1)}%` : ''}`, lvl[0], `${lvl[1]}・${ymdShort(M.ratioDate)}${isNum(M.ratioChg) ? `（較前一日 ${M.ratioChg >= 0 ? '+' : '−'}${fix(Math.abs(M.ratioChg), 1)}）` : ''}${M.ratioMin ? `・近半年最低 ${fix(M.ratioMin, 1)}%` : ''}`, mode !== 'up']);
+    } else if (mode !== 'up') rows.push(['融資維持率|margin', '計算中', '', '下次收盤完整更新後提供（130% 追繳線、140% 以下斷頭風險高）']);
     if (isNum(M.chg5) && M.balance) {
       const r5 = M.chg5 / (M.balance - M.chg5) * 100;
       const t = mode === 'up' ? (r5 > 3 ? ['warn', '散戶追價，短線過熱'] : ['', r5 < 0 ? '上漲但融資減少，籌碼乾淨' : '溫和增加']) : (r5 < -5 ? ['ok', '大幅去槓桿，籌碼在清洗'] : r5 > 2 ? ['warn', '跌時融資反增，散戶逢低承接、籌碼變亂'] : ['', '變化不大']);
-      rows.push(['融資餘額 5 日', `${M.chg5 >= 0 ? '+' : '−'}${int(Math.abs(M.chg5))} 億（${pp(r5)}）`, t[0], `${t[1]}・餘額 ${int(M.balance)} 億・${ymdShort(M.date)}`]);
+      rows.push(['融資餘額 5 日|margin', `${M.chg5 >= 0 ? '+' : '−'}${int(Math.abs(M.chg5))} 億（${pp(r5)}）`, t[0], `${t[1]}・餘額 ${int(M.balance)} 億・${ymdShort(M.date)}`]);
     }
-    if (cm && isNum(cm.foreignValueEst)) { const v = cm.foreignValueEst / 1e8; rows.push(['外資現貨', `${v >= 0 ? '買超' : '賣超'} ${int(Math.abs(v))} 億`, mode === 'down' && v < -200 ? 'warn' : mode === 'up' && v > 100 ? 'ok' : '', `${ymdShort(cm.date)}${tw.foreignCum ? `・5 日累計 ${tw.foreignCum.d5 >= 0 ? '+' : '−'}${int(Math.abs(tw.foreignCum.d5))} 億` : ''}`]); }
-    if (fu) rows.push(['外資期貨', `淨${fu.net < 0 ? '空' : '多'} ${int(Math.abs(fu.net))} 口`, fu.net < -40000 && mode === 'down' ? 'warn' : '', isNum(fu.chg5) ? `5 日${(fu.net < 0) === (fu.chg5 < 0) ? '增加' : '減少'} ${int(Math.abs(fu.chg5))} 口${fu.net < 0 && fu.chg5 > 0 ? '（空單回補）' : fu.net < 0 && fu.chg5 < 0 ? '（持續加空）' : ''}` : '']);
+    if (cm && isNum(cm.foreignValueEst)) { const v = cm.foreignValueEst / 1e8; rows.push(['外資現貨|foreign', `${v >= 0 ? '買超' : '賣超'} ${int(Math.abs(v))} 億`, mode === 'down' && v < -200 ? 'warn' : mode === 'up' && v > 100 ? 'ok' : '', `${ymdShort(cm.date)}${tw.foreignCum ? `・5 日累計 ${tw.foreignCum.d5 >= 0 ? '+' : '−'}${int(Math.abs(tw.foreignCum.d5))} 億` : ''}`]); }
+    if (fu) rows.push(['外資期貨|foreign', `淨${fu.net < 0 ? '空' : '多'} ${int(Math.abs(fu.net))} 口`, fu.net < -40000 && mode === 'down' ? 'warn' : '', isNum(fu.chg5) ? `5 日${(fu.net < 0) === (fu.chg5 < 0) ? '增加' : '減少'} ${int(Math.abs(fu.chg5))} 口${fu.net < 0 && fu.chg5 > 0 ? '（空單回補）' : fu.net < 0 && fu.chg5 < 0 ? '（持續加空）' : ''}` : '']);
     const brSame = br && d10(br.date) === (liveToday ? today : d10(ix.marketDate));
     if (br && (brSame || mode !== 'up')) {
       const t = (br.adv || 0) + (br.dec || 0) + (br.unch || 0), up = t ? br.adv / t * 100 : null;
-      if (mode === 'up') rows.push(['上漲家數', `${int(br.adv)} 家（${fix(up, 0)}%）`, up < 45 ? 'warn' : up > 65 ? 'ok' : '', `${up < 45 ? '指數漲但多數股票沒跟，權值股撐盤' : up > 65 ? '普漲，上漲有廣度' : '漲跌參半'}・漲停 ${int(br.upLimit)}・${ymdShort(br.date)}`]);
-      else rows.push(['跌停／下跌家數', `${int(br.downLimit)}／${int(br.dec)} 家`, br.downLimit >= 50 ? 'bad' : br.dec / t > 0.7 ? 'warn' : '', `${brSame ? (br.downLimit >= 50 ? '恐慌性賣壓' : br.dec / t > 0.7 ? '全面性下跌' : '跌勢集中在部分股票') : '前一交易日'}・站上月線 ${fix(br.above20, 0)}%・${ymdShort(br.date)}`]);
+      if (mode === 'up') rows.push(['上漲家數|breadth', `${int(br.adv)} 家（${fix(up, 0)}%）`, up < 45 ? 'warn' : up > 65 ? 'ok' : '', `${up < 45 ? '指數漲但多數股票沒跟，權值股撐盤' : up > 65 ? '普漲，上漲有廣度' : '漲跌參半'}・漲停 ${int(br.upLimit)}・${ymdShort(br.date)}`]);
+      else rows.push(['跌停／下跌家數|breadth', `${int(br.downLimit)}／${int(br.dec)} 家`, br.downLimit >= 50 ? 'bad' : br.dec / t > 0.7 ? 'warn' : '', `${brSame ? (br.downLimit >= 50 ? '恐慌性賣壓' : br.dec / t > 0.7 ? '全面性下跌' : '跌勢集中在部分股票') : '前一交易日'}・站上月線 ${fix(br.above20, 0)}%・${ymdShort(br.date)}`]);
     }
-    if (mode === 'up' && isNum(rsi)) rows.push(['加權 RSI', fix(rsi, 0), rsi > 75 ? 'warn' : rsi < 50 ? '' : 'ok', rsi > 75 ? '短線過熱' : rsi < 50 ? '仍在弱勢區，屬於反彈' : '動能轉強']);
+    if (mode === 'up' && isNum(rsi)) rows.push(['加權 RSI|rsi', fix(rsi, 0), rsi > 75 ? 'warn' : rsi < 50 ? '' : 'ok', rsi > 75 ? '短線過熱' : rsi < 50 ? '仍在弱勢區，屬於反彈' : '動能轉強']);
     const broken = (ol.sr?.support || []).filter(x => isNum(price) && x.p >= price);
-    if (mode !== 'up' && sup.length) rows.push(['下方支撐', sup.map(lvTxt).join('、'), '', broken.length ? `已跌破 ${broken.map(x => x.label).join('、')}` : '跌破第一道支撐要提高警覺']);
-    else if (mode !== 'up' && broken.length) { let k = Math.floor(price / 1000) * 1000; if (k >= price) k -= 1000; rows.push(['支撐', `已全部跌破`, 'bad', `跌破 ${broken.slice(0, 2).map(x => `${x.label} ${int(x.p)}`).join('、')}；下一個參考是整數關卡 ${int(k)}`]); }
-    if (mode !== 'down' && res.length) rows.push(['上方壓力', res.map(lvTxt).join('、'), '', '帶量突破才算轉強']);
+    if (mode !== 'up' && sup.length) rows.push(['下方支撐|ma', sup.map(lvTxt).join('、'), '', broken.length ? `已跌破 ${broken.map(x => x.label).join('、')}` : '跌破第一道支撐要提高警覺']);
+    else if (mode !== 'up' && broken.length) { let k = Math.floor(price / 1000) * 1000; if (k >= price) k -= 1000; rows.push(['支撐|ma', `已全部跌破`, 'bad', `跌破 ${broken.slice(0, 2).map(x => `${x.label} ${int(x.p)}`).join('、')}；下一個參考是整數關卡 ${int(k)}`]); }
+    if (mode !== 'down' && res.length) rows.push(['上方壓力|ma', res.map(lvTxt).join('、'), '', '帶量突破才算轉強']);
     // 建議
     const v = est ?? M.ratio, fs = cm?.foreignValueEst / 1e8, s1 = sup[0] ? `${sup[0].label} ${int(sup[0].p)}` : broken.length && isNum(price) ? `整數關卡 ${int(Math.floor(price / 1000) * 1000 >= price ? Math.floor(price / 1000) * 1000 - 1000 : Math.floor(price / 1000) * 1000)}` : '下方支撐', r1 = res[0] ? `${res[0].label} ${int(res[0].p)}` : '上方壓力';
     let adv;
@@ -2673,7 +2894,7 @@ ${footer()}`;
     const title = mode === 'down' ? '下跌日：先看融資與賣壓' : mode === 'up' ? '上漲日：看量能廣度與壓力' : '盤整：看支撐與壓力';
     return `<div class="fc fc-${mode}" data-dk="focus"><div class="fc-h"><b>今日重點</b><span class="fc-m">${esc(title)}</span><span class="small muted">加權 <b class="mono ${cls(chg)}">${pp(chg)}</b>・${esc(when)}</span></div>
       <p class="fc-a"><span class="fc-t">建議</span>${esc(adv)}</p>
-      <div class="fc-g">${rows.map(([l, v, c, n, key]) => `<div class="fc-i ${c ? 'fc-' + c : ''}${key ? ' fc-key' : ''}"><span>${esc(l)}</span><b class="mono">${esc(v)}</b>${n ? `<em>${esc(n)}</em>` : ''}</div>`).join('')}</div></div>`;
+      <div class="fc-g">${rows.map(([l0, v, c, n, key]) => { const [l, man] = l0.split('|'); return `<a class="fc-i ${c ? 'fc-' + c : ''}${key ? ' fc-key' : ''}" href="#/manual/${man || 'index'}"><span>${esc(l)} <i class="fc-q" aria-hidden="true">?</i></span><b class="mono">${esc(v)}</b>${n ? `<em>${esc(n)}</em>` : ''}</a>`; }).join('')}</div></div>`;
   }
   function dashLiveHtml() {
     const s = S.snap, Q = dashQuotes(), live = nasLive(), fresh = live && Date.now() - LIVE.at < 60000;
@@ -2756,8 +2977,10 @@ ${footer()}`;
     const tile = (r, gi) => `<a class="hm-t" data-dk="h-${hset}-${gi}-${esc(r.k)}" href="#/s/${encodeURIComponent(r.k)}" style="background:${heatBg(r.q.c, r.m === 'tw' ? 5 : 3)}"><span class="hm-n">${r.h ? '<i class="hm-own" title="持股">持</i>' : r.st ? '<i class="hm-star" title="追蹤">★</i>' : ''}${esc(r.name)}</span><b class="mono">${pct(r.q.c)}</b><span class="hm-p mono">${px(r.q.p)}</span>${r.tag ? `<span class="hm-x">${esc(r.tag)}</span>` : ''}</a>`;
     const heat = heatTabs + (groups.map((g, gi) => `<div class="hm-g"><div class="hm-h"><b>${esc(g.title)}</b><span class="small muted">${g.raw ? g.sub : esc(g.sub)}</span></div><div class="hm">${g.rows.map(r => tile(r, gi)).join('')}</div></div>`).join('') || `<p class="empty">${esc(note || '沒有資料')}</p>`);
     let focus = ''; try { focus = focusHtml(); } catch (e) { console.error(e); }
+    let thermo = ''; try { thermo = thermoHtml(); } catch (e) { console.error(e); }
     return `<div class="ds-h"><h2 id="ds-h">即時儀表板</h2><span class="ds-st small muted" data-dk="st">${status}</span></div>
       ${focus}
+      ${thermo}
       <div class="dk-grid">${tiles}</div>
       ${kp.length ? `<div class="dm-grid">${kp.join('')}</div>` : ''}
       <div class="ds-row">${chart}<div class="hm-w">${heat}</div></div>`;
@@ -3179,11 +3402,52 @@ ${footer()}`;
       ${stat.length ? `<section class="card"><div class="hd"><h2>數據</h2><span class="note">買進看之後漲多少；賣出看之後跌多少（跌越多代表賣得越對）</span></div><div class="pp-list">${stat.map(([l, v]) => `<div class="pp-row"><div class="pp-h"><span>${esc(l)}</span><b>${v}</b></div></div>`).join('')}</div></section>` : ''}
       <section class="card"><p class="small" style="margin:0">也可以看：<a href="#/journal">我的成績單與市場感覺準不準</a>。</p></section>${footer()}`;
   }
+  // ── 系統頁：AI 引擎狀態（自動降級）與 NAS 健康 ─────────────────────────
+  function engineHtml() {
+    const st = S.snap.status || {}, R = S.remote, L = S.local || {};
+    const fresh = R && R.fresh, eng = k => !!(L[k] || (fresh && R.engines?.[k]?.ok));
+    const cloudOk = /^ok/.test(st.ai || '') || /^ok/.test(st.digestAI || '');
+    const brief = t => { t = String(t || ''); const pend = /待處理 (\d+)/.exec(t)?.[1], add = /新增 (\d+)/.exec(t)?.[1];
+      const why = /429|quota|額度/i.test(t) ? '額度用完' : /503|high demand|UNAVAILABLE/i.test(t) ? '服務忙碌' : /JSON|Unexpected|對不上/i.test(t) ? '回覆格式錯誤' : /^fail/.test(t) ? '失敗' : '';
+      return add != null ? `新增 ${add}・待處理 ${pend}${why ? `（${why}）` : ''}` : /^ok/.test(t) ? '正常' : /暫停到/.test(t) ? `暫停到 ${t.match(/T(\d{2}:\d{2})/)?.[1] || ''}（額度用完）` : why || t.slice(0, 20); };
+    const cloudNote = [st.ai && `市場評論 ${brief(st.ai)}`, st.digestAI && `全球快報 ${brief(st.digestAI)}`, st.newsAI && `新聞摘要 ${brief(st.newsAI)}`, st.themeAI && `題材 ${brief(st.themeAI)}`, st.newsDeep && `查證 ${brief(st.newsDeep)}`].filter(Boolean).join('・');
+    const pcNote = R ? `${R.fresh ? '在線' : '離線'}・最後上傳 ${agoMin(R.age)}${R.fresh ? '' : '（電腦關機或睡眠）'}` : SY.get().token ? '還沒有電腦上傳的結果' : '這台裝置沒設定同步，看不到電腦狀態';
+    const rows = [
+      ['預測', '電腦 NPU 模型', eng('npu'), pcNote], ['預測', '電腦 CPU 模型', eng('cpu'), '電腦 NPU 不可用時改用'], ['預測', '雲端模型（GitHub）', true, '每次網站更新都會重算，永遠可用'],
+      ['文字', '電腦本機語言模型', eng('llm'), '個股 AI 解讀、問 AI'], ['文字', '雲端 AI（Gemini）', cloudOk, cloudNote || '—'], ['文字', '規則引擎', true, 'AI 都不可用時，用程式規則整理新聞與快報'],
+    ];
+    const useP = rows.filter(r => r[0] === '預測').find(r => r[2]), useT = rows.filter(r => r[0] === '文字').find(r => r[2]);
+    const warn = /額度|忙碌|錯誤|失敗|待處理 [1-9]\d{2,}/.test(cloudNote);
+    return `<section class="card" aria-labelledby="eng-h"><div class="hd"><h2 id="eng-h">AI 引擎狀態</h2><span class="note">由上往下自動降級：前一個不可用就用下一個</span><a class="act" href="#/manual/arch">說明</a></div>
+      <p class="eng-now">目前預測用 <b>${esc(useP[1])}</b>，文字解讀用 <b>${esc(useT[1])}</b>${warn ? '<span class="eng-w">雲端 AI 部分功能不順，有些新聞沒有 AI 摘要</span>' : ''}</p>
+      <div class="eng">${['預測', '文字'].map(g => `<div class="eng-g"><span class="eng-gt">${g}</span>${rows.filter(r => r[0] === g).map(r => `<div class="eng-r ${r[2] ? 'on' : 'off'}${r === useP || r === useT ? ' use' : ''}"><i></i><b>${esc(r[1])}</b><span>${esc(r[3])}</span></div>`).join('<span class="eng-a" aria-hidden="true">↓</span>')}</div>`).join('')}</div></section>`;
+  }
+  async function nasHealthHtml() {
+    if (!nasBase()) return `<section class="card" aria-labelledby="nh-h"><div class="hd"><h2 id="nh-h">NAS 健康</h2></div><p class="empty">在「設定」填入 NAS 網址後顯示。</p></section>`;
+    let H = null; try { H = await getJSON(nasBase() + '/health.json', 8000); } catch (_) {}
+    if (!H?.now) return `<section class="card" aria-labelledby="nh-h"><div class="hd"><h2 id="nh-h">NAS 健康</h2></div><p class="empty">${LIVE.data ? 'NAS 還是舊版程式：SSH 到 NAS 執行 git pull 後就會顯示' : 'NAS 連不到：確認 Tailscale 已連線，或在 NAS 執行 bash nas/check.sh'}</p></section>`;
+    const n = H.now, sm = H.samples || [];
+    const kpi = (l, v, ok, note) => `<div class="dm"><span>${l}</span><b class="mono ${ok === false ? 'bad-t' : ''}">${v}</b><em>${note || ''}</em></div>`;
+    const ser = (k, f = v => v) => sm.map(x => (isNum(x[k]) ? f(x[k]) : null));
+    const chart = sm.length >= 3 ? `<div class="ch-grid">${[['即時行情正常比例', ser('liveOk').map((v, i) => (v != null && sm[i].liveN ? v / sm[i].liveN * 100 : null)), v => fix(v, 0) + '%', '#0EA5A4'], ['備援資料延遲（分鐘）', ser('backupAge'), v => int(v), '#E07B39'], ['記憶體（MB）', ser('rss'), v => int(v), '#8B5CF6']].map(([t, v, f, c]) => `<div class="ch-mini"><div class="ch-mh"><b>${t}</b></div>${lineChart('nh', sm.map(x => x.at), [{ name: t, col: c, v }], { h: 100, w: 360, fmt: f, xfmt: x => new Date(x).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', hour12: false }) })}</div>`).join('')}</div>` : '<p class="small muted">每小時記錄一筆，累積 3 小時後顯示趨勢。</p>';
+    const ck = (H.checks || []).slice().reverse();
+    return `<section class="card" aria-labelledby="nh-h"><div class="hd"><h2 id="nh-h">NAS 健康</h2><span class="note">每小時記錄，保留 7 天</span><a class="act" href="#/manual/nas">維護說明</a></div>
+      <div class="dm-grid">${kpi('即時行情', `${n.liveOk}／${n.liveN}`, n.liveOk === n.liveN, `${n.stocks} 檔個股・${isNum(n.liveAge) ? n.liveAge + ' 秒前更新' : ''}`)}${kpi('備援資料', isNum(n.backupAge) ? `${n.backupAge} 分鐘前` : '—', !(n.backupAge > 1440) && n.backupOk !== false, n.backupOk === false ? '上次更新失敗' : '每 30 分鐘同步')}${kpi('記憶體', `${n.rss} MB`, n.rss < 600, `已執行 ${n.up >= 1440 ? fix(n.up / 1440, 1) + ' 天' : n.up >= 60 ? fix(n.up / 60, 1) + ' 小時' : n.up + ' 分鐘'}`)}${isNum(n.free) ? kpi('剩餘空間', `${n.free} GB`, n.free > 5, n.free <= 5 ? '空間快滿了' : '') : ''}</div>
+      ${chart}
+      <h3 class="ch-h3">每週體檢與自動修復</h3>${ck.length ? `<div class="nh-ck">${ck.map(c => `<div class="nh-r"><b>${esc(tpeTime(c.at))}</b><span>${c.found ? `發現 ${c.found} 項・自動修好 ${c.fixed.length} 項${c.left.length ? `・<span class="bad-t">還有 ${c.left.length} 項要手動處理</span>` : ''}` : '全部正常'}</span>${[...c.fixed, ...c.left].length ? `<ul>${c.fixed.map(x => `<li>${esc(x)}</li>`).join('')}${c.left.map(x => `<li class="bad-t">${esc(x)}</li>`).join('')}</ul>` : ''}</div>`).join('')}</div>` : '<p class="small muted">每週日 20:30 自動體檢，結果會記在這裡。</p>'}</section>`;
+  }
+  async function fillSystem() {
+    const box = $('#sys-top'); if (!box) return;
+    if (SY.get().token) await loadRemote().catch(() => null);
+    const h = engineHtml() + await nasHealthHtml();
+    if (S.route !== 'scorecard' || !$('#sys-top')) return;
+    patchKeep(box, () => { box.innerHTML = h; bindLineCharts(box); });
+  }
   function viewScorecard() {
     const sc = S.snap.scorecard, st = S.snap.status || {};
     const ACC = accuracyBoard();
     const STZ = { yahoo: 'Yahoo 報價', vix: 'VIX 恐慌指數', treasury: '美國公債殖利率', t86: '三大法人（TWSE）', finmind: 'FinMind 法人／營收', fundamentals: '美股基本面', breadth: '台股寬度（收盤歷史）', futures: '外資台指期', putcall: '選擇權 P/C 比', valuation: '台股估值', margin: '融資餘額', usValuation: '標普本益比', fred: 'FRED 信用／壓力', indices: '指數推論', ai: '雲端 AI 解讀', tdcc: '集保大戶', exdiv: '除權息', tpex: '上櫃行情', usUniverse: '美股清單', universe: '搜尋清單', usFinancials: '美股財報', twFinancials: '台股財報' };
-    return `${ACC}
+    return `<div id="sys-top">${engineHtml()}</div>${ACC}
 <section class="card" aria-labelledby="bt0"><div class="hd"><h2 id="bt0">策略回測</h2><span class="note">過去 2 年照技術面訊號操作的結果，可自行調整門檻、停損、停利；另附 AI 模型的樣本外表現</span><a class="act btn primary sm" href="#/backtest" style="color:#fff">開始回測</a></div></section>
 ${(() => { const W = S.snap.weekCheck; if (!W?.weeks?.length) return ''; const s0 = W.summary || {};
         const wk = w => { const rows = w.rows; const base = rows[0]?.base || w.week; return `<div class="pp-row"><b>${esc(base.slice(5).replace('-', '/'))} 收盤後的預測</b>${rows.some(r => r.bf) ? ' <span class="small muted">回溯重算</span>' : ''}${rows.map(r => `<div class="small">${esc(r.name)}：預測<b>${r.view}</b>（${r.up}%）・區間 ${px(r.lo)}～${px(r.hi)} → ${r.done ? `實際 <b class="${cls(r.ret)}">${pct(r.ret)}</b> ${r.dirHit ? '<span class="up">✓</span>' : '<span class="down">✗</span>'}${r.inRange ? '' : '・<span class="muted">超出區間</span>'}${r.brokeSup ? '・跌破支撐' : ''}${r.brokeRes ? '・突破壓力' : ''}` : r.days ? `進行中（${r.days}/5 天，目前 <span class="${cls(r.ret)}">${pct(r.ret)}</span>）` : '等待中'}</div>`).join('')}</div>`; };
@@ -3456,7 +3720,7 @@ ${footer()}`;
   async function render() {
     const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
     S.route = h.startsWith('s/') ? h : (h.split('/')[0] || 'home');
-    const nav = h.startsWith('s/') ? 'home' : S.route === 'all' ? 'home' : ['backtest', 'history'].includes(S.route) ? 'scorecard' : ['paper', 'decide', 'tw', 'compare', 'lab', 'ask', 'tax', 'habits', 'industry'].includes(S.route) ? 'journal' : S.route;
+    const nav = h.startsWith('s/') ? 'home' : S.route === 'all' ? 'home' : ['backtest', 'history'].includes(S.route) ? 'scorecard' : ['paper', 'decide', 'tw', 'compare', 'lab', 'ask', 'tax', 'habits', 'industry', 'manual'].includes(S.route) ? 'journal' : S.route;
     document.querySelectorAll('[data-nav]').forEach(a => { a.classList.toggle('act', a.dataset.nav === nav); if (a.dataset.nav === nav) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
     const main = $('#main');
     if (!S.snap) return;
@@ -3482,7 +3746,7 @@ ${footer()}`;
     else if (S.route === 'backtest') { const k = h.split('/')[1]; if (k) { BT.scope = decodeURIComponent(k).toUpperCase(); LS.set('bt', BT); } main.innerHTML = viewBacktest(); bindBacktest(); document.title = '策略回測・訊號終端'; }
     else if (S.route === 'news') { main.innerHTML = '<p class="loading">載入新聞…</p>'; const [N] = await Promise.all([loadNews(), loadUniverse()]); if (S.route !== 'news') return; main.innerHTML = viewNews(N); { const ev = viewPcEvents(); if (ev) main.querySelector('#dgs-h')?.closest('section')?.insertAdjacentHTML('afterend', ev); } bindDigest(); setupFolds(); document.title = '新聞・訊號終端'; }
     else if (S.route === 'journal') { main.innerHTML = viewJournal(); document.title = '我的成績單・訊號終端'; afterJournal(); }
-    else if (S.route === 'scorecard') { main.innerHTML = viewScorecard(); document.title = '模型成績・訊號終端'; if (SY.get().token) loadRemote().then(() => { if (S.route !== 'scorecard' || $('#pcs-h')) return; const h = viewPcScore(); if (h) main.querySelector('footer')?.insertAdjacentHTML('beforebegin', h); }); }
+    else if (S.route === 'scorecard') { main.innerHTML = viewScorecard(); document.title = '模型成績・訊號終端'; fillSystem(); if (SY.get().token) loadRemote().then(() => { if (S.route !== 'scorecard' || $('#pcs-h')) return; const h = viewPcScore(); if (h) main.querySelector('footer')?.insertAdjacentHTML('beforebegin', h); }); }
     else if (S.route === 'industry') { main.innerHTML = '<p class="loading">載入產業分類…</p>'; const html = await viewIndustry(decodeURIComponent(h.split('/')[1] || '')); if (S.route !== 'industry') return; main.innerHTML = html; bindIndustry(); document.title = '產業分類・訊號終端'; }
     else if (S.route === 'tw') { main.innerHTML = '<p class="loading">載入台股資料…</p>'; const html = await viewTW(); if (S.route !== 'tw') return; main.innerHTML = html; bindIndustry(); document.title = '台股籌碼與營收・訊號終端'; }
     else if (S.route === 'compare') { main.innerHTML = '<p class="loading">載入比較…</p>'; const html = await viewCompare(); if (S.route !== 'compare') return; main.innerHTML = html; const f = $('#cmp-form'); if (f) f.onsubmit = e => { e.preventDefault(); LS.set('cmpKeys', [...f.querySelectorAll('input')].map(x => x.value.trim().toUpperCase()).filter(Boolean).slice(0, 4)); render(); }; document.title = '個股比較・訊號終端'; }
@@ -3493,6 +3757,7 @@ ${footer()}`;
     else if (S.route === 'decide') { main.innerHTML = viewDecide(); bindDecide(); document.title = '待你確認・訊號終端'; }
     else if (S.route === 'paper') { main.innerHTML = viewPaper(); document.title = '虛擬跟單・訊號終端'; }
     else if (S.route === 'charts') { if (!main.querySelector('#dash')) main.innerHTML = '<p class="loading">畫圖中…</p>'; let html; try { html = await viewCharts(); } catch (e) { console.error(e); html = `<section class="card"><p class="empty">圖表載入失敗：${esc(e.message)}。請按右上角重新整理，或把這段文字截圖給我。</p></section>`; } if (S.route !== 'charts') return; if (main.querySelector('#dash') && main.querySelector('.ch-wrap')) patchCharts(main, html); else { main.innerHTML = html; bindCharts2(); } document.title = '圖表・訊號終端'; }
+    else if (S.route === 'manual') { const an = h.split('/')[1] || ''; main.innerHTML = viewManual(an); bindManual(an); document.title = '使用手冊・訊號終端'; }
     else if (S.route === 'settings') { main.innerHTML = viewSettings(); bindSettings(); document.title = '設定・訊號終端'; }
     else if (S.route === 'all') { main.innerHTML = `<div><a href="#/" class="small">← 回總覽</a></div><section class="card" id="opps">${viewOpps(0)}</section>${footer()}`; document.title = '全部標的・訊號終端'; }
     else { main.innerHTML = viewHome(); document.title = '訊號終端'; afterHome(); if (SY.get().token) loadRemote().then(() => { if (S.route !== 'home' || $('#pck-h') || $('#ms-h')) return; const h = viewPcReview() + viewPcChecks(), h2 = viewPcScan(); if (h) $('#opps')?.insertAdjacentHTML('beforebegin', h); if (h2) $('#opps')?.insertAdjacentHTML('afterend', h2); if (h || h2) setupFolds(); }); loadNews().then(N => { if (S.route !== 'home') return; const el = $('#themes'); if (el) el.innerHTML = viewThemesMini(N); const d = $('#digest'); if (d) d.innerHTML = viewDigestMini(N); setupFolds(); }); }
