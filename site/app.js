@@ -29,7 +29,7 @@
   }
   applyLook(); mqDark?.addEventListener?.('change', applyLook);
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  const APP_VERSION = '1.22.0';
+  const APP_VERSION = '1.22.1';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -408,7 +408,7 @@
     return `<div class="theme"><div class="th-hd"><b>${esc(t.name)}</b>${ph}${t.auto ? '<span class="pill">新聞自動抓到</span>' : ''}<span class="small muted">${t.count} 則新聞${isNum(t.avgChg) ? `・相關股今日平均 <span class="${cls(t.avgChg)}">${pct(t.avgChg)}</span>` : ''}</span></div>
       ${t.sum ? `<p class="nc-s">${esc(t.sum)}</p>` : ''}
       ${stocks}
-      ${full ? `<details class="th-news"><summary class="small">相關新聞 ${Math.min(t.news.length, 3)} 則</summary><div class="ncl">${t.news.slice(0, 3).map(newsCard).join('')}</div></details>` : ''}</div>`;
+      ${full ? `<details class="th-news"><summary class="small">相關新聞 ${Math.min((t.news || []).length, 3)} 則</summary><div class="ncl">${(t.news || []).slice(0, 3).map(newsCard).join('')}</div></details>` : ''}</div>`;
   }
   function viewThemesMini(N) {
     if (!N?.themes?.length) return `<div class="hd"><h2 id="th-h">熱門題材</h2></div><p class="empty">還沒有新聞資料，下一次更新後出現。</p>`;
@@ -2576,9 +2576,10 @@ ${footer()}`;
   /** 正負長條（HTML）：rows=[{label, v, href?, note?}] */
   function divBars(rows, { fmt = pp, max = null, inverse = false } = {}) {
     const m = max || Math.max(...rows.map(r => Math.abs(r.v)).filter(isNum), 0.01);
-    return `<div class="db">${rows.map(r => {
-      const w = Math.min(50, Math.abs(r.v) / m * 50), c = cls(r.v, inverse);
-      return `<div class="db-r"><span class="db-l">${r.href ? `<a href="${r.href}">${esc(r.label)}</a>` : esc(r.label)}${r.note ? `<em>${esc(r.note)}</em>` : ''}</span><span class="db-t"><i class="db-b ${c}" style="${r.v >= 0 ? `left:50%` : `right:50%`};width:${w.toFixed(1)}%"></i></span><b class="db-v mono ${c}">${esc(fmt(r.v))}</b></div>`;
+    const one = rows.every(r => !(r.v < 0)) || rows.every(r => !(r.v > 0)), half = one ? 100 : 50;
+    return `<div class="db${one ? ' db-one' : ''}">${rows.map(r => {
+      const w = Math.min(half, Math.abs(r.v) / m * half), c = cls(r.v, inverse);
+      return `<div class="db-r"><span class="db-l">${r.href ? `<a href="${r.href}">${esc(r.label)}</a>` : esc(r.label)}${r.note ? `<em>${esc(r.note)}</em>` : ''}</span><span class="db-t"><i class="db-b ${c}" style="${one ? 'left:0' : r.v >= 0 ? 'left:50%' : 'right:50%'};width:${w.toFixed(1)}%"></i></span><b class="db-v mono ${c}">${esc(fmt(r.v))}</b></div>`;
     }).join('')}</div>`;
   }
   /** 環圈圖＋圖例 */
@@ -2818,21 +2819,21 @@ ${footer()}`;
       const lv = nasLive() ? LIVE.data.items?.[t.k] : null;
       let v, c, src;
       if (lv?.ok !== false && isNum(lv?.price)) { v = lv.price; c = lv.chgPct; src = 'live'; }
+      else if (t.env && isNum(envOf(t.env)?.value)) { v = envOf(t.env).value; c = isNum(Q[t.sym]?.price) && Math.abs(Q[t.sym].price / v - 1) < 0.02 ? Q[t.sym].chg : null; src = 'web'; }
       else if (isNum(Q[t.sym]?.price)) { v = Q[t.sym].price; c = Q[t.sym].chg; src = 'web'; }
-      else if (t.env && isNum(envOf(t.env)?.value)) { v = envOf(t.env).value; c = null; src = 'web'; }
       if (!isNum(v)) continue;
       if (t.norm) v = t.norm(v);
       const [lc, lt] = t.lv(v, c ?? 0);
       const pos = t.bar ? Math.max(0, Math.min(100, (v - t.bar[0]) / (t.bar[1] - t.bar[0]) * 100)) : null;
-      out.push(`<a class="th ${lc ? 'th-' + lc : ''}" data-dk="t-${t.k}" href="#/manual/${t.man}" title="點開看高低代表什麼"><span class="th-n">${esc(t.n)}${src === 'live' ? '<i class="lvd"></i>' : ''}</span><b class="mono">${t.f(v)}</b>${isNum(c) ? `<span class="th-c mono ${t.k === 'VIX' || t.k === 'TNX' || t.k === 'DXY' || t.k === 'USDTWD' ? '' : cls(c)}">${pct(c)}</span>` : ''}<span class="th-l">${esc(lt)}</span>${pos != null ? `<span class="th-bar"><i style="left:${pos.toFixed(0)}%"></i></span>` : ''}</a>`);
+      out.push(`<a class="th ${lc ? 'tm-' + lc : ''}" data-dk="t-${t.k}" href="#/manual/${t.man}" title="點開看高低代表什麼"><span class="th-n">${esc(t.n)}${src === 'live' ? '<i class="lvd"></i>' : ''}</span><b class="mono">${t.f(v)}</b>${isNum(c) ? `<span class="th-c mono ${t.k === 'VIX' || t.k === 'TNX' || t.k === 'DXY' || t.k === 'USDTWD' ? '' : cls(c)}">${pct(c)}</span>` : ''}<span class="th-l">${esc(lt)}</span>${pos != null ? `<span class="th-bar"><i style="left:${pos.toFixed(0)}%"></i></span>` : ''}</a>`);
     }
     // 信用利差（每日）、殖利率曲線（每日）
     const hy = s.health?.us?.hy;
-    if (hy && isNum(hy.v)) { const p = hy.pct; const [lc, lt] = p >= 90 ? ['bad', '近一年最高區，信用風險升溫'] : p >= 75 ? ['warn', '偏高'] : p <= 25 ? ['ok', '低，信用環境寬鬆'] : ['', '中性']; out.push(`<a class="th ${lc ? 'th-' + lc : ''}" data-dk="t-HY" href="#/manual/hy"><span class="th-n">高收益債利差</span><b class="mono">${num(hy.v, 2)}%</b>${isNum(hy.chg) ? `<span class="th-c mono">${hy.chg >= 0 ? '+' : '−'}${fix(Math.abs(hy.chg), 2)}</span>` : ''}<span class="th-l">${esc(lt)}</span><span class="th-bar"><i style="left:${Math.round(p)}%"></i></span></a>`); }
+    if (hy && isNum(hy.v)) { const p = hy.pct; const [lc, lt] = p >= 90 ? ['bad', '近一年最高區，信用風險升溫'] : p >= 75 ? ['warn', '偏高'] : p <= 25 ? ['ok', '低，信用環境寬鬆'] : ['', '中性']; out.push(`<a class="th ${lc ? 'tm-' + lc : ''}" data-dk="t-HY" href="#/manual/hy"><span class="th-n">高收益債利差</span><b class="mono">${num(hy.v, 2)}%</b>${isNum(hy.chg) ? `<span class="th-c mono">${hy.chg >= 0 ? '+' : '−'}${fix(Math.abs(hy.chg), 2)}</span>` : ''}<span class="th-l">${esc(lt)}</span><span class="th-bar"><i style="left:${Math.round(p)}%"></i></span></a>`); }
     const cv = envOf('curve');
-    if (cv && isNum(cv.value)) { const v = cv.value; const [lc, lt] = v < 0 ? ['bad', '倒掛，衰退前兆'] : v < 0.5 ? ['warn', '走平'] : ['ok', '正常陡峭']; out.push(`<a class="th ${lc ? 'th-' + lc : ''}" data-dk="t-CURVE" href="#/manual/curve"><span class="th-n">10 年－2 年</span><b class="mono">${v >= 0 ? '+' : '−'}${fix(Math.abs(v), 2)}</b><span class="th-l">${esc(lt)}</span><span class="th-bar"><i style="left:${Math.max(0, Math.min(100, (2 - v) / 3 * 100)).toFixed(0)}%"></i></span></a>`); }
+    if (cv && isNum(cv.value)) { const v = cv.value; const [lc, lt] = v < 0 ? ['bad', '倒掛，衰退前兆'] : v < 0.5 ? ['warn', '走平'] : ['ok', '正常陡峭']; out.push(`<a class="th ${lc ? 'tm-' + lc : ''}" data-dk="t-CURVE" href="#/manual/curve"><span class="th-n">10 年－2 年</span><b class="mono">${v >= 0 ? '+' : '−'}${fix(Math.abs(v), 2)}</b><span class="th-l">${esc(lt)}</span><span class="th-bar"><i style="left:${Math.max(0, Math.min(100, (2 - v) / 3 * 100)).toFixed(0)}%"></i></span></a>`); }
     if (!out.length) return '';
-    const bad = out.filter(h => h.includes('th-bad')).length, warn = out.filter(h => h.includes('th-warn')).length;
+    const bad = out.filter(h => h.includes('tm-bad')).length, warn = out.filter(h => h.includes('tm-warn')).length;
     const sum = bad >= 2 ? '多項風險指標亮紅燈，全球處於避險狀態' : bad === 1 || warn >= 3 ? '部分風險指標偏高，留意波動' : '全球風險指標大致正常';
     return `<div class="tm" data-dk="tm"><div class="tm-h"><b>全球溫度計</b><span class="small muted">${esc(sum)}・點任一格看高低代表什麼</span></div><div class="tm-g">${out.join('')}</div></div>`;
   }
@@ -2848,7 +2849,7 @@ ${footer()}`;
     const when = liveToday ? `盤中 ${hms(lv.time)}` : `${ymdShort(ix.marketDate)} 收盤`;
     const dist = p => (isNum(price) && price ? (p / price - 1) * 100 : null);
     const M = tw.margin || {}, br = tw.breadth, fu = tw.futures, cm = s.chipMarket, rsi = ol.ind?.rsi;
-    const sup = (ol.sr?.support || []).filter(x => !isNum(price) || x.p < price).slice(0, 2), res = (ol.sr?.resistance || []).filter(x => !isNum(price) || x.p > price).slice(0, 2);
+    const sup = (ol.sr?.support || []).filter(x => !isNum(price) || (x.p < price && x.p > price * 0.92)).slice(0, 2), res = (ol.sr?.resistance || []).filter(x => !isNum(price) || x.p > price).slice(0, 2);
     const lvTxt = lv => (lv.p ? `${lv.label} ${int(lv.p)}（${pp(dist(lv.p) ?? lv.dist)}）` : '');
     const rows = [];   // [標籤, 數值, 等級 ok|warn|bad|'', 說明]
     let est = null;
@@ -2872,12 +2873,13 @@ ${footer()}`;
       else rows.push(['跌停／下跌家數|breadth', `${int(br.downLimit)}／${int(br.dec)} 家`, br.downLimit >= 50 ? 'bad' : br.dec / t > 0.7 ? 'warn' : '', `${brSame ? (br.downLimit >= 50 ? '恐慌性賣壓' : br.dec / t > 0.7 ? '全面性下跌' : '跌勢集中在部分股票') : '前一交易日'}・站上月線 ${fix(br.above20, 0)}%・${ymdShort(br.date)}`]);
     }
     if (mode === 'up' && isNum(rsi)) rows.push(['加權 RSI|rsi', fix(rsi, 0), rsi > 75 ? 'warn' : rsi < 50 ? '' : 'ok', rsi > 75 ? '短線過熱' : rsi < 50 ? '仍在弱勢區，屬於反彈' : '動能轉強']);
-    const broken = (ol.sr?.support || []).filter(x => isNum(price) && x.p >= price);
+    const broken = (ol.sr?.support || []).filter(x => isNum(price) && x.p >= price), far = (ol.sr?.support || []).find(x => isNum(price) && x.p <= price * 0.92);
     if (mode !== 'up' && sup.length) rows.push(['下方支撐|ma', sup.map(lvTxt).join('、'), '', broken.length ? `已跌破 ${broken.map(x => x.label).join('、')}` : '跌破第一道支撐要提高警覺']);
-    else if (mode !== 'up' && broken.length) { let k = Math.floor(price / 1000) * 1000; if (k >= price) k -= 1000; rows.push(['支撐|ma', `已全部跌破`, 'bad', `跌破 ${broken.slice(0, 2).map(x => `${x.label} ${int(x.p)}`).join('、')}；下一個參考是整數關卡 ${int(k)}`]); }
+    else if (mode !== 'up' && !broken.length && far) rows.push(['下方支撐|ma', lvTxt(far), '', '最近的支撐距離較遠，中間沒有明顯支撐']);
+    else if (mode !== 'up' && broken.length) { let k = Math.floor(price / 1000) * 1000; if (k >= price) k -= 1000; rows.push(['支撐|ma', `整數關卡 ${int(k)}`, 'bad', `已跌破 ${broken.slice(0, 2).map(x => `${x.label} ${int(x.p)}`).join('、')}${far ? `；再下一道是 ${far.label} ${int(far.p)}（${pp(dist(far.p))}）` : ''}`]); }
     if (mode !== 'down' && res.length) rows.push(['上方壓力|ma', res.map(lvTxt).join('、'), '', '帶量突破才算轉強']);
     // 建議
-    const v = est ?? M.ratio, fs = cm?.foreignValueEst / 1e8, s1 = sup[0] ? `${sup[0].label} ${int(sup[0].p)}` : broken.length && isNum(price) ? `整數關卡 ${int(Math.floor(price / 1000) * 1000 >= price ? Math.floor(price / 1000) * 1000 - 1000 : Math.floor(price / 1000) * 1000)}` : '下方支撐', r1 = res[0] ? `${res[0].label} ${int(res[0].p)}` : '上方壓力';
+    const v = est ?? M.ratio, fs = cm?.foreignValueEst / 1e8, s1 = sup[0] ? `${sup[0].label} ${int(sup[0].p)}` : isNum(price) ? `整數關卡 ${int(Math.floor(price / 1000) * 1000 >= price ? Math.floor(price / 1000) * 1000 - 1000 : Math.floor(price / 1000) * 1000)}` : '下方支撐', r1 = res[0] ? `${res[0].label} ${int(res[0].p)}` : '上方壓力';
     let adv;
     if (mode === 'down') {
       if (isNum(v) && v < 140) adv = `融資斷頭賣壓可能還沒結束：先不要急著接，等維持率回到 150% 以上、或融資大幅減少後再分批進場；持股跌破停損照紀律出場。`;
@@ -2906,11 +2908,11 @@ ${footer()}`;
     const b = s.health?.tw?.breadth, fu = s.health?.tw?.futures, cm = s.chipMarket, pcR = s.health?.tw?.putcall, vix = s.env?.find(e => e.key === 'vix'), H = dashHold();
     const kp = [];
     if (H) kp.push(`<div class="dm" data-dk="m-hold"><span>持股市值${H.live ? '<i class="lvd"></i>' : ''}</span><b class="mono">${int(H.mv)}</b><em class="${cls(H.day)}">今日 ${H.day >= 0 ? '+' : '−'}${int(Math.abs(H.day))}（${pp(H.dayPct)}）</em></div>`);
-    if (b) { const t = (b.adv || 0) + (b.dec || 0) + (b.unch || 0); kp.push(`<div class="dm" data-dk="m-br"><span>漲跌家數</span><b class="mono"><span class="up">${int(b.adv)}</span> / <span class="down">${int(b.dec)}</span></b>${t ? `<div class="stk sm"><i class="up" style="width:${(b.adv / t * 100).toFixed(1)}%"></i><i class="flat" style="width:${(b.unch / t * 100).toFixed(1)}%"></i><i class="down" style="width:${(b.dec / t * 100).toFixed(1)}%"></i></div>` : ''}<em>站上月線 ${fix(b.above20, 0)}%</em></div>`); }
-    if (cm && isNum(cm.foreignValueEst)) kp.push(`<div class="dm" data-dk="m-fv"><span>外資現貨</span><b class="mono ${cls(cm.foreignValueEst)}">${cm.foreignValueEst >= 0 ? '+' : '−'}${int(Math.abs(cm.foreignValueEst) / 1e8)} 億</b><em>${esc(ymdShort(cm.date))}</em></div>`);
-    if (fu) kp.push(`<div class="dm" data-dk="m-fu"><span>外資期貨</span><b class="mono ${cls(fu.net)}">${fu.net >= 0 ? '+' : '−'}${int(Math.abs(fu.net))} 口</b><em>5 日 ${isNum(fu.chg5) ? (fu.chg5 >= 0 ? '+' : '−') + int(Math.abs(fu.chg5)) : '—'}</em></div>`);
+    // （外資、漲跌家數、VIX 已在「今日重點」與「全球溫度計」，這裡不重複）
+
+
     if (pcR) kp.push(`<div class="dm" data-dk="m-pc"><span>P/C 比</span><b class="mono">${fix(pcR.oi, 1)}%</b><em>近一年第 ${fix(pcR.pct, 0)} 百分位</em></div>`);
-    if (vix && isNum(vix.value)) kp.push(`<div class="dm" data-dk="m-vix"><span>VIX</span><b class="mono ${vix.value >= 25 ? 'bad-t' : vix.value >= 20 ? 'warn-t' : ''}">${num(vix.value, 1)}</b><em>${vix.value >= 30 ? '恐慌' : vix.value >= 20 ? '波動升溫' : vix.value < 15 ? '很平靜' : '正常'}</em></div>`);
+
     // 3. 盤中走勢
     let sel = LS.get('dashK') || '', chart = '';
     const QM = new Map(Q);
