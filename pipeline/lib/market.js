@@ -191,13 +191,13 @@ async function twValuation() {
   const rows = await get('https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL', { timeout: 20000 });
   if (!Array.isArray(rows) || !rows.length) return null;
   const s = rows[0];
-  const kPE = findKey(s, /^PEratio$/i, /本益比/), kDY = findKey(s, /^DividendYield$/i, /殖利率/), kPB = findKey(s, /^PBratio$/i, /淨值比/), kC = findKey(s, /^Code$/i, /代號/);
+  const kPE = findKey(s, /^PEratio$/i, /本益比/), kDY = findKey(s, /^DividendYield$/i, /殖利率/), kPB = findKey(s, /^PBratio$/i, /淨值比/), kC = findKey(s, /^Code$/i, /代號/), kD = findKey(s, /^Date$/i, /日期/);
   if (!kPE) return { error: `欄位無法辨識：${Object.keys(s).join('|')}` };
   const st = rows.filter(r => /^\d{4}$/.test(String(r[kC] || '').trim()));
   const pe = st.map(r => num(r[kPE])).filter(v => v > 0 && v < 200);
   const per = {};
   for (const r of rows) { const id = String(r[kC] || '').trim(); if (!/^(\d{4}|0\d{3,5}[A-Z]?)$/.test(id)) continue; const a = num(r[kPE]), b = kDY ? num(r[kDY]) : 0, c = kPB ? num(r[kPB]) : 0; per[id] = { pe: a > 0 ? a : null, dy: b > 0 ? b : null, pb: c > 0 ? c : null }; }
-  return { pe: median(pe), dy: median(st.map(r => num(r[kDY])).filter(v => v > 0)), pb: median(st.map(r => num(r[kPB])).filter(v => v > 0)), n: pe.length, per };
+  return { date: kD ? (rocDate(s[kD]) || '').replace(/-/g, '') || null : null, pe: median(pe), dy: median(st.map(r => num(r[kDY])).filter(v => v > 0)), pb: median(st.map(r => num(r[kPB])).filter(v => v > 0)), n: pe.length, per };
 }
 /** 信用交易統計（全市場）：融資金額今日餘額（億元） */
 /**
@@ -221,6 +221,11 @@ async function twMargin(date, closes = null) {
   const out = { date, balance: num(row[iT]) / 1e5, prev: iY >= 0 ? num(row[iY]) / 1e5 : null, ratio: null, n: 0 };   // 億元
   // 個股融資餘額（第一個「今日餘額」欄是融資，第二個是融券）
   const per = tables.find(t => t !== tbl && (t.fields || []).some(x => /代號/.test(String(x))) && (t.fields || []).some(x => /今日餘額/.test(String(x))));
+  if (per) {   // 個股融資／融券今日餘額（張）：FinMind 抓不到時的備援
+    const pf = per.fields, iId = col(pf, /代號/), iBs = pf.map((x, i) => /今日餘額/.test(String(x)) ? i : -1).filter(i => i >= 0);
+    out.stocks = {};
+    for (const r of per.data) { const id = String(r[iId] || '').trim(); if (id) out.stocks[id] = { margin: num(r[iBs[0]]), short: iBs[1] != null ? num(r[iBs[1]]) : 0 }; }
+  }
   if (per && closes && amt > 0) {
     const pf = per.fields, iId = col(pf, /代號/), iB = col(pf, /今日餘額/);
     let mv = 0, n = 0;
