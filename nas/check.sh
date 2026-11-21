@@ -11,9 +11,10 @@ APP="$(cd "$(dirname "$0")/.." && pwd)"
 BASE="${INVEST_BACKUP_BASE:-$(cd "$APP/.." && pwd)/invest-backup}"
 NODE="$(command -v node || echo /usr/local/bin/node)"
 # pm2 位置：PATH → /usr/local/bin → npm 全域安裝位置 → Synology 套件資料夾（搬儲存區後常常找不到）
-PM2="$(command -v pm2 2>/dev/null)"
-for c in /usr/local/bin/pm2 "$(npm prefix -g 2>/dev/null)/bin/pm2" /volume*/@appstore/Node.js*/usr/local/bin/pm2 /volume*/@appstore/Node.js*/usr/local/lib/node_modules/pm2/bin/pm2; do
-  [ -z "$PM2" ] && [ -x "$c" ] && PM2="$c"
+PM2=""
+PM2_LOCAL="$(cd "$(dirname "$0")/../.." && pwd)/invest-tools/node_modules/.bin/pm2"
+for c in "$PM2_LOCAL" "$(command -v pm2 2>/dev/null)" /usr/local/bin/pm2 "$(npm prefix -g 2>/dev/null)/bin/pm2" /volume*/@appstore/Node.js*/usr/local/bin/pm2 /volume*/@appstore/Node.js*/usr/local/lib/node_modules/pm2/bin/pm2; do
+  [ -z "$PM2" ] && [ -n "$c" ] && [ -x "$c" ] && "$c" -v >/dev/null 2>&1 && PM2="$c"
 done
 PM2="${PM2:-/usr/local/bin/pm2}"
 DOCKER="$(command -v docker || echo /usr/local/bin/docker)"
@@ -43,7 +44,7 @@ echo "▶ 執行環境"
 [ -d "$APP/node_modules" ] && ok "套件已安裝" || { bad "套件沒安裝（node_modules 不見了）" "cd \"$APP\" && ONNXRUNTIME_NODE_INSTALL=skip npm ci --omit=dev --no-audit --no-fund"; N_NPM=1; }
 
 echo "▶ 備援伺服器（pm2：signal-backup）"
-[ -x "$PM2" ] && ok "pm2：$PM2" || { bad "找不到可執行的 pm2（搬儲存區後常見）" "sudo npm install -g pm2 && sudo ln -sf \"\$(sudo npm prefix -g)/bin/pm2\" /usr/local/bin/pm2"; }
+[ -x "$PM2" ] && "$PM2" -v >/dev/null 2>&1 && ok "pm2：$PM2" || { bad "pm2 執行不了（搬儲存區後常見；用 sudo 裝的全域 pm2 一般帳號常讀不到）" "npm install --prefix \"$(dirname "$(dirname "$(dirname "$PM2_LOCAL")")")\" pm2 --no-audit --no-fund"; N_PM2=1; NO_PM2=1; }
 if [ -x "$PM2" ] && "$PM2" describe signal-backup >/dev/null 2>&1; then
   P=$("$PM2" jlist 2>/dev/null | "$NODE" -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const a=JSON.parse(s).find(x=>x.name==='signal-backup');console.log((a?.pm2_env?.pm_exec_path||'')+'|'+(a?.pm2_env?.status||'')+'|'+(a?.pm2_env?.env?.INVEST_BACKUP_BASE||''))})")
   SP="${P%%|*}"; REST="${P#*|}"; ST="${REST%%|*}"; EB="${REST#*|}"
@@ -109,6 +110,10 @@ if [ $FIX = 1 ] && [ $BAD -gt 0 ]; then
   [ $N_BASE = 1 ] && { mkdir -p "$BASE" && done_ "建立備援資料夾 $BASE" || fail_ "建立備援資料夾"; }
   mkdir -p "$TS/state"
   [ $N_BACKUP = 1 ] && { bash "$APP/nas/run-backup.sh" all >/dev/null 2>&1 && done_ "重跑一次完整備援" || fail_ "備援更新（看 $BASE/run.log）"; }
+  if [ "${NO_PM2:-0}" = 1 ]; then
+    T="$(dirname "$(dirname "$(dirname "$PM2_LOCAL")")")"; mkdir -p "$T"
+    npm install --prefix "$T" pm2 --no-audit --no-fund >/dev/null 2>&1 && [ -x "$PM2_LOCAL" ] && { PM2="$PM2_LOCAL"; done_ "在 $T 安裝 pm2（不需要 sudo）"; } || fail_ "安裝 pm2"
+  fi
   if [ $N_PM2 = 1 ]; then
     if [ -n "$CHECK_AUTO" ]; then info "pm2 設定要手動修（自動體檢本身就跑在 pm2 裡）"
     else "$PM2" delete signal-backup >/dev/null 2>&1; "$PM2" start "$APP/nas/server.js" --name signal-backup --interpreter "$NODE" >/dev/null && "$PM2" save >/dev/null && done_ "pm2 改用這個資料夾的程式" || fail_ "pm2 重新登記"; fi
