@@ -8,7 +8,12 @@ set -e
 HOME_DIR="${HOME_DIR:-/volume1/homes}"
 APP="$HOME_DIR/invest-dashboard"
 NODE="$(command -v node || echo /usr/local/bin/node)"
-PM2="$(command -v pm2 || echo /usr/local/bin/pm2)"
+# pm2 位置：PATH → /usr/local/bin → npm 全域安裝位置 → Synology 套件資料夾（搬儲存區後常常找不到）
+PM2="$(command -v pm2 2>/dev/null)"
+for c in /usr/local/bin/pm2 "$(npm prefix -g 2>/dev/null)/bin/pm2" /volume*/@appstore/Node.js*/usr/local/bin/pm2 /volume*/@appstore/Node.js*/usr/local/lib/node_modules/pm2/bin/pm2; do
+  [ -z "$PM2" ] && [ -x "$c" ] && PM2="$c"
+done
+PM2="${PM2:-/usr/local/bin/pm2}"
 echo "▶ 1/4 下載或更新程式"
 if [ -d "$APP/.git" ]; then git -C "$APP" pull -q --ff-only; else git clone -q https://github.com/weichehuang11-cyber/invest-dashboard.git "$APP"; fi
 cd "$APP"

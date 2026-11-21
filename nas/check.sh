@@ -10,7 +10,12 @@ FIX=0; [ "$1" = "--fix" ] && FIX=1
 APP="$(cd "$(dirname "$0")/.." && pwd)"
 BASE="${INVEST_BACKUP_BASE:-$(cd "$APP/.." && pwd)/invest-backup}"
 NODE="$(command -v node || echo /usr/local/bin/node)"
-PM2="$(command -v pm2 || echo /usr/local/bin/pm2)"
+# pm2 位置：PATH → /usr/local/bin → npm 全域安裝位置 → Synology 套件資料夾（搬儲存區後常常找不到）
+PM2="$(command -v pm2 2>/dev/null)"
+for c in /usr/local/bin/pm2 "$(npm prefix -g 2>/dev/null)/bin/pm2" /volume*/@appstore/Node.js*/usr/local/bin/pm2 /volume*/@appstore/Node.js*/usr/local/lib/node_modules/pm2/bin/pm2; do
+  [ -z "$PM2" ] && [ -x "$c" ] && PM2="$c"
+done
+PM2="${PM2:-/usr/local/bin/pm2}"
 DOCKER="$(command -v docker || echo /usr/local/bin/docker)"
 OK=0; BAD=0; FIXES=()
 N_PULL=0; N_NPM=0; N_BASE=0; N_BACKUP=0; N_PM2=0; N_TS=0; N_RUNNER=0; DIRTY=0
@@ -38,6 +43,7 @@ echo "▶ 執行環境"
 [ -d "$APP/node_modules" ] && ok "套件已安裝" || { bad "套件沒安裝（node_modules 不見了）" "cd \"$APP\" && ONNXRUNTIME_NODE_INSTALL=skip npm ci --omit=dev --no-audit --no-fund"; N_NPM=1; }
 
 echo "▶ 備援伺服器（pm2：signal-backup）"
+[ -x "$PM2" ] && ok "pm2：$PM2" || { bad "找不到可執行的 pm2（搬儲存區後常見）" "sudo npm install -g pm2 && sudo ln -sf \"\$(sudo npm prefix -g)/bin/pm2\" /usr/local/bin/pm2"; }
 if [ -x "$PM2" ] && "$PM2" describe signal-backup >/dev/null 2>&1; then
   P=$("$PM2" jlist 2>/dev/null | "$NODE" -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const a=JSON.parse(s).find(x=>x.name==='signal-backup');console.log((a?.pm2_env?.pm_exec_path||'')+'|'+(a?.pm2_env?.status||'')+'|'+(a?.pm2_env?.env?.INVEST_BACKUP_BASE||''))})")
   SP="${P%%|*}"; REST="${P#*|}"; ST="${REST%%|*}"; EB="${REST#*|}"
