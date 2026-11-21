@@ -7,9 +7,9 @@
 #         $STATE/      NAS 自己的預測紀錄與快取
 #
 # 用法（Synology 控制台 → 任務排程表 → 使用者定義的指令碼）：
-#   bash /volume2/homes/invest-dashboard/nas/run-backup.sh            盤中
-#   bash /volume2/homes/invest-dashboard/nas/run-backup.sh tw         台股收盤後
-#   bash /volume2/homes/invest-dashboard/nas/run-backup.sh us         美股收盤後
+#   bash /volume1/homes/invest-dashboard/nas/run-backup.sh            盤中
+#   bash /volume1/homes/invest-dashboard/nas/run-backup.sh tw         台股收盤後
+#   bash /volume1/homes/invest-dashboard/nas/run-backup.sh us         美股收盤後
 # ─────────────────────────────────────────────────────────────
 set -u
 DIR="$(cd "$(dirname "$0")/.." && pwd)"

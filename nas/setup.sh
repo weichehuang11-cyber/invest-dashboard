@@ -5,7 +5,7 @@
 # 會做：下載／更新程式 → 安裝套件 → 第一次完整產生資料 → 用 pm2 常駐備援伺服器（含排程）
 # ─────────────────────────────────────────────────────────────
 set -e
-HOME_DIR="${HOME_DIR:-/volume2/homes}"
+HOME_DIR="${HOME_DIR:-/volume1/homes}"
 APP="$HOME_DIR/invest-dashboard"
 NODE="$(command -v node || echo /usr/local/bin/node)"
 PM2="$(command -v pm2 || echo /usr/local/bin/pm2)"

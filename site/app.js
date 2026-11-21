@@ -29,7 +29,7 @@
   }
   applyLook(); mqDark?.addEventListener?.('change', applyLook);
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  const APP_VERSION = '1.22.1';
+  const APP_VERSION = '1.22.2';
   /** 雲端 AI 個股點評：容錯「2886 兆豐金」這種鍵 */
   const aiStock = (snap, k) => { const m = snap?.ai?.stocks; if (!m) return null; if (m[k]) return m[k]; const hit = Object.keys(m).find(x => x.split(/\s/)[0].toUpperCase() === k); return hit ? m[hit] : null; };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2655,7 +2655,7 @@ ${footer()}`;
       ]) },
     { g: '使用手冊', id: 'nas', t: 'NAS 維護與故障排除', body: () => `
       ${mT(['狀況', '怎麼做'], [
-        ['更新程式', '<code>cd /volume2/homes/invest-dashboard && git pull</code>（伺服器約 1 分鐘內自動重啟）'],
+        ['更新程式', `<code>cd ${esc(LS.get('nasDir') || '/volume1/homes/invest-dashboard')} && git pull</code>（伺服器約 1 分鐘內自動重啟；這是 NAS 回報的實際位置）`],
         ['全面檢查', '<code>bash nas/check.sh</code>；能自動修的加 <code>--fix</code>'],
         ['服務狀態', '<code>pm2 status</code>、<code>pm2 logs signal-backup --lines 50</code>'],
         ['重啟服務', '<code>pm2 restart signal-backup</code>'],
@@ -3428,7 +3428,7 @@ ${footer()}`;
     if (!nasBase()) return `<section class="card" aria-labelledby="nh-h"><div class="hd"><h2 id="nh-h">NAS 健康</h2></div><p class="empty">在「設定」填入 NAS 網址後顯示。</p></section>`;
     let H = null; try { H = await getJSON(nasBase() + '/health.json', 8000); } catch (_) {}
     if (!H?.now) return `<section class="card" aria-labelledby="nh-h"><div class="hd"><h2 id="nh-h">NAS 健康</h2></div><p class="empty">${LIVE.data ? 'NAS 還是舊版程式：SSH 到 NAS 執行 git pull 後就會顯示' : 'NAS 連不到：確認 Tailscale 已連線，或在 NAS 執行 bash nas/check.sh'}</p></section>`;
-    const n = H.now, sm = H.samples || [];
+    const n = H.now, sm = H.samples || []; if (n.dir) LS.set('nasDir', n.dir);
     const kpi = (l, v, ok, note) => `<div class="dm"><span>${l}</span><b class="mono ${ok === false ? 'bad-t' : ''}">${v}</b><em>${note || ''}</em></div>`;
     const ser = (k, f = v => v) => sm.map(x => (isNum(x[k]) ? f(x[k]) : null));
     const chart = sm.length >= 3 ? `<div class="ch-grid">${[['即時行情正常比例', ser('liveOk').map((v, i) => (v != null && sm[i].liveN ? v / sm[i].liveN * 100 : null)), v => fix(v, 0) + '%', '#0EA5A4'], ['備援資料延遲（分鐘）', ser('backupAge'), v => int(v), '#E07B39'], ['記憶體（MB）', ser('rss'), v => int(v), '#8B5CF6']].map(([t, v, f, c]) => `<div class="ch-mini"><div class="ch-mh"><b>${t}</b></div>${lineChart('nh', sm.map(x => x.at), [{ name: t, col: c, v }], { h: 100, w: 360, fmt: f, xfmt: x => new Date(x).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', hour12: false }) })}</div>`).join('')}</div>` : '<p class="small muted">每小時記錄一筆，累積 3 小時後顯示趨勢。</p>';

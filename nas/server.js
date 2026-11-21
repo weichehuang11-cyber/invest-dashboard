@@ -8,7 +8,7 @@
  *   4. 監看 GitHub 排程：盤中網站資料超過 60 分鐘沒更新，就推播提醒並自動觸發一次 GitHub 更新
  *      （設定檔 nas/.env：NTFY_TOPIC=…、GH_TOKEN=…（只需 invest-dashboard 的 Actions 讀寫權限））
  *
- *   pm2 start /volume2/homes/invest-dashboard/nas/server.js --name signal-backup && pm2 save
+ *   pm2 start /volume1/homes/invest-dashboard/nas/server.js --name signal-backup && pm2 save
  */
 const http = require('http');
 const https = require('https');
@@ -146,7 +146,7 @@ function healthNow() {
   let L = {}; try { L = JSON.parse(Live.snapshotJSON()); } catch (_) {}
   const it = Object.values(L.items || {}), sAt = (() => { try { return fs.statSync(path.join(SITE, 'data', 'snapshot.json')).mtimeMs; } catch (_) { return 0; } })();
   let free = null; try { const f = fs.statfsSync(BASE); free = +(f.bavail * f.bsize / 1e9).toFixed(1); } catch (_) {}
-  return { at: new Date().toISOString(), liveOk: it.filter(x => x.ok !== false).length, liveN: it.length, liveAge: L.at ? Math.round((Date.now() - Date.parse(L.at)) / 1000) : null,
+  return { at: new Date().toISOString(), dir: DIR, liveOk: it.filter(x => x.ok !== false).length, liveN: it.length, liveAge: L.at ? Math.round((Date.now() - Date.parse(L.at)) / 1000) : null,
     stocks: Object.keys(L.stocks || {}).length, backupAge: sAt ? Math.round((Date.now() - sAt) / 60000) : null, backupOk: state.last ? state.last.ok : null,
     rss: Math.round(process.memoryUsage().rss / 1e6), up: Math.round(process.uptime() / 60), free, liveReq };
 }

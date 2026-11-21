@@ -57,11 +57,11 @@ curl -fsSL https://raw.githubusercontent.com/weichehuang11-cyber/invest-dashboar
 
 它會下載程式、安裝套件、第一次完整產生資料，並用 pm2 常駐 `nas/server.js`：在 `http://NAS:8765/backup/` 提供備援網站，並內建排程（盤中每 30 分鐘、台股 16:55、美股 05:45）。不需要再設 DSM 任務排程表。之後要更新程式，再執行一次同一行即可。
 
-產出在 `/volume2/homes/invest-backup/`：`site/`（備援網站）、`archive/snapshots/`（每次快照）、`archive/daily/`、`archive/backup/`（舊 invest 資料每日打包，保留 60 天）。狀態：`http://NAS:8765/backup/status.json`。
+產出在 `/volume1/homes/invest-backup/`：`site/`（備援網站）、`archive/snapshots/`（每次快照）、`archive/daily/`、`archive/backup/`（舊 invest 資料每日打包，保留 60 天）。狀態：`http://NAS:8765/backup/status.json`。
 
 ### NAS 監看 GitHub 排程（選用）
 
-GitHub 免費排程偶爾會延遲或略過。在 NAS 建立 `/volume2/homes/invest-dashboard/nas/.env`：
+GitHub 免費排程偶爾會延遲或略過。在 NAS 建立 `/volume1/homes/invest-dashboard/nas/.env`：
 
 ```
 NTFY_TOPIC=你的 ntfy 主題

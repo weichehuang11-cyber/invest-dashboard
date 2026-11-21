@@ -1,5 +1,10 @@
 # 版本紀錄
 
+## v1.22.2（2026-11-21）
+
+- NAS 程式位置改為 `/volume1/homes/invest-dashboard`（儲存區調整後的新位置）：說明文件、手冊的指令一併更新。
+- NAS 健康資料回報程式實際所在資料夾；使用手冊的更新指令會自動顯示 NAS 回報的路徑，之後再搬也不用改。
+
 ## v1.22.3（2026-11-21）
 
 - **修正 FinMind 個股融資一直失敗（HTTP 422）**：FinMind 把資料集改名為 `TaiwanStockMarginPurchaseShortSale`（S 大寫），舊名稱被拒絕。改回正確名稱後恢復 FinMind 個股融資（含上櫃股）；證交所備援保留。
