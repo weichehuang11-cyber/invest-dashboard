@@ -23,6 +23,7 @@ permissions:
   contents: write
   pages: write
   id-token: write
+  actions: read
 
 concurrency:
   group: update
@@ -81,7 +82,8 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy1.outputs.page_url || steps.deploy2.outputs.page_url || steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - id: src
+        uses: actions/checkout@v4
         with:
           repository: ${{ github.repository }}-src   # 程式碼在私人 repo
           token: ${{ secrets.SRC_TOKEN }}
@@ -132,6 +134,8 @@ jobs:
       - name: 組合網站
         run: |
           cp -r site/. out/
+          # 網頁程式壓縮（變數名稱打亂、去掉註解），增加閱讀難度
+          npx --yes terser@5.36.0 out/app.js -c -m --comments false -o out/app.min.js && mv out/app.min.js out/app.js || echo "壓縮失敗，用原始檔"
           node -e "require('fs').writeFileSync('out/version.json', JSON.stringify({ version: require('./package.json').version }))"
           # 加上版本號，避免手機瀏覽器繼續用舊的程式
           V=$(git rev-parse --short HEAD)
@@ -200,3 +204,17 @@ jobs:
           SRC_TOKEN: ${{ secrets.SRC_TOKEN }}
           SRC_REPO: ${{ github.repository }}-src
         run: bash deploy/push-log.sh update build.log
+
+      - name: 更新失敗時推播（連續失敗只通知一次）
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+          SRC_FAIL: ${{ steps.src.outcome == 'failure' }}
+        run: |
+          [ -n "$NTFY_TOPIC" ] || exit 0
+          PREV=$(gh api "repos/${{ github.repository }}/actions/workflows/update.yml/runs?status=completed&per_page=2" --jq '[.workflow_runs[] | select(.id != ${{ github.run_id }})][0].conclusion' 2>/dev/null || echo "")
+          [ "$PREV" = "failure" ] && { echo "上一次也失敗，已經通知過"; exit 0; }
+          if [ "$SRC_FAIL" = "true" ]; then MSG="排程取不到程式碼：SRC_TOKEN 權杖可能過期或失效。到 GitHub → Developer settings → Fine-grained tokens 按 Regenerate，再更新公開 repo 的 SRC_TOKEN。"; else MSG="網站資料更新失敗，網站停在上一次的資料。"; fi
+          curl -fsS -H "Title: 訊號終端：網站更新失敗" -H "Priority: 4" -d "$MSG" "${NTFY_SERVER:-https://ntfy.sh}/$NTFY_TOPIC" >/dev/null && echo "已推播"
