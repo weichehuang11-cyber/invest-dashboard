@@ -1,0 +1,26 @@
+name: 清除舊的發布紀錄
+
+# 一次性：發布紀錄（Deployments）會連到舊的 commit，舊 commit 打得開就看得到當時的程式碼
+on:
+  workflow_dispatch:
+
+permissions:
+  deployments: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 刪除舊的發布紀錄（保留最新一筆）
+        env:
+          GH_TOKEN: ${{ github.token }}
+          R: ${{ github.repository }}
+        run: |
+          IDS=$(gh api "repos/$R/deployments?per_page=100" --paginate --jq '.[].id')
+          LATEST=$(echo "$IDS" | head -1); n=0
+          for id in $IDS; do
+            [ "$id" = "$LATEST" ] && continue
+            gh api -X POST "repos/$R/deployments/$id/statuses" -f state=inactive >/dev/null 2>&1
+            gh api -X DELETE "repos/$R/deployments/$id" >/dev/null 2>&1 && n=$((n+1))
+          done
+          echo "刪除發布紀錄 $n 筆，保留最新 1 筆"
