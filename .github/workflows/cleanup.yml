@@ -1,0 +1,36 @@
+name: 清除公開 repo 的舊內容
+
+# 一次性：刪掉舊分支、版本發布與標籤（程式碼已完整保存在私人 repo）
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: '也刪除舊的執行紀錄（yes＝刪）'
+        required: false
+        default: 'no'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 刪除分支、版本發布、標籤
+        env:
+          GH_TOKEN: ${{ github.token }}
+          R: ${{ github.repository }}
+        run: |
+          for b in data fix/data-health fix/finmind-margin-dataset; do gh api -X DELETE "repos/$R/git/refs/heads/$b" >/dev/null 2>&1 && echo "刪除分支 $b" || echo "分支 $b 不存在"; done
+          n=0; for id in $(gh api "repos/$R/releases?per_page=100" --paginate --jq '.[].id'); do gh api -X DELETE "repos/$R/releases/$id" >/dev/null && n=$((n+1)); done; echo "刪除版本發布 $n 個"
+          n=0; for t in $(gh api "repos/$R/tags?per_page=100" --paginate --jq '.[].name'); do gh api -X DELETE "repos/$R/git/refs/tags/$t" >/dev/null && n=$((n+1)); done; echo "刪除標籤 $n 個"
+      - name: 刪除舊的執行紀錄
+        if: inputs.runs == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          R: ${{ github.repository }}
+        run: |
+          n=0
+          for id in $(gh api "repos/$R/actions/runs?per_page=100" --paginate --jq ".workflow_runs[] | select(.id != ${{ github.run_id }}) | .id"); do gh api -X DELETE "repos/$R/actions/runs/$id" >/dev/null 2>&1 && n=$((n+1)); done
+          echo "刪除執行紀錄 $n 筆"
