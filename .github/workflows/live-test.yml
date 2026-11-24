@@ -1,0 +1,51 @@
+name: 資料來源測試
+
+# 手動執行：測試 NAS 即時行情與台股補充資料（月營收、借券）的來源是否抓得到（結果顯示在執行摘要）
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}-src   # 程式碼在私人 repo
+          token: ${{ secrets.SRC_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 推論補強
+        run: |
+          { npm ci --omit=dev --ignore-scripts --no-audit --no-fund && node pipeline/test/analog-live.js; } >> test.log 2>&1 || echo 失敗
+      - name: 即時行情
+        run: |
+          { node nas/livefeed.js; } >> test.log 2>&1 || echo 失敗
+      - name: Yahoo 一分 K 尾端
+        run: |
+          { node pipeline/test/yahoo-tail.js; } >> test.log 2>&1 || echo 失敗
+      - name: 即時新聞
+        run: |
+          { node nas/newsfeed.js; } >> test.log 2>&1 || echo 失敗
+      - name: 台股補充資料
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: |
+          { node pipeline/lib/twdata.js; } >> test.log 2>&1 || echo 失敗
+      - name: 融資維持率
+        run: |
+          { node pipeline/test/margin-live.js; } >> test.log 2>&1 || echo 失敗
+      - name: FinMind 個股融資
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: |
+          { node pipeline/test/finmind-margin-live.js; } >> test.log 2>&1 || echo 失敗
+      - name: 詳細紀錄存到私人 repo
+        if: always()
+        env:
+          SRC_TOKEN: ${{ secrets.SRC_TOKEN }}
+          SRC_REPO: ${{ github.repository }}-src
+        run: bash deploy/push-log.sh live-test test.log

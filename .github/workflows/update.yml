@@ -1,0 +1,202 @@
+name: 更新資料並發布網站
+
+on:
+  schedule:
+    # GitHub 排程用 UTC，而且常延遲或略過，所以排得比需要的密（每 10 分鐘），
+    # 再由「檢查」步驟決定要不要真的跑：距離上次更新不到 20 分鐘就跳過。
+    - cron: '3,13,23,33,43,53 1-5 * * 1-5'    # 台股盤中（台北 09:00–13:59；避開整點與 */10，GitHub 較不會略過）
+    - cron: '11,31,51 8-10 * * 1-5'   # 台股收盤後完整更新時段（台北 16:40–18:59）
+    - cron: '7,17,27,37,47,57 13-20 * * 1-5'  # 美股盤中（涵蓋夏令與冬令時間）
+    - cron: '19,39,59 21-23 * * 1-5'  # 美股收盤後完整更新時段（台北 05:15–07:59）
+    - cron: '17 */3 * * 0,6'       # 週末每 3 小時更新新聞與全球快報
+  push:
+    branches: [main]
+    paths: ['site/**', 'config/**', 'pipeline/**', 'ml/**', '.github/workflows/update.yml']
+  workflow_dispatch:
+    inputs:
+      full:
+        description: '完整更新（tw / us / all，留空 = 盤中快速更新）'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: update
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.c.outputs.run }}
+      full: ${{ steps.c.outputs.full }}
+    steps:
+      - id: c
+        name: 決定要不要更新、用哪種模式
+        run: |
+          EVENT="${{ github.event_name }}"
+          FULL="${{ github.event.inputs.full }}"
+          SITE="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          RAW="https://raw.githubusercontent.com/${{ github.repository }}-src/data"
+          GEN=$(curl -fsS "$SITE/data/meta.json?t=$(date +%s)" | jq -r '.generatedAt // empty' 2>/dev/null || true)
+          [ -n "$GEN" ] || GEN=$(curl -fsS "$SITE/data/snapshot.json?t=$(date +%s)" | jq -r '.generatedAt // empty' 2>/dev/null || true)
+          LAST=$(curl -fsS -H "Authorization: token ${{ secrets.SRC_TOKEN }}" "$RAW/last.json?t=$(date +%s)" 2>/dev/null || echo '{}')
+          TPE_DAY=$(TZ=Asia/Taipei date +%F)
+          UTC_HM=$((10#$(date -u +%H) * 60 + 10#$(date -u +%M)))
+          RUN=1
+          if [ "$EVENT" = "schedule" ]; then
+            FULL=""
+            DOW=$(date -u +%u)   # 1=週一 … 7=週日（UTC）；週末的排程只做快速更新（新聞與全球快報），不跑完整更新
+            # 台股收盤後：UTC 08:40–10:59（三大法人約 15:00–16:30 公布）
+            if [ $DOW -le 5 ] && [ $UTC_HM -ge 520 ] && [ $UTC_HM -lt 660 ] && [ "$(echo "$LAST" | jq -r '.fullAt.tw // ""')" != "$TPE_DAY" ]; then FULL=tw; fi
+            # 晚間補齊台股（融資約 21:30 公布）：UTC 13:50–15:59；週末排程若上個交易日還沒補齊也補一次
+            TWLATE=$(echo "$LAST" | jq -r '.fullAt.twLate // ""'); TWTRADE=$(echo "$LAST" | jq -r '.tradeDate.tw // ""')
+            if [ -n "$TWTRADE" ] && [ "$TWLATE" != "$TWTRADE" ] && { { [ $DOW -le 5 ] && [ $UTC_HM -ge 830 ] && [ $UTC_HM -lt 960 ]; } || [ $DOW -ge 6 ]; }; then FULL=tw; fi
+            # 美股收盤後：UTC 21:15–23:59
+            if [ $DOW -le 5 ] && [ $UTC_HM -ge 1275 ] && [ "$(echo "$LAST" | jq -r '.fullAt.us // ""')" != "$TPE_DAY" ]; then FULL=us; fi
+            if [ -z "$FULL" ]; then
+              AGE=999
+              [ -n "$GEN" ] && AGE=$(( ( $(date +%s) - $(date -d "$GEN" +%s) ) / 60 ))
+              # 收盤後時段只跑完整更新；盤中距離上次不到 20 分鐘就跳過
+              if [ $UTC_HM -ge 520 ] && [ $UTC_HM -lt 660 ]; then RUN=0; fi
+              if [ $UTC_HM -ge 1275 ]; then RUN=0; fi
+              if [ $AGE -lt 20 ]; then RUN=0; fi
+              echo "上次更新 $GEN（$AGE 分鐘前）"
+            fi
+          fi
+          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+          echo "full=$FULL" >> "$GITHUB_OUTPUT"
+          echo "結果：run=$RUN full=${FULL:-盤中}"
+
+  build:
+    needs: check
+    if: needs.check.outputs.run == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy1.outputs.page_url || steps.deploy2.outputs.page_url || steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}-src   # 程式碼在私人 repo
+          token: ${{ secrets.SRC_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --omit=dev
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip   # 不下載 GPU（CUDA）元件，CPU 版已內建
+
+      - name: 取出狀態（data 分支：預測紀錄、昨日訊號、快取）
+        run: |
+          if git fetch --depth=1 origin data 2>/dev/null; then
+            git worktree add state origin/data
+          else
+            mkdir -p state
+          fi
+
+      - name: 判斷更新模式
+        id: mode
+        run: |
+          FULL="${{ needs.check.outputs.full }}"
+          # 第一次（尚無狀態）一律完整更新
+          [ -f state/heavy.json ] || FULL=all
+          echo "full=$FULL" >> "$GITHUB_OUTPUT"
+          echo "更新模式：${FULL:-盤中快速更新}"
+
+      - name: 產生資料
+        id: build
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BACKUP_GIST_ID: ${{ secrets.BACKUP_GIST_ID }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          LOCAL_GIST_ID: ${{ secrets.LOCAL_GIST_ID }}
+        run: |
+          ARGS="--out=out/data --state=state"
+          [ -n "${{ steps.mode.outputs.full }}" ] && ARGS="$ARGS --full=${{ steps.mode.outputs.full }} --archive-daily=state/archive"
+          # 詳細紀錄寫進 build.log（會加密），公開的執行紀錄只看得到成功或失敗
+          PRIVATE_LOG=1 PRIVATE_LOG_FILE=build.log node pipeline/build.js $ARGS
+          grep -q DIGEST_CHANGED build.log && echo "digest=1" >> "$GITHUB_OUTPUT" || true
+
+      - name: 組合網站
+        run: |
+          cp -r site/. out/
+          node -e "require('fs').writeFileSync('out/version.json', JSON.stringify({ version: require('./package.json').version }))"
+          # 加上版本號，避免手機瀏覽器繼續用舊的程式
+          V=$(git rev-parse --short HEAD)
+          sed -i "s|src=\"app.js\"|src=\"app.js?v=$V\"|; s|href=\"app.css\"|href=\"app.css?v=$V\"|" out/index.html
+          grep -o 'app\.[a-z]*?v=[a-z0-9]*' out/index.html
+
+      - name: 推播通知（有設定通知管道才會送）
+        id: notify
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BACKUP_GIST_ID: ${{ secrets.BACKUP_GIST_ID }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: |
+          OUT=$(PRIVATE_LOG=1 PRIVATE_LOG_FILE=build.log node pipeline/notify.js --snap=out/data/snapshot.json --state=state || true)
+          if echo "$OUT" | grep -q NOTIFIED_CHANGED; then echo "changed=1" >> "$GITHUB_OUTPUT"; fi
+
+      - name: 儲存狀態（完整更新、通知紀錄或全球快報有變）
+        if: steps.mode.outputs.full != '' || steps.notify.outputs.changed == '1' || steps.build.outputs.digest == '1'
+        run: |
+          cd state
+          if [ ! -d .git ] && [ ! -f .git ]; then
+            git init -q -b data && git remote add origin "https://x-access-token:${{ secrets.SRC_TOKEN }}@github.com/${{ github.repository }}-src.git"
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo "狀態沒有變化"; exit 0; }
+          git commit -q -m "state: $(date -u +%Y-%m-%dT%H:%MZ) ${{ steps.mode.outputs.full }}"
+          git push -q origin HEAD:data
+
+      - name: 加密網站資料（只有輸入密碼才看得到）
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          SITE_PASSPHRASE: ${{ secrets.SITE_PASSPHRASE }}
+        run: |
+          jq '{generatedAt}' out/data/snapshot.json > out/data/meta.json
+          node pipeline/encrypt-site.js out/data build.log
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+      # GitHub 偶爾剛上傳完就說「找不到 github-pages」：等一下再發布，最多試 3 次
+      - id: deploy1
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - if: steps.deploy1.outcome == 'failure'
+        run: sleep 45
+      - id: deploy2
+        if: steps.deploy1.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - if: steps.deploy1.outcome == 'failure' && steps.deploy2.outcome == 'failure'
+        run: sleep 90
+      - id: deploy
+        if: steps.deploy1.outcome == 'failure' && steps.deploy2.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+
+      - name: 詳細紀錄存到私人 repo
+        if: always()
+        env:
+          SRC_TOKEN: ${{ secrets.SRC_TOKEN }}
+          SRC_REPO: ${{ github.repository }}-src
+        run: bash deploy/push-log.sh update build.log

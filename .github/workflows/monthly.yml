@@ -1,0 +1,37 @@
+name: 每月成績報告
+
+on:
+  schedule:
+    - cron: '33 0 1 * *'      # 每月 1 日 08:33（台北）
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}-src   # 程式碼在私人 repo
+          token: ${{ secrets.SRC_TOKEN }}
+      - name: 取得最新資料（網站資料已加密，下載後在這裡解開）
+        env:
+          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          SITE_PASSPHRASE: ${{ secrets.SITE_PASSPHRASE }}
+        run: |
+          node pipeline/fetch-site.js out/data snapshot --bars=^TWII,^GSPC,^SOX
+      - name: 送出月報
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BACKUP_GIST_ID: ${{ secrets.BACKUP_GIST_ID }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          LOCAL_GIST_ID: ${{ secrets.LOCAL_GIST_ID }}
+          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+          PRIVATE_LOG: '1'
+        run: node pipeline/notify.js --monthly --snap=out/data/snapshot.json --bars=out/data/bars

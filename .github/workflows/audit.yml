@@ -1,0 +1,57 @@
+name: 資料核對
+
+# 手動執行：比對最近幾版網站資料哪些數字變了，並把收盤價拿去跟證交所、Yahoo 對
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: '要比對的「更新資料並發布網站」執行編號（空白分隔，舊到新）'
+        required: true
+      dump:
+        description: '逐版列出的欄位（逗號分隔，例如 items.2454.chip）'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}-src   # 程式碼在私人 repo
+          token: ${{ secrets.SRC_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 下載各版網站資料
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNS: ${{ inputs.runs }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          SITE_PASSPHRASE: ${{ secrets.SITE_PASSPHRASE }}
+        run: |
+          mkdir -p audit
+          for r in $RUNS; do
+            if [ "$r" = live ]; then SITE_URL="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/" node pipeline/fetch-site.js audit/live/data snapshot && echo "下載 live（目前網站）" || echo "下載失敗 live"; continue; fi
+            mkdir -p "audit/$r" && gh run download "$r" -R "$GITHUB_REPOSITORY" -n github-pages -D "audit/$r" && tar -xf "audit/$r/artifact.tar" -C "audit/$r" && echo "下載 $r" || echo "下載失敗 $r"
+          done
+      - name: 比對
+        env:
+          RUNS: ${{ inputs.runs }}
+          DUMP: ${{ inputs.dump }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          SITE_PASSPHRASE: ${{ secrets.SITE_PASSPHRASE }}
+        run: |
+          npm ci --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null
+          node pipeline/test/audit.js $(for r in $RUNS; do echo "audit/$r"; done) > audit.log 2>&1 || true
+          echo "核對完成（結果存到私人 repo）"
+      - name: 詳細紀錄存到私人 repo
+        if: always()
+        env:
+          SRC_TOKEN: ${{ secrets.SRC_TOKEN }}
+          SRC_REPO: ${{ github.repository }}-src
+        run: bash deploy/push-log.sh audit audit.log
